@@ -1,0 +1,11 @@
+{
+  "agent_name": "NyaNya",
+  "provider": "gemini_cli",
+  "model": "gemini-cli-default",
+  "base_url": "",
+  "temperature": 0.3,
+  "timeout_seconds": 180,
+  "system_prompt_path": "prompts/system.md",
+  "sessions_dir": "sessions",
+  "save_transcripts": true
+}
