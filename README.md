@@ -76,6 +76,7 @@ macOS service manager for Discord:
 
 ```bash
 ./scripts/nyanya_ctl.sh preflight
+./scripts/nyanya_ctl.sh auth
 ./scripts/nyanya_ctl.sh check
 ./scripts/nyanya_ctl.sh restart
 ./scripts/nyanya_ctl.sh status

@@ -9,6 +9,7 @@ Use one management command:
 ```bash
 ./scripts/nyanya_ctl.sh status
 ./scripts/nyanya_ctl.sh preflight
+./scripts/nyanya_ctl.sh auth
 ./scripts/nyanya_ctl.sh check
 ./scripts/nyanya_ctl.sh restart
 ```
@@ -18,6 +19,7 @@ Installed package entrypoints also expose:
 ```bash
 nyanyactl status
 nyanyactl preflight
+nyanyactl auth
 nyanyactl check
 nyanyactl restart
 ```
@@ -52,6 +54,14 @@ Check backend and Discord configuration:
 ```bash
 ./scripts/nyanya_ctl.sh check
 ```
+
+Run only the configured backend authentication/connectivity check:
+
+```bash
+./scripts/nyanya_ctl.sh auth
+```
+
+For OAuth-backed backends, complete the browser consent flow and paste the authorization code into the terminal when the CLI asks for it.
 
 Install and start the Discord bridge:
 
