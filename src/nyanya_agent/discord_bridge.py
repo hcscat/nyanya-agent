@@ -181,17 +181,17 @@ def main() -> int:
             channel_ids.add(str(parent.id))
         return bool(channel_ids & allowed_channel_ids) or str(message.author.id) in allowed_user_ids
 
-    def should_respond(message: discord.Message) -> tuple[bool, str]:
+    def should_respond(message: discord.Message) -> tuple[bool, str, str]:
         content = message.content.strip()
         if isinstance(message.channel, discord.DMChannel):
-            return True, content
+            return True, content, "dm"
         if content.startswith(prefix):
-            return True, content[len(prefix) :].strip()
+            return True, content[len(prefix) :].strip(), "prefix"
         if client.user and client.user in message.mentions:
-            return True, strip_bot_mention(content)
+            return True, strip_bot_mention(content), "mention"
         if respond_in_allowed_channels and is_allowed(message):
-            return True, content
-        return False, ""
+            return True, content, "allowed_channel"
+        return False, "", ""
 
     async def reply(message: discord.Message, text: str) -> None:
         for chunk in split_message(text, DISCORD_LIMIT):
@@ -380,19 +380,19 @@ def main() -> int:
     async def on_message(message: discord.Message) -> None:
         if message.author.bot:
             return
-        respond, text = should_respond(message)
+        respond, text, trigger = should_respond(message)
         print(
             "Discord message "
             f"channel_id={message.channel.id} user_id={message.author.id} "
             f"parent_id={getattr(message.channel, 'parent_id', None)} "
-            f"allowed={is_allowed(message)} respond={respond} text_len={len(text)}",
+            f"allowed={is_allowed(message)} respond={respond} trigger={trigger} text_len={len(text)}",
             flush=True,
         )
         if not respond:
             return
         if is_file_share_channel(message):
             cmd = command_name(text)
-            if cmd not in {"upload", "/upload", "파일업로드", "/파일업로드", "sendfile", "file"}:
+            if trigger == "allowed_channel" and cmd not in {"upload", "/upload", "파일업로드", "/파일업로드", "sendfile", "file"}:
                 return
         if not is_allowed(message):
             await reply(

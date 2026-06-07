@@ -2,7 +2,7 @@
 
 Date: 2026-06-07
 
-This guide explains how to rename the Discord bot currently known as `HCS Hermes` to a new visible name such as `냐냐에이전트`.
+This guide explains how to rename the Discord bot used by nyanya-agent to a visible name such as `NyaNya`.
 
 ## Key Distinction
 
@@ -29,11 +29,11 @@ References:
 Use this path when the token, client ID, permissions, and installed server membership should stay the same.
 
 1. Open https://discord.com/developers/applications
-2. Select the existing `HCS Hermes` application.
+2. Select the existing Discord application used by nyanya-agent.
 3. Open `General Information`.
 4. Change the application name if OAuth/install prompts should also show the new name.
 5. Open `Bot`.
-6. Change the bot `Username` to the desired visible bot name, for example `냐냐에이전트`.
+6. Change the bot `Username` to the desired visible bot name, for example `NyaNya`.
 7. Save changes.
 8. In the Discord server, check whether the bot has a server nickname. If a nickname exists, it can override the visible username in that server.
 9. If needed, remove or change the server nickname using Discord server/member management permissions.
@@ -76,8 +76,8 @@ Restart the bridge when local runtime settings changed:
 For LaunchAgent installs:
 
 ```bash
-./scripts/install_discord_launch_agent.sh
-./scripts/status_launch_agents.sh
+./scripts/nyanya_ctl.sh restart
+./scripts/nyanya_ctl.sh status
 ```
 
 ## When Re-Invite Is Needed
