@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CLI 세션형 에이전트 개발 사이클</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --ink: #1a2433;
+      --muted: #5c687a;
+      --panel: #ffffff;
+      --line: #d8e0eb;
+      --navy: #25446f;
+      --teal: #147d78;
+      --green: #2d7a46;
+      --gold: #a66b13;
+      --red: #b64a3c;
+      --soft-navy: #e8eef7;
+      --soft-teal: #e4f4f2;
+      --soft-green: #e7f3eb;
+      --soft-gold: #fff1dc;
+      --soft-red: #fde9e6;
+      --shadow: 0 12px 30px rgba(26, 36, 51, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
+      line-height: 1.72;
+      word-break: keep-all;
+    }
+
+    header {
+      background: #203a5f;
+      color: #fff;
+      padding: 44px 22px 34px;
+    }
+
+    .wrap {
+      width: min(1120px, calc(100% - 44px));
+      margin: 0 auto;
+    }
+
+    .eyebrow {
+      display: inline-block;
+      padding: 5px 10px;
+      border: 1px solid rgba(255,255,255,0.34);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.12);
+      font-size: 0.86rem;
+      font-weight: 700;
+    }
+
+    h1 {
+      margin: 14px 0 12px;
+      max-width: 900px;
+      font-size: clamp(2rem, 4.8vw, 3.8rem);
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      max-width: 860px;
+      margin: 0;
+      color: rgba(255,255,255,0.88);
+      font-size: 1.08rem;
+    }
+
+    main {
+      padding: 26px 0 62px;
+      display: grid;
+      gap: 18px;
+    }
+
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 24px;
+    }
+
+    h2 {
+      margin: 0 0 10px;
+      font-size: clamp(1.3rem, 3vw, 2rem);
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 1.06rem;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 14px;
+      color: var(--muted);
+    }
+
+    code {
+      padding: 0.12rem 0.32rem;
+      border-radius: 6px;
+      background: #eef3f8;
+      color: #234163;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      word-break: break-all;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      background: #fff;
+    }
+
+    .card p:last-child { margin-bottom: 0; }
+
+    .navy { background: var(--soft-navy); border-color: rgba(37,68,111,0.22); }
+    .teal { background: var(--soft-teal); border-color: rgba(20,125,120,0.22); }
+    .green { background: var(--soft-green); border-color: rgba(45,122,70,0.22); }
+    .gold { background: var(--soft-gold); border-color: rgba(166,107,19,0.22); }
+    .red { background: var(--soft-red); border-color: rgba(182,74,60,0.22); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 0.95rem;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 12px 13px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #eef3f8;
+      color: #243449;
+    }
+
+    td {
+      color: var(--muted);
+      background: #fff;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .step {
+      min-height: 118px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 13px;
+      background: #fff;
+    }
+
+    .num {
+      display: inline-grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      background: var(--navy);
+      color: #fff;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    .callout {
+      border-left: 4px solid var(--teal);
+      background: var(--soft-teal);
+      padding: 15px 16px;
+      border-radius: 8px;
+      color: #214b4b;
+    }
+
+    footer {
+      color: var(--muted);
+      padding: 0 0 36px;
+      font-size: 0.92rem;
+    }
+
+    @media (max-width: 920px) {
+      .grid, .two, .flow { grid-template-columns: 1fr; }
+      section { padding: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <span class="eyebrow">NyaNya Agent architecture note</span>
+      <h1>CLI 세션형 에이전트를 만들려면 무엇이 달라져야 하는가</h1>
+      <p class="lead">
+        Claude Code, Codex, Antigravity CLI 같은 도구는 단순히 프롬프트 한 번을 외부 모델에 넘기는 프로그램이 아니다.
+        세션, 컨텍스트 예산, 압축, 도구 권한, 파일 작업, 재개 가능한 실행 상태를 가진 런타임이다.
+      </p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section>
+      <h2>1. 현재 냐냐에이전트의 성격</h2>
+      <p>
+        현재 냐냐에이전트는 로컬-first messenger bridge와 lightweight CLI wrapper에 가깝다.
+        Discord/Telegram에서 요청을 받고, 허용 workspace와 보호 경로를 검사한 뒤,
+        Gemini/Antigravity CLI 또는 Codex CLI 같은 외부 실행기를 호출한다.
+      </p>
+      <div class="grid">
+        <div class="card navy">
+          <h3>강점</h3>
+          <p>구조가 작고, 설치와 이해가 쉽고, Discord/Telegram 자동화에 바로 쓸 수 있다.</p>
+        </div>
+        <div class="card teal">
+          <h3>역할</h3>
+          <p>직접 모델 런타임이라기보다 메시지 수신, 정책 검사, 외부 CLI 위임을 담당하는 router다.</p>
+        </div>
+        <div class="card gold">
+          <h3>한계</h3>
+          <p>긴 세션을 자체 관리하거나, 컨텍스트 압축을 자체 수행하거나, 도구 실행 그래프를 자체적으로 유지하지 않는다.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>2. CLI 세션형 에이전트와의 차이</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>항목</th>
+            <th>현재 냐냐에이전트</th>
+            <th>CLI 세션형 에이전트</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>세션</td>
+            <td>메신저 대화별 in-memory 메시지 일부를 보관한다.</td>
+            <td>세션 ID, 작업 디렉토리, 파일 diff, tool 결과, plan 상태, 압축 요약을 지속 저장한다.</td>
+          </tr>
+          <tr>
+            <td>컨텍스트 관리</td>
+            <td>최근 메시지를 제한적으로 유지하고 외부 CLI에 전달한다.</td>
+            <td>토큰 예산을 계산하고, 오래된 대화와 tool 결과를 요약/압축하며, 필요한 파일만 다시 주입한다.</td>
+          </tr>
+          <tr>
+            <td>도구 실행</td>
+            <td>Codex CLI, Gemini/Antigravity CLI 같은 외부 프로세스에 위임한다.</td>
+            <td>자체 tool registry, MCP client, plugin/skill loader, 권한 승인, sandbox 실행기를 갖는다.</td>
+          </tr>
+          <tr>
+            <td>작업 상태</td>
+            <td>작업 큐와 취소 이벤트 중심이다.</td>
+            <td>단계별 plan, 중간 산출물, tool call history, 실패 복구 지점, resume state를 가진다.</td>
+          </tr>
+          <tr>
+            <td>파일 변경</td>
+            <td>직접 수정은 제한적이고, 복잡한 작업은 Codex에 맡긴다.</td>
+            <td>파일 읽기/쓰기/패치/검증/rollback 전략을 자체적으로 설계한다.</td>
+          </tr>
+          <tr>
+            <td>사용자 인터페이스</td>
+            <td>Discord/Telegram/간단 CLI 중심이다.</td>
+            <td>TTY streaming, 승인 prompt, diff view, plan update, 세션 resume, 로그 조회를 제공한다.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>3. 필요한 내부 구성요소</h2>
+      <div class="grid">
+        <div class="card navy">
+          <h3>Session Kernel</h3>
+          <p>세션 생성, 재개, 종료, 현재 작업 디렉토리, 모델 설정, 사용자 권한을 하나의 상태 객체로 관리한다.</p>
+        </div>
+        <div class="card teal">
+          <h3>Context Manager</h3>
+          <p>대화, 파일 스냅샷, tool 결과, 요약문을 토큰 예산 안에 넣도록 선택하고 압축한다.</p>
+        </div>
+        <div class="card green">
+          <h3>Tool Runtime</h3>
+          <p>shell, file, browser, MCP, app connector, plugin tool을 공통 schema와 permission model로 실행한다.</p>
+        </div>
+        <div class="card gold">
+          <h3>Skill Loader</h3>
+          <p>작업 유형별 지침, 예제, 스크립트, 템플릿을 로딩하고 해당 세션의 system context에 반영한다.</p>
+        </div>
+        <div class="card red">
+          <h3>Safety Layer</h3>
+          <p>allowed roots, secret redaction, destructive action approval, network/file 권한, audit log를 강제한다.</p>
+        </div>
+        <div class="card">
+          <h3>Renderer and Reporter</h3>
+          <p>CLI 출력, Discord 답변, HTML 보고서, diff 요약, 실패 원인 보고를 같은 작업 상태에서 생성한다.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>4. 개발 사이클</h2>
+      <div class="flow">
+        <div class="step">
+          <div class="num">1</div>
+          <h3>요구사항 정의</h3>
+          <p>지원할 채널, tool 종류, 파일 권한, 세션 지속 범위, 모델 provider를 정한다.</p>
+        </div>
+        <div class="step">
+          <div class="num">2</div>
+          <h3>세션 모델 설계</h3>
+          <p>session id, messages, summaries, tool calls, workspace, approvals, artifacts schema를 만든다.</p>
+        </div>
+        <div class="step">
+          <div class="num">3</div>
+          <h3>도구 계층 구현</h3>
+          <p>file, shell, MCP, plugin, app connector를 같은 호출 규약으로 묶는다.</p>
+        </div>
+        <div class="step">
+          <div class="num">4</div>
+          <h3>컨텍스트 압축</h3>
+          <p>토큰 한계 도달 전 요약하고, 원문이 필요한 evidence는 파일/로그 참조로 유지한다.</p>
+        </div>
+        <div class="step">
+          <div class="num">5</div>
+          <h3>검증 루프</h3>
+          <p>작업 결과를 테스트, lint, render, diff, 사용자 승인으로 확인한 뒤 세션에 기록한다.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>5. 냐냐에이전트에서 진화시키는 순서</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>단계</th>
+            <th>추가할 것</th>
+            <th>판단 기준</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1단계</td>
+            <td>세션 저장소를 JSON/SQLite로 영속화</td>
+            <td>브리지 재시작 후에도 대화, 대기 작업, 요약 상태를 이어갈 수 있어야 한다.</td>
+          </tr>
+          <tr>
+            <td>2단계</td>
+            <td>tool call record와 artifact registry</td>
+            <td>어떤 명령을 왜 실행했고 어떤 파일을 만들었는지 추적할 수 있어야 한다.</td>
+          </tr>
+          <tr>
+            <td>3단계</td>
+            <td>MCP/plugin/skill loader</td>
+            <td>로컬 파일로 등록된 tool과 skill을 세션 시작 시 안전하게 불러와야 한다.</td>
+          </tr>
+          <tr>
+            <td>4단계</td>
+            <td>context compaction engine</td>
+            <td>긴 작업 중에도 중요한 결정, 파일 경로, 테스트 결과, 남은 TODO가 보존되어야 한다.</td>
+          </tr>
+          <tr>
+            <td>5단계</td>
+            <td>interactive CLI UI</td>
+            <td>사용자가 터미널에서 plan, 승인 요청, diff, tool log, resume을 볼 수 있어야 한다.</td>
+          </tr>
+          <tr>
+            <td>6단계</td>
+            <td>sandbox and approval policy</td>
+            <td>읽기, 쓰기, 네트워크, 외부 앱 제어가 정책과 사용자 승인에 의해 제한되어야 한다.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>6. 구현 우선순위</h2>
+      <div class="grid two">
+        <div class="card green">
+          <h3>먼저 할 것</h3>
+          <p>
+            현재 구조를 유지하면서 세션 저장소, tool call log, context summary 파일을 추가한다.
+            이 단계는 Discord/Telegram bridge를 깨지 않고도 진행할 수 있다.
+          </p>
+        </div>
+        <div class="card red">
+          <h3>나중에 할 것</h3>
+          <p>
+            자체 모델 runtime, 완전한 TUI, MCP host, plugin marketplace, 브라우저 제어는 구조가 안정된 뒤 추가한다.
+            처음부터 모두 만들면 디버깅 범위가 지나치게 커진다.
+          </p>
+        </div>
+      </div>
+      <div class="callout">
+        결론: 냐냐에이전트를 CLI 세션형 에이전트로 발전시키려면 "외부 CLI 호출 wrapper"에서
+        "세션 상태와 도구 실행을 직접 소유하는 runtime"으로 중심을 옮겨야 한다.
+      </div>
+    </section>
+  </main>
+
+  <footer class="wrap">
+    Prepared for NyaNya Agent. File: <code>docs/cli_session_agent_development_cycle.html</code>
+  </footer>
+</body>
+</html>

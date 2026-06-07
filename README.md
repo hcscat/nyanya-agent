@@ -24,7 +24,11 @@ The current implementation is intentionally small:
 
 ```text
 src/nyanya_agent/core.py              # CLI and backend providers
-src/nyanya_agent/bridge_common.py     # queue, routing, workspace policy, Codex delegation
+src/nyanya_agent/bridge_common.py     # compatibility exports for bridge helpers
+src/nyanya_agent/bridge_constants.py  # command names and routing keyword tables
+src/nyanya_agent/bridge_policy.py     # workspace, command, and safety policy helpers
+src/nyanya_agent/bridge_runtime.py    # Codex delegation and runtime helpers
+src/nyanya_agent/bridge_store.py      # conversation store and per-user task queue
 src/nyanya_agent/discord_bridge.py    # Discord bridge
 src/nyanya_agent/telegram_bridge.py   # Telegram bridge
 ```
@@ -126,4 +130,7 @@ Keep workspace roots narrow. Do not run public bots with broad filesystem access
 ## Documentation
 
 - [Copyright review](docs/copyright_review.md)
+- [Public and private source policy](docs/source_publication_policy.md)
+- [Discord bot rename guide](docs/discord_bot_rename_guide.md)
 - [Why many agents use TypeScript](docs/typescript_agent_ecosystem.html)
+- [CLI session agent development cycle](docs/cli_session_agent_development_cycle.html)
