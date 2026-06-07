@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>왜 많은 에이전트 프로그램은 TypeScript로 만들어질까</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --ink: #182033;
+      --muted: #627086;
+      --panel: #ffffff;
+      --line: #d9e2ee;
+      --blue: #2f65d9;
+      --blue-soft: #e8efff;
+      --green: #23845c;
+      --green-soft: #e5f4ed;
+      --orange: #b96a16;
+      --orange-soft: #fff0da;
+      --red: #c34d3f;
+      --red-soft: #fde8e5;
+      --shadow: 0 14px 36px rgba(24, 32, 51, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
+      line-height: 1.72;
+      word-break: keep-all;
+    }
+
+    header {
+      padding: 54px 24px 38px;
+      color: #fff;
+      background: linear-gradient(135deg, #2f65d9, #23845c);
+    }
+
+    .hero, main, footer {
+      max-width: 1120px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      max-width: 900px;
+      margin: 12px 0;
+      font-size: clamp(2rem, 5vw, 4rem);
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      max-width: 820px;
+      margin: 0;
+      color: rgba(255, 255, 255, 0.9);
+      font-size: 1.1rem;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 6px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.38);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.14);
+      font-weight: 700;
+      font-size: 0.88rem;
+    }
+
+    main {
+      padding: 28px 24px 64px;
+      display: grid;
+      gap: 20px;
+    }
+
+    section {
+      padding: 26px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    h2 {
+      margin: 0 0 10px;
+      font-size: clamp(1.3rem, 3vw, 2rem);
+      line-height: 1.24;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 14px;
+      color: var(--muted);
+    }
+
+    code {
+      padding: 0.12rem 0.32rem;
+      border-radius: 6px;
+      background: #edf2fb;
+      color: #234ba0;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      word-break: break-all;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .card b {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 1.02rem;
+    }
+
+    .card span {
+      display: block;
+      color: var(--muted);
+    }
+
+    .blue { background: var(--blue-soft); border-color: rgba(47, 101, 217, 0.25); }
+    .green { background: var(--green-soft); border-color: rgba(35, 132, 92, 0.25); }
+    .orange { background: var(--orange-soft); border-color: rgba(185, 106, 22, 0.25); }
+    .red { background: var(--red-soft); border-color: rgba(195, 77, 63, 0.25); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
+      font-size: 0.96rem;
+    }
+
+    th, td {
+      padding: 13px 14px;
+      border: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #eef3fb;
+      color: #28334a;
+    }
+
+    td {
+      color: var(--muted);
+      background: #fff;
+    }
+
+    .callout {
+      padding: 16px 18px;
+      border-left: 4px solid var(--blue);
+      border-radius: 8px;
+      background: var(--blue-soft);
+      color: #243c7f;
+    }
+
+    footer {
+      padding: 0 24px 42px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    @media (max-width: 820px) {
+      .grid { grid-template-columns: 1fr; }
+      section { padding: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="hero">
+      <div class="badge">Agent implementation note</div>
+      <h1>왜 많은 에이전트 프로그램은 TypeScript로 만들어질까</h1>
+      <p class="lead">
+        Python으로도 에이전트는 충분히 만들 수 있습니다. 다만 웹 UI, 실시간 스트리밍,
+        브라우저 자동화, 패키징, 플러그인 생태계를 엮는 순간 TypeScript가 선택되는 이유가 명확해집니다.
+      </p>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>1. 핵심 결론</h2>
+      <p>
+        TypeScript가 많은 에이전트 프로젝트에서 쓰이는 이유는 모델 추론 자체 때문이 아닙니다.
+        실제 이유는 에이전트가 점점 "채팅 프로그램"이 아니라 "웹 앱, 플러그인 호스트, 브라우저 컨트롤러,
+        실시간 작업 콘솔"이 되기 때문입니다.
+      </p>
+      <div class="callout">
+        Python은 모델 호출, 데이터 처리, 로컬 스크립팅에 강합니다.
+        TypeScript는 UI, 네트워크 이벤트, 브라우저, npm 패키징, JSON 스키마 기반 도구 정의에 강합니다.
+      </div>
+    </section>
+
+    <section>
+      <h2>2. TypeScript가 유리한 지점</h2>
+      <div class="grid">
+        <div class="card blue">
+          <b>웹 UI와 같은 언어</b>
+          <span>React, Next.js, Electron, Vite 기반 데스크톱/대시보드를 만들 때 프론트엔드와 백엔드 일부를 같은 타입 시스템으로 묶을 수 있습니다.</span>
+        </div>
+        <div class="card green">
+          <b>실시간 이벤트 처리</b>
+          <span>스트리밍 토큰, tool call 이벤트, WebSocket, SSE, 브라우저 이벤트를 Node 런타임에서 자연스럽게 처리합니다.</span>
+        </div>
+        <div class="card orange">
+          <b>npm 생태계</b>
+          <span>CLI, 플러그인, MCP 서버, 브라우저 자동화 라이브러리, 웹 번들러가 npm 중심으로 배포됩니다.</span>
+        </div>
+        <div class="card">
+          <b>JSON과 타입 궁합</b>
+          <span>LLM tool schema, OpenAPI, MCP manifest, config 파일이 JSON 기반이라 TypeScript 타입과 잘 맞습니다.</span>
+        </div>
+        <div class="card">
+          <b>브라우저 자동화</b>
+          <span>Playwright, Puppeteer 같은 주요 자동화 도구가 Node/TypeScript 문서와 예제를 강하게 지원합니다.</span>
+        </div>
+        <div class="card">
+          <b>배포 UX</b>
+          <span><code>npm install -g</code>, Electron 앱, 단일 Node CLI 배포 방식은 비개발자에게 안내하기 쉽습니다.</span>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>3. Python이 유리한 지점</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>영역</th>
+            <th>Python 장점</th>
+            <th>NyaNya Agent와의 관계</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>로컬 자동화</td>
+            <td>파일, 프로세스, 표준 라이브러리, 시스템 스크립팅이 간단합니다.</td>
+            <td>현재 코어 로직이 Python 표준 라이브러리 중심이라 유지보수가 쉽습니다.</td>
+          </tr>
+          <tr>
+            <td>데이터 처리</td>
+            <td>CSV, 문서, 분석, ML 라이브러리 생태계가 강합니다.</td>
+            <td>리포트 생성이나 파일 분석 기능을 확장하기 좋습니다.</td>
+          </tr>
+          <tr>
+            <td>운영 스크립트</td>
+            <td>macOS/Linux 서버에서 shell과 함께 쓰기 쉽습니다.</td>
+            <td>LaunchAgent, CLI wrapper, workspace 정책 구현에 충분합니다.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>4. 비교표</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>판단 기준</th>
+            <th>Python 중심</th>
+            <th>TypeScript 중심</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>빠른 로컬 CLI</td>
+            <td>강함</td>
+            <td>충분함</td>
+          </tr>
+          <tr>
+            <td>웹 대시보드</td>
+            <td>FastAPI/Streamlit 등으로 가능하나 프론트와 분리됨</td>
+            <td>매우 강함</td>
+          </tr>
+          <tr>
+            <td>Electron Desktop</td>
+            <td>보통 별도 wrapper 필요</td>
+            <td>강함</td>
+          </tr>
+          <tr>
+            <td>브라우저 제어</td>
+            <td>가능</td>
+            <td>Playwright/Puppeteer와 문서 궁합이 좋음</td>
+          </tr>
+          <tr>
+            <td>LLM tool schema 타입 안정성</td>
+            <td>Pydantic으로 강하게 가능</td>
+            <td>Zod/TypeScript 타입으로 강하게 가능</td>
+          </tr>
+          <tr>
+            <td>비개발자 설치</td>
+            <td>Python/venv 설명이 필요</td>
+            <td>npm 또는 데스크톱 앱 배포가 쉬움</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>5. NyaNya Agent의 현실적 선택</h2>
+      <p>
+        지금 단계의 NyaNya Agent는 Python 유지가 합리적입니다. 이유는 코어가 작고,
+        Discord bridge와 로컬 파일 정책이 중심이며, 별도 웹 UI가 아직 없기 때문입니다.
+      </p>
+      <p>
+        대신 npm wrapper를 제공하면 공유 UX를 일부 개선할 수 있습니다.
+        즉, 내부 구현은 Python으로 유지하고 사용자는 <code>npm install -g @hcscat/nyanya-agent</code> 같은 방식으로 진입할 수 있습니다.
+      </p>
+      <div class="callout">
+        TypeScript 전환은 웹 대시보드, 플러그인 마켓, 브라우저 자동화 UI, Electron Desktop을 본격적으로 만들 때 검토하는 것이 맞습니다.
+        지금은 Python core + npm wrapper가 비용 대비 효율적입니다.
+      </div>
+    </section>
+
+    <section>
+      <h2>6. 추천 발전 경로</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>단계</th>
+            <th>구현</th>
+            <th>판단</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1단계</td>
+            <td>Python package, `.env.example`, GitHub 공개</td>
+            <td>현재 목표에 적합</td>
+          </tr>
+          <tr>
+            <td>2단계</td>
+            <td>npm wrapper로 Python 실행</td>
+            <td>공유 편의성 확보</td>
+          </tr>
+          <tr>
+            <td>3단계</td>
+            <td>FastAPI 기반 로컬 dashboard</td>
+            <td>Python 유지 가능</td>
+          </tr>
+          <tr>
+            <td>4단계</td>
+            <td>React/TypeScript dashboard</td>
+            <td>UI가 커지면 유리</td>
+          </tr>
+          <tr>
+            <td>5단계</td>
+            <td>Electron Desktop</td>
+            <td>TypeScript 비중 증가가 자연스러움</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <footer>
+    <p>Prepared for NyaNya Agent. File: <code>docs/typescript_agent_ecosystem.html</code></p>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "users": {
+    "discord-user:1234567890": {
+      "workspace": "/absolute/path/to/allowed/workspace",
+      "set_by": "discord-user:admin-id",
+      "set_at": "2026-01-01T00:00:00+0000"
+    }
+  }
+}

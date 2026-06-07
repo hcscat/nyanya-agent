@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nyanya-agent"
+version = "0.1.0"
+description = "A lightweight Python-first messenger bridge and local agent wrapper."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "HCS" }]
+dependencies = []
+
+[project.optional-dependencies]
+bots = ["discord.py>=2.4,<3"]
+dev = ["pytest>=8,<9", "ruff>=0.8,<1"]
+
+[project.scripts]
+nyanya = "nyanya_agent.core:main"
+nyanya-discord = "nyanya_agent.discord_bridge:main"
+nyanya-telegram = "nyanya_agent.telegram_bridge:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"

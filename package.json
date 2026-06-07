@@ -1,0 +1,36 @@
+{
+  "name": "@hcscat/nyanya-agent",
+  "version": "0.1.0",
+  "description": "NPM wrapper for the Python-based NyaNya Agent.",
+  "license": "MIT",
+  "private": false,
+  "type": "commonjs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hcscat/nyanya-agent.git"
+  },
+  "bin": {
+    "nyanya-agent": "bin/nyanya-agent.js",
+    "nyanya-discord": "bin/nyanya-discord.js",
+    "nyanya-telegram": "bin/nyanya-telegram.js"
+  },
+  "files": [
+    "bin/*.js",
+    "src/nyanya_agent/*.py",
+    "config/nyanya.json",
+    "config/user_workspaces.example.json",
+    "docs/*.md",
+    "docs/*.html",
+    "scripts/*.sh",
+    "prompts/system.md",
+    "README.md",
+    ".env.example",
+    "pyproject.toml"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "check": "python3 -m py_compile src/nyanya_agent/core.py src/nyanya_agent/bridge_common.py src/nyanya_agent/discord_bridge.py src/nyanya_agent/telegram_bridge.py"
+  }
+}
