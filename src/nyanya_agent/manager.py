@@ -172,6 +172,15 @@ def check_config(*, include_backend: bool = True) -> int:
     return rc
 
 
+def auth() -> int:
+    result = run([python_executable(), "-m", "nyanya_agent.core", "--check"], check=False)
+    if result.stdout:
+        print(result.stdout.strip())
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+    return result.returncode
+
+
 def discord_api(method: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     token = discord_token()
     if not token:
@@ -205,7 +214,7 @@ def bot_name(name: str | None) -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Manage nyanya-agent local services")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("install", "start", "stop", "restart", "uninstall", "status", "check", "preflight"):
+    for name in ("install", "start", "stop", "restart", "uninstall", "status", "check", "preflight", "auth"):
         sub.add_parser(name)
     bot = sub.add_parser("bot-name")
     bot.add_argument("name", nargs="?", help="New Discord bot username. Omit to read current username.")
@@ -231,6 +240,8 @@ def main() -> int:
         return check_config()
     if args.command == "preflight":
         return check_config(include_backend=False)
+    if args.command == "auth":
+        return auth()
     if args.command == "bot-name":
         return bot_name(args.name)
     return 2
