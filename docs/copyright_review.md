@@ -12,6 +12,10 @@ Local source:
 
 - `src/nyanya_agent/core.py`
 - `src/nyanya_agent/bridge_common.py`
+- `src/nyanya_agent/bridge_constants.py`
+- `src/nyanya_agent/bridge_policy.py`
+- `src/nyanya_agent/bridge_runtime.py`
+- `src/nyanya_agent/bridge_store.py`
 - `src/nyanya_agent/discord_bridge.py`
 - `src/nyanya_agent/telegram_bridge.py`
 
@@ -29,7 +33,7 @@ Checks performed:
 - Local core file hashes did not exactly match any checked official repository file.
 - Project-specific local strings such as the messenger helper docstring, workspace policy text, Codex delegation environment variable names, `run_subprocess_cancellable`, and `Discord attachment context` were not found in the official repository.
 - A narrowed text-similarity check against representative official Python files produced very low ratios, around `0.009` to `0.020`.
-- The local project structure is materially different: four small Python modules plus shell scripts versus the official multi-package agent runtime with CLI, TUI, Desktop, web dashboard, provider registry, tools, skills, gateway, memory, scheduler, and many pinned dependencies.
+- The local project structure is materially different: a small Python CLI/bridge package plus shell scripts versus the official multi-package agent runtime with CLI, TUI, Desktop, web dashboard, provider registry, tools, skills, gateway, memory, scheduler, and many pinned dependencies.
 
 ## License Context
 
