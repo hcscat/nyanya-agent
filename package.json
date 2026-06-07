@@ -11,6 +11,7 @@
   },
   "bin": {
     "nyanya-agent": "bin/nyanya-agent.js",
+    "nyanyactl": "bin/nyanyactl.js",
     "nyanya-discord": "bin/nyanya-discord.js",
     "nyanya-telegram": "bin/nyanya-telegram.js"
   },

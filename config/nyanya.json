@@ -1,5 +1,5 @@
 {
-  "agent_name": "NyaNya",
+  "agent_name": "nyanya-agent",
   "provider": "gemini_cli",
   "model": "gemini-cli-default",
   "base_url": "",

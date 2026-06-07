@@ -18,6 +18,7 @@ dev = ["pytest>=8,<9", "ruff>=0.8,<1"]
 
 [project.scripts]
 nyanya = "nyanya_agent.core:main"
+nyanyactl = "nyanya_agent.manager:main"
 nyanya-discord = "nyanya_agent.discord_bridge:main"
 nyanya-telegram = "nyanya_agent.telegram_bridge:main"
 

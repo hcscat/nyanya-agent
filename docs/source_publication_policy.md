@@ -49,6 +49,7 @@ Never publish these:
 - Real Discord user IDs, owner IDs, guild IDs, channel IDs, bot tokens, invite secrets, or Telegram chat/user IDs unless intentionally converted into non-sensitive examples.
 - `config/user_workspaces.json`, because it maps real messenger users to local filesystem paths.
 - `sessions/`, `logs/`, `downloads/`, `run/`, `tmp/`, and generated transcripts.
+- `.gitignore`, if it contains local-only privacy patterns. Use `.git/info/exclude` for local ignore rules instead.
 - Discord or Telegram attachments downloaded from private channels.
 - Local model, CLI, MCP, or app connector caches under the user's home directory.
 - Private prompts that reveal internal operating policy, customer data, or personal automation rules.

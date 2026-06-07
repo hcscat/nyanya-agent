@@ -69,6 +69,8 @@ def load_config(path: pathlib.Path) -> dict[str, Any]:
             "provider": provider,
             "model": model,
             "base_url": base_url.rstrip("/"),
+            "system_prompt_path": os.getenv("NYANYA_SYSTEM_PROMPT_PATH", data.get("system_prompt_path", "prompts/system.md")),
+            "sessions_dir": os.getenv("NYANYA_SESSIONS_DIR", data.get("sessions_dir", "sessions")),
             "temperature": float(os.getenv("NYANYA_TEMPERATURE", data.get("temperature", 0.3))),
             "timeout_seconds": int(os.getenv("NYANYA_TIMEOUT_SECONDS", data.get("timeout_seconds", 120))),
             "gemini_cli": os.getenv("NYANYA_GEMINI_CLI", "gemini"),

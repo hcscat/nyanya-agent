@@ -18,7 +18,7 @@ https://github.com/hcscat/nyanya-agent.git
 
 ## Status
 
-This repository is an independent lightweight project. It is not the Nous Research Hermes Agent and does not vendor or copy that project's source tree.
+This repository is an independent lightweight project. It does not vendor or copy another agent project's source tree.
 
 The current implementation is intentionally small:
 
@@ -72,11 +72,13 @@ Discord bridge:
 ./scripts/run_discord_bridge.sh
 ```
 
-macOS LaunchAgent for Discord:
+macOS service manager for Discord:
 
 ```bash
-./scripts/install_discord_launch_agent.sh
-./scripts/status_launch_agents.sh
+./scripts/nyanya_ctl.sh preflight
+./scripts/nyanya_ctl.sh check
+./scripts/nyanya_ctl.sh restart
+./scripts/nyanya_ctl.sh status
 ```
 
 ## Configuration
@@ -89,7 +91,9 @@ Important variables:
 NYANYA_PROVIDER=gemini_cli
 NYANYA_GEMINI_CLI=gemini
 NYANYA_WORKSPACE_ROOTS=/absolute/workspace/path
+NYANYA_SYSTEM_PROMPT_PATH=prompts/system.md
 NYANYA_DISCORD_BOT_TOKEN=
+NYANYA_DISCORD_PREFIX=!nyanya
 NYANYA_DISCORD_RESPOND_IN_ALLOWED_CHANNELS=false
 NYANYA_DISCORD_ALLOWED_CHANNEL_IDS=
 NYANYA_CODEX_ENABLED=false
@@ -132,5 +136,6 @@ Keep workspace roots narrow. Do not run public bots with broad filesystem access
 - [Copyright review](docs/copyright_review.md)
 - [Public and private source policy](docs/source_publication_policy.md)
 - [Discord bot rename guide](docs/discord_bot_rename_guide.md)
+- [Operations guide](docs/operations_guide.md)
 - [Why many agents use TypeScript](docs/typescript_agent_ecosystem.html)
 - [CLI session agent development cycle](docs/cli_session_agent_development_cycle.html)
