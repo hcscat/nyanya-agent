@@ -14,6 +14,7 @@ import pathlib
 import re
 import sys
 
+from nyanya_agent import dashboard_store
 from nyanya_agent.bridge_common import (
     CANCEL_ALL_COMMANDS,
     CANCEL_COMMANDS,
@@ -102,6 +103,99 @@ def main() -> int:
     intents.dm_messages = True
 
     client = discord.Client(intents=intents)
+    phase_check_task: asyncio.Task[None] | None = None
+
+    def dashboard_recording_enabled() -> bool:
+        return parse_bool(os.getenv("NYANYA_DASHBOARD_RECORDING_ENABLED"), True)
+
+    def request_mode(command: str) -> str:
+        if command in {"gemini", "/gemini"}:
+            return "gemini"
+        if command in {"codex", "/codex"}:
+            return "codex"
+        if command in {"codex-work", "/codex-work", "codex_work", "/codex_work"}:
+            return "codex_write"
+        if command in {"upload", "/upload", "파일업로드", "/파일업로드", "sendfile", "file"}:
+            return "upload"
+        if command in {
+            "reset",
+            "/reset",
+            "save",
+            "/save",
+            "status",
+            "/status",
+            "config",
+            "/config",
+            "resources",
+            "/resources",
+            "resource",
+            "/resource",
+            "리소스",
+            "/리소스",
+            "취소",
+            "/cancel",
+            "cancel",
+            "/취소",
+        }:
+            return "control"
+        return "auto"
+
+    def create_dashboard_request(message: discord.Message, text: str, trigger: str, *, status: str = "received") -> str | None:
+        if not dashboard_recording_enabled():
+            return None
+        command = command_name(text)
+        try:
+            return dashboard_store.create_agent_request(
+                source="discord",
+                guild_id=str(getattr(getattr(message, "guild", None), "id", "") or ""),
+                channel_id=str(message.channel.id),
+                channel_name=str(getattr(message.channel, "name", "") or ""),
+                user_id=str(message.author.id),
+                trigger=trigger,
+                command=command,
+                mode=request_mode(command),
+                provider=str(config.get("provider") or ""),
+                model=str(config.get("model") or ""),
+                prompt=text,
+                status=status,
+                metadata={
+                    "message_id": str(message.id),
+                    "author_name": str(getattr(message.author, "name", "") or ""),
+                    "attachment_count": len(message.attachments),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"Dashboard request create failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            return None
+
+    def mark_dashboard_request(request_id: str | None, status: str, **kwargs: object) -> None:
+        if not request_id:
+            return
+        try:
+            dashboard_store.mark_request_status(request_id, status, **kwargs)
+        except Exception as exc:  # noqa: BLE001
+            print(f"Dashboard request update failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+
+    async def phase_check_loop() -> None:
+        if not parse_bool(os.getenv("NYANYA_PHASE_CHECK_ENABLED"), False):
+            return
+        channel_id = os.getenv("NYANYA_DASHBOARD_CONFIRMATION_CHANNEL_ID", "").strip()
+        if not channel_id:
+            print("NyaNya phase checker disabled: NYANYA_DASHBOARD_CONFIRMATION_CHANNEL_ID is empty", flush=True)
+            return
+        interval = int(os.getenv("NYANYA_PHASE_CHECK_INTERVAL_SECONDS", "21600"))
+        await client.wait_until_ready()
+        while not client.is_closed():
+            try:
+                channel = client.get_channel(int(channel_id)) or await client.fetch_channel(int(channel_id))
+                checks = dashboard_store.due_phase_checks(interval_seconds=interval)
+                for check in checks:
+                    message_text = check.get("discord_message", "")
+                    if message_text:
+                        await channel.send(message_text)
+            except Exception as exc:  # noqa: BLE001
+                print(f"NyaNya phase checker failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            await asyncio.sleep(max(60, interval))
 
     def attachment_download_root() -> pathlib.Path:
         raw = os.getenv("NYANYA_DISCORD_ATTACHMENT_DIR", "nyanya-agent/downloads/discord")
@@ -200,11 +294,25 @@ def main() -> int:
     def is_file_share_channel(message: discord.Message) -> bool:
         return str(message.channel.id) in file_share_channel_ids or getattr(message.channel, "name", "") == "자료공유"
 
-    async def handle_command(message: discord.Message, text: str, attachment_note: str = "") -> str:
+    async def handle_command(message: discord.Message, text: str, attachment_note: str = "", request_id: str | None = None) -> str:
         owner_key = f"discord-user:{message.author.id}"
         conversation_key = f"discord:{message.channel.id}:user:{message.author.id}"
         command = command_name(text)
         loop = asyncio.get_running_loop()
+
+        def finish(response: str, *, status: str = "completed", error: str | None = None, mode: str | None = None) -> str:
+            mark_dashboard_request(
+                request_id,
+                status,
+                event_type=f"command_{status}",
+                message=response or status,
+                result_summary=response,
+                error=error,
+                mode=mode or request_mode(command),
+                provider=str(config.get("provider") or ""),
+                model=str(config.get("model") or ""),
+            )
+            return response
 
         def prompt_with_attachments(prompt: str) -> str:
             if not attachment_note:
@@ -220,116 +328,125 @@ def main() -> int:
             command = command_name(text)
 
         if not text or command in HELP_COMMANDS:
-            return discord_help_text(
-                prefix=prefix,
-                channel_id=str(message.channel.id),
-                user_id=str(message.author.id),
-                is_admin=store.is_owner(str(message.author.id)),
+            return finish(
+                discord_help_text(
+                    prefix=prefix,
+                    channel_id=str(message.channel.id),
+                    user_id=str(message.author.id),
+                    is_admin=store.is_owner(str(message.author.id)),
+                ),
+                mode="control",
             )
         if command in CANCEL_ALL_COMMANDS:
             if not store.is_owner(str(message.author.id)):
-                return "전체 취소는 관리자만 사용할 수 있습니다."
-            return store.cancel_all()
+                return finish("전체 취소는 관리자만 사용할 수 있습니다.", status="failed", error="owner required", mode="control")
+            return finish(store.cancel_all(), mode="control")
         if command in CANCEL_USER_COMMANDS:
             if not store.is_owner(str(message.author.id)):
-                return "사용자 취소는 관리자만 사용할 수 있습니다."
+                return finish("사용자 취소는 관리자만 사용할 수 있습니다.", status="failed", error="owner required", mode="control")
             target = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ""
             if not target:
-                return "사용법: 사용자취소 discord_user_id 또는 사용자취소 discord-user:discord_user_id"
+                return finish("사용법: 사용자취소 discord_user_id 또는 사용자취소 discord-user:discord_user_id", status="failed", error="missing target", mode="control")
             target_owner = target if ":" in target else f"discord-user:{target}"
-            return store.cancel_owner(target_owner)
+            return finish(store.cancel_owner(target_owner), mode="control")
         if command in CANCEL_COMMANDS:
-            return store.cancel_owner(owner_key)
+            return finish(store.cancel_owner(owner_key), mode="control")
         if command in SET_HOME_COMMANDS:
             if not store.is_owner(str(message.author.id)):
-                return "홈워크스페이스 설정은 관리자만 사용할 수 있습니다."
+                return finish("홈워크스페이스 설정은 관리자만 사용할 수 있습니다.", status="failed", error="owner required", mode="control")
             parts = text.split(maxsplit=2)
             if len(parts) < 3:
-                return "사용법: set_home discord_user_id HCS 또는 set_home discord-user:discord_user_id HCS"
+                return finish("사용법: set_home discord_user_id HCS 또는 set_home discord-user:discord_user_id HCS", status="failed", error="missing arguments", mode="control")
             try:
                 target_owner = normalize_owner_key(parts[1], "discord")
             except ValueError as exc:
-                return str(exc)
-            return store.set_home(target_owner, parts[2], set_by=owner_key)
+                return finish(str(exc), status="failed", error=str(exc), mode="control")
+            return finish(store.set_home(target_owner, parts[2], set_by=owner_key), mode="control")
         if command in UNSET_HOME_COMMANDS:
             if not store.is_owner(str(message.author.id)):
-                return "홈워크스페이스 해제는 관리자만 사용할 수 있습니다."
+                return finish("홈워크스페이스 해제는 관리자만 사용할 수 있습니다.", status="failed", error="owner required", mode="control")
             target = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ""
             if not target:
-                return "사용법: unset_home discord_user_id 또는 unset_home discord-user:discord_user_id"
+                return finish("사용법: unset_home discord_user_id 또는 unset_home discord-user:discord_user_id", status="failed", error="missing target", mode="control")
             try:
                 target_owner = normalize_owner_key(target, "discord")
             except ValueError as exc:
-                return str(exc)
-            return store.unset_home(target_owner)
+                return finish(str(exc), status="failed", error=str(exc), mode="control")
+            return finish(store.unset_home(target_owner), mode="control")
         if command in GET_HOME_COMMANDS:
             target = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ""
             if target:
                 if not store.is_owner(str(message.author.id)):
-                    return "다른 사용자의 홈워크스페이스 조회는 관리자만 사용할 수 있습니다."
+                    return finish("다른 사용자의 홈워크스페이스 조회는 관리자만 사용할 수 있습니다.", status="failed", error="owner required", mode="control")
                 try:
                     target_owner = normalize_owner_key(target, "discord")
                 except ValueError as exc:
-                    return str(exc)
+                    return finish(str(exc), status="failed", error=str(exc), mode="control")
             else:
                 target_owner = owner_key
-            return store.home_text(target_owner)
+            return finish(store.home_text(target_owner), mode="control")
         if command in {"reset", "/reset"}:
             store.reset(conversation_key)
-            return "대화 컨텍스트를 초기화했습니다."
+            return finish("대화 컨텍스트를 초기화했습니다.", mode="control")
         if command in {"save", "/save"}:
             path = store.save(conversation_key)
-            return f"저장했습니다: {path}" if path else "세션 저장이 꺼져 있습니다."
+            return finish(f"저장했습니다: {path}" if path else "세션 저장이 꺼져 있습니다.", mode="control")
         if command in {"status", "/status"}:
-            return (
-                "NyaNya bridge is running.\n"
-                f"provider={store.config.get('provider')}\n"
-                f"model={store.config.get('model')}"
+            return finish(
+                (
+                    "NyaNya Agent bridge is running.\n"
+                    f"provider={store.config.get('provider')}\n"
+                    f"model={store.config.get('model')}"
+                ),
+                mode="control",
             )
         if command in {"config", "/config"}:
-            return store.status_text()
+            return finish(store.status_text(), mode="control")
         if command in {"gemini", "/gemini"}:
             prompt = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ""
             if not prompt:
-                return "사용법: gemini Google CLI에 물어볼 내용을 적어주세요."
+                return finish("사용법: gemini Google CLI에 물어볼 내용을 적어주세요.", status="failed", error="missing prompt", mode="gemini")
             return store.submit(
                 owner_key=owner_key,
                 conversation_key=conversation_key,
                 prompt=prompt_with_attachments(prompt),
                 mode="gemini",
                 responder=respond_later,
+                request_id=request_id,
             )
         if command in {"codex", "/codex"}:
             prompt = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ""
             if not prompt:
-                return "사용법: codex 검수하거나 조사할 내용을 적어주세요."
+                return finish("사용법: codex 검수하거나 조사할 내용을 적어주세요.", status="failed", error="missing prompt", mode="codex")
             return store.submit(
                 owner_key=owner_key,
                 conversation_key=conversation_key,
                 prompt=prompt_with_attachments(prompt),
                 mode="codex",
                 responder=respond_later,
+                request_id=request_id,
             )
         if command in {"codex-work", "/codex-work", "codex_work", "/codex_work"}:
             prompt = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ""
             if not prompt:
-                return "사용법: codex-work Codex에 맡길 작업을 적어주세요."
+                return finish("사용법: codex-work Codex에 맡길 작업을 적어주세요.", status="failed", error="missing prompt", mode="codex_write")
             return store.submit(
                 owner_key=owner_key,
                 conversation_key=conversation_key,
                 prompt=prompt_with_attachments(prompt),
                 mode="codex_write",
                 responder=respond_later,
+                request_id=request_id,
             )
         if command in {"resources", "/resources", "resource", "/resource", "리소스", "/리소스"}:
             try:
-                return store.resources()
+                return finish(store.resources(), mode="control")
             except Exception as exc:  # noqa: BLE001
-                return f"리소스 조회 실패: {exc}"
+                return finish(f"리소스 조회 실패: {exc}", status="failed", error=str(exc), mode="control")
         if command in {"upload", "/upload", "파일업로드", "/파일업로드", "sendfile", "file"}:
             parts = text.split(maxsplit=1)
             if len(parts) < 2:
-                return "사용법: upload <파일_경로>"
+                return finish("사용법: upload <파일_경로>", status="failed", error="missing file path", mode="upload")
             file_path_str = parts[1].strip().strip("`\"'")
 
             owner_key = f"discord-user:{message.author.id}"
@@ -349,32 +466,46 @@ def main() -> int:
                 try:
                     resolved_path = resolve_workspace_path(file_path_str)
                 except Exception as exc:
-                    return f"파일 경로 오류: {exc}"
+                    return finish(f"파일 경로 오류: {exc}", status="failed", error=str(exc), mode="upload")
 
             if not resolved_path.exists():
-                return f"파일을 찾을 수 없습니다: {resolved_path}"
+                return finish(f"파일을 찾을 수 없습니다: {resolved_path}", status="failed", error="file not found", mode="upload")
             if not resolved_path.is_file():
-                return f"지정한 경로는 파일이 아닙니다: {resolved_path}"
+                return finish(f"지정한 경로는 파일이 아닙니다: {resolved_path}", status="failed", error="not a file", mode="upload")
 
             try:
                 with open(resolved_path, "rb") as f:
                     discord_file = discord.File(f, filename=resolved_path.name)
                     content = None if is_file_share_channel(message) else f"요청하신 파일({resolved_path.name})을 업로드합니다."
                     await message.channel.send(content=content, file=discord_file)
+                mark_dashboard_request(
+                    request_id,
+                    "completed",
+                    event_type="file_uploaded",
+                    message=f"uploaded={resolved_path.name}",
+                    result_summary=f"uploaded={resolved_path.name}",
+                    mode="upload",
+                    provider=str(config.get("provider") or ""),
+                    model=str(config.get("model") or ""),
+                )
                 return ""
             except Exception as e:
-                return f"파일 업로드 실패: {e}"
+                return finish(f"파일 업로드 실패: {e}", status="failed", error=str(e), mode="upload")
         return store.submit(
             owner_key=owner_key,
             conversation_key=conversation_key,
             prompt=prompt_with_attachments(text),
             mode="auto",
             responder=respond_later,
+            request_id=request_id,
         )
 
     @client.event
     async def on_ready() -> None:
-        print(f"NyaNya Discord bridge started as {client.user}")
+        nonlocal phase_check_task
+        print(f"NyaNya Agent Discord bridge started as {client.user}")
+        if phase_check_task is None or phase_check_task.done():
+            phase_check_task = asyncio.create_task(phase_check_loop())
 
     @client.event
     async def on_message(message: discord.Message) -> None:
@@ -390,11 +521,26 @@ def main() -> int:
         )
         if not respond:
             return
+        request_id = create_dashboard_request(message, text, trigger)
         if is_file_share_channel(message):
             cmd = command_name(text)
             if trigger == "allowed_channel" and cmd not in {"upload", "/upload", "파일업로드", "/파일업로드", "sendfile", "file"}:
+                mark_dashboard_request(
+                    request_id,
+                    "ignored",
+                    event_type="file_share_silent",
+                    message="File-share channel ignored ordinary chatter",
+                    mode="ignored",
+                )
                 return
         if not is_allowed(message):
+            mark_dashboard_request(
+                request_id,
+                "ignored",
+                event_type="not_allowed",
+                message="Channel or user is not allowed",
+                mode="access_control",
+            )
             await reply(
                 message,
                 "이 채널/사용자는 아직 NyaNya 허용 목록에 없습니다.\n"
@@ -409,7 +555,13 @@ def main() -> int:
             note = await attachment_context(message, text)
         except Exception as exc:  # noqa: BLE001
             print(f"Discord attachment context failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
-        res = await handle_command(message, text, note)
+            mark_dashboard_request(
+                request_id,
+                "running",
+                event_type="attachment_context_failed",
+                message=str(exc),
+            )
+        res = await handle_command(message, text, note, request_id)
         if res:
             await reply(message, res)
 
