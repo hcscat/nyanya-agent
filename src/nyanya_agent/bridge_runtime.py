@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import pathlib
 import re
@@ -410,7 +409,7 @@ def run_codex_task(
 def task_failure_text(exc: Exception) -> str:
     if isinstance(exc, subprocess.TimeoutExpired):
         return (
-            f"NyaNya 요청 실패: 백엔드 실행이 {int(exc.timeout)}초를 넘겨 중단되었습니다. "
+            f"NyaNya Agent 요청 실패: 백엔드 실행이 {int(exc.timeout)}초를 넘겨 중단되었습니다. "
             "복잡한 파일/HTML 생성 작업은 Codex 위임으로 처리되도록 요청을 다시 보내 주세요."
         )
 
@@ -420,4 +419,4 @@ def task_failure_text(exc: Exception) -> str:
     max_chars = int(os.getenv("NYANYA_ERROR_MAX_CHARS", "1200"))
     if len(detail) > max_chars:
         detail = detail[:max_chars].rstrip() + "\n...[truncated]"
-    return f"NyaNya 요청 실패: {detail}"
+    return f"NyaNya Agent 요청 실패: {detail}"

@@ -217,15 +217,17 @@ def discord_help_text(*, prefix: str, channel_id: str, user_id: str, is_admin: b
         admin_note = "\n관리자 명령은 등록된 관리자만 사용할 수 있습니다."
 
     return (
-        "NyaNya Discord 명령어\n"
+        "NyaNya Agent Discord 명령어\n"
         f"channel_id={channel_id}\nuser_id={user_id}\n\n"
         "도움말 보기:\n"
         f"- `{prefix} help`\n"
         f"- `{prefix} commands`\n"
         f"- `{prefix} 명령어`\n"
+        "- `@nyanya help`\n"
         "- DM에서는 접두어 없이 `help` 또는 `commands`\n\n"
         "기본 사용:\n"
         f"- `{prefix} 질문`: Antigravity CLI가 기본 답변\n"
+        "- `@nyanya 질문`: 멘션으로 동일하게 호출\n"
         f"- `{prefix} gemini 질문`: Google CLI로 직접 답변\n"
         f"- `{prefix} codex 검수/조사 내용`: Codex CLI 읽기 전용 위임\n"
         f"- `{prefix} codex-work 파일 생성/수정 요청`: Codex CLI 쓰기 작업 위임\n"

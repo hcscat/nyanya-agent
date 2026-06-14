@@ -87,6 +87,10 @@ def parse_bool(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def agent_display_name(config: dict[str, Any]) -> str:
+    return str(config.get("agent_name") or "NyaNya Agent")
+
+
 def read_system_prompt(config: dict[str, Any]) -> str:
     prompt_path = pathlib.Path(config["system_prompt_path"])
     if not prompt_path.is_absolute():
@@ -239,7 +243,7 @@ def runtime_status_context(config: dict[str, Any]) -> str:
         configured_model_dir = pathlib.Path.home() / ".ollama" / "models"
 
     lines = [
-        "Runtime status as observed by NyaNya before calling the model:",
+        f"Runtime status as observed by {agent_display_name(config)} before calling the model:",
         f"- active_provider={config.get('provider')}",
         f"- active_model={config.get('model')}",
         f"- google_cli_family={google_cli_family}",
@@ -264,7 +268,7 @@ def format_cli_conversation(config: dict[str, Any], messages: list[dict[str, str
         "assistant": "Assistant",
     }
     parts = [
-        "Answer as NyaNya. Use the full conversation context below and reply to the final user message.",
+        f"Answer as {agent_display_name(config)}. Use the full conversation context below and reply to the final user message.",
         "Keep the answer concise and useful. If the user writes in Korean, answer in Korean.",
         runtime_status_context(config),
     ]
@@ -410,7 +414,7 @@ def save_session(config: dict[str, Any], messages: list[dict[str, str]]) -> path
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     path = sessions_dir / f"nyanya-{stamp}.json"
     payload = {
-        "agent_name": config.get("agent_name", "NyaNya"),
+        "agent_name": agent_display_name(config),
         "provider": config["provider"],
         "model": config["model"],
         "base_url": config["base_url"],
@@ -431,7 +435,7 @@ def run_single_prompt(config: dict[str, Any], prompt: str) -> int:
     try:
         answer = chat_once(config, messages)
     except Exception as exc:  # noqa: BLE001 - CLI should print backend errors clearly.
-        print(f"NyaNya request failed: {exc}", file=sys.stderr)
+        print(f"{agent_display_name(config)} request failed: {exc}", file=sys.stderr)
         return 1
     messages.append({"role": "assistant", "content": answer})
     print(answer)
@@ -443,7 +447,7 @@ def run_single_prompt(config: dict[str, Any], prompt: str) -> int:
 
 def run_repl(config: dict[str, Any]) -> int:
     messages = build_messages(config)
-    print(f"NyaNya local agent: provider={config['provider']} model={config['model']}")
+    print(f"{agent_display_name(config)} local agent: provider={config['provider']} model={config['model']}")
     print("Commands: /exit, /reset, /save, /config")
     while True:
         try:
@@ -472,11 +476,11 @@ def run_repl(config: dict[str, Any]) -> int:
         try:
             answer = chat_once(config, messages)
         except Exception as exc:  # noqa: BLE001
-            print(f"NyaNya request failed: {exc}", file=sys.stderr)
+            print(f"{agent_display_name(config)} request failed: {exc}", file=sys.stderr)
             messages.pop()
             continue
         messages.append({"role": "assistant", "content": answer})
-        print(f"\nNyaNya> {answer}")
+        print(f"\n{agent_display_name(config)}> {answer}")
 
     path = save_session(config, messages)
     if path:
@@ -485,7 +489,7 @@ def run_repl(config: dict[str, Any]) -> int:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="NyaNya local LLM agent")
+    parser = argparse.ArgumentParser(description="NyaNya Agent local LLM agent")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="Path to NyaNya JSON config")
     parser.add_argument("--prompt", help="Run one prompt and exit")
     parser.add_argument("--provider", choices=["ollama", "openai_compatible", "gemini_cli"], help="Override provider")

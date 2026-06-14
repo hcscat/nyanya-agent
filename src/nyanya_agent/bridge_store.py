@@ -7,12 +7,12 @@ from dataclasses import dataclass, field
 import json
 import os
 import pathlib
-import subprocess
 import threading
 import time
 from typing import Any, Callable
 
 from nyanya_agent import core as nyanya
+from nyanya_agent import dashboard_store
 from nyanya_agent.bridge_policy import *
 from nyanya_agent.bridge_runtime import *
 
@@ -23,6 +23,7 @@ class NyaNyaTask:
     prompt: str
     mode: str
     responder: Callable[[str], None]
+    request_id: str | None = None
     cancel_event: threading.Event = field(default_factory=threading.Event)
 
 
@@ -50,6 +51,22 @@ class NyaNyaConversationStore:
         task = NyaNyaTask(key, key, prompt, "auto", lambda _text: None)
         return self._answer_sync(task, auto_route=True)
 
+    def _dashboard_mark(self, task: NyaNyaTask, status: str, **kwargs: Any) -> None:
+        if not task.request_id:
+            return
+        try:
+            dashboard_store.mark_request_status(task.request_id, status, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - telemetry must not break messenger handling.
+            print(f"NyaNya dashboard update failed: {type(exc).__name__}: {exc}", flush=True)
+
+    def _dashboard_event(self, task: NyaNyaTask, event_type: str, message: str, **metadata: Any) -> None:
+        if not task.request_id:
+            return
+        try:
+            dashboard_store.append_request_event(task.request_id, event_type, message, metadata=metadata)
+        except Exception as exc:  # noqa: BLE001
+            print(f"NyaNya dashboard event failed: {type(exc).__name__}: {exc}", flush=True)
+
     def _answer_sync(self, task: NyaNyaTask, *, auto_route: bool) -> str:
         if task.cancel_event.is_set():
             return "요청이 취소되었습니다."
@@ -73,6 +90,16 @@ class NyaNyaConversationStore:
             codex_mode = codex_auto_mode(task.prompt) if auto_route else None
             if codex_mode:
                 label = codex_auto_label(task.prompt)
+                self._dashboard_mark(
+                    task,
+                    "running",
+                    event_type="routed_to_codex",
+                    message=f"Auto-routed to Codex: {label}",
+                    mode=codex_mode,
+                    provider="codex_cli",
+                    model=os.getenv("NYANYA_CODEX_MODEL", "").strip() or "<codex default>",
+                    metadata={"auto_route_label": label},
+                )
                 answer = f"[자동 Codex 위임: {label}]\n" + run_codex_task(
                     task.prompt,
                     write=codex_mode == "codex_write",
@@ -80,6 +107,13 @@ class NyaNyaConversationStore:
                     workdir=workspace,
                 )
             else:
+                self._dashboard_event(
+                    task,
+                    "backend_call",
+                    "Calling configured LLM backend",
+                    provider=str(self.config.get("provider") or ""),
+                    model=str(self.config.get("model") or ""),
+                )
                 answer = nyanya.chat_once(self.config, snapshot, cancel_event=task.cancel_event, workspace=workspace)
         except Exception:
             with self._lock:
@@ -241,8 +275,9 @@ class NyaNyaConversationStore:
         prompt: str,
         mode: str,
         responder: Callable[[str], None],
+        request_id: str | None = None,
     ) -> str:
-        task = NyaNyaTask(owner_key, conversation_key, prompt, mode, responder)
+        task = NyaNyaTask(owner_key, conversation_key, prompt, mode, responder, request_id=request_id)
         start_now = False
         with self._task_lock:
             state = self._state_for_owner(owner_key)
@@ -253,6 +288,13 @@ class NyaNyaConversationStore:
             else:
                 queue = state["queue"]
                 if len(queue) >= self.task_queue_max:
+                    self._dashboard_mark(
+                        task,
+                        "failed",
+                        event_type="queue_rejected",
+                        message="Task queue is full",
+                        error="Task queue is full",
+                    )
                     return (
                         "이미 처리 중인 작업과 대기 중인 작업이 있습니다. "
                         "취소 후 다시 요청하세요. 취소하려면 `취소`라고 보내세요."
@@ -262,6 +304,7 @@ class NyaNyaConversationStore:
         if start_now:
             self._start_task(task)
             return "요청을 접수했습니다. 처리 중입니다. 취소하려면 `취소`라고 보내세요."
+        self._dashboard_mark(task, "queued", event_type="queued", message=f"Queued at position {queued}")
         return f"요청을 대기열에 넣었습니다. 대기 {queued}/{self.task_queue_max}. 취소하려면 `취소`라고 보내세요."
 
     def cancel_owner(self, owner_key: str) -> str:
@@ -269,9 +312,12 @@ class NyaNyaConversationStore:
             state = self._state_for_owner(owner_key)
             current = state["current"]
             queued = len(state["queue"])
-            state["queue"].clear()
             if current is not None:
                 current.cancel_event.set()
+                self._dashboard_mark(current, "cancelled", event_type="cancel_requested", message="Cancel requested by owner")
+            for task in state["queue"]:
+                self._dashboard_mark(task, "cancelled", event_type="queue_cancelled", message="Queued task cancelled")
+            state["queue"].clear()
         if current is None and queued == 0:
             return "취소할 진행 중/대기 작업이 없습니다."
         if current is not None:
@@ -287,6 +333,9 @@ class NyaNyaConversationStore:
                 if current is not None:
                     current.cancel_event.set()
                     cancelled_current += 1
+                    self._dashboard_mark(current, "cancelled", event_type="cancel_requested", message="Cancel requested by owner")
+                for task in state["queue"]:
+                    self._dashboard_mark(task, "cancelled", event_type="queue_cancelled", message="Queued task cancelled")
                 cancelled_queued += len(state["queue"])
                 state["queue"].clear()
         if cancelled_current == 0 and cancelled_queued == 0:
@@ -302,6 +351,16 @@ class NyaNyaConversationStore:
         thread.start()
 
     def _run_task(self, task: NyaNyaTask) -> None:
+        self._dashboard_mark(
+            task,
+            "running",
+            event_type="task_started",
+            message="Worker thread started",
+            mode=task.mode,
+            provider=str(self.config.get("provider") or ""),
+            model=str(self.config.get("model") or ""),
+        )
+        failed = False
         try:
             if task.cancel_event.is_set():
                 answer = "요청이 취소되었습니다."
@@ -326,8 +385,15 @@ class NyaNyaConversationStore:
                 answer = f"지원하지 않는 작업 모드입니다: {task.mode}"
         except Exception as exc:  # noqa: BLE001
             answer = task_failure_text(exc)
+            failed = True
         try:
             task.responder(answer)
+            if task.cancel_event.is_set() or answer.strip() == "요청이 취소되었습니다.":
+                self._dashboard_mark(task, "cancelled", event_type="task_cancelled", message=answer, result_summary=answer)
+            elif failed or answer.startswith("NyaNya Agent 요청 실패:") or answer.startswith("Codex CLI 실행 실패:"):
+                self._dashboard_mark(task, "failed", event_type="task_failed", message=answer, result_summary=answer, error=answer)
+            else:
+                self._dashboard_mark(task, "completed", event_type="task_completed", message="Task completed", result_summary=answer)
         finally:
             self._finish_task(task)
 

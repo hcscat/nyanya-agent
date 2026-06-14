@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NyaNya Agent Dashboard</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">NY</div>
+          <div>
+            <strong>NyaNya Agent</strong>
+            <span>Ops Dashboard</span>
+          </div>
+        </div>
+        <nav class="nav">
+          <a href="#overview">현황</a>
+          <a href="#requests">요청</a>
+          <a href="#usage">사용량</a>
+          <a href="#projects">프로젝트</a>
+          <a href="#audit">감사</a>
+        </nav>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Local control plane</p>
+            <h1>NyaNya Agent 운영 대시보드</h1>
+          </div>
+          <div class="topbar-actions">
+            <select id="usagePeriod" aria-label="사용량 기간">
+              <option value="daily">일별</option>
+              <option value="weekly">주별</option>
+              <option value="monthly">월별</option>
+            </select>
+            <button id="refreshBtn" class="button secondary" type="button">새로고침</button>
+          </div>
+        </header>
+
+        <section id="overview" class="metrics" aria-label="운영 지표"></section>
+
+        <div class="main-grid">
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Live Queue</p>
+                <h2>진행 중 요청</h2>
+              </div>
+            </div>
+            <div id="runningList" class="stack"></div>
+          </section>
+
+          <aside class="panel">
+            <div class="panel-heading compact">
+              <div>
+                <p class="eyebrow">Exceptions</p>
+                <h2>최근 실패</h2>
+              </div>
+            </div>
+            <div id="failureList" class="stack"></div>
+          </aside>
+        </div>
+
+        <section id="requests" class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Discord Work Ledger</p>
+              <h2>요청 이력</h2>
+            </div>
+          </div>
+          <div id="requestTable" class="table-wrap"></div>
+        </section>
+
+        <section id="usage" class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Trend</p>
+              <h2>사용량 추이</h2>
+            </div>
+          </div>
+          <div id="usageChart" class="usage-chart"></div>
+        </section>
+
+        <section id="projects" class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Project Phase</p>
+              <h2>프로젝트 단계</h2>
+            </div>
+            <form id="projectForm" class="inline-form">
+              <input id="projectNameInput" name="name" type="text" placeholder="프로젝트 이름" required />
+              <input id="projectGoalInput" name="goal" type="text" placeholder="목표" />
+              <button class="button" type="submit">추가</button>
+            </form>
+          </div>
+          <div id="projectList" class="project-list"></div>
+        </section>
+
+        <section id="audit" class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Audit</p>
+              <h2>감사 로그</h2>
+            </div>
+          </div>
+          <div id="auditLog" class="audit-log"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
