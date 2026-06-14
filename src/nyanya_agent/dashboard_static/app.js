@@ -1,4 +1,5 @@
 const state = {
+  activeView: "main",
   summary: null,
   requests: [],
   usage: [],
@@ -32,6 +33,14 @@ const labels = {
 
 function $(id) {
   return document.getElementById(id);
+}
+
+function qs(selector) {
+  return document.querySelector(selector);
+}
+
+function $$(selector) {
+  return Array.from(document.querySelectorAll(selector));
 }
 
 function escapeHtml(value) {
@@ -77,7 +86,7 @@ async function api(path, options = {}) {
 }
 
 async function loadAll() {
-  const period = $("usagePeriod").value;
+  const period = $("usagePeriod")?.value || "daily";
   const [summary, requests, usage, projects, audit] = await Promise.all([
     api("/v1/summary"),
     api("/v1/requests?limit=50"),
@@ -94,6 +103,7 @@ async function loadAll() {
 }
 
 function render() {
+  renderActiveView();
   renderMetrics();
   renderRunning();
   renderFailures();
@@ -101,6 +111,30 @@ function render() {
   renderUsage();
   renderProjects();
   renderAudit();
+}
+
+function renderActiveView() {
+  $$("[data-view-panel]").forEach((panel) => {
+    const active = panel.dataset.viewPanel === state.activeView;
+    panel.hidden = !active;
+    panel.classList.toggle("active", active);
+  });
+  $$("[data-view]").forEach((button) => {
+    const active = button.dataset.view === state.activeView;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-current", active ? "page" : "false");
+  });
+}
+
+function setView(view, { updateHash = true } = {}) {
+  if (!["main", "projects", "stats"].includes(view)) {
+    view = "main";
+  }
+  state.activeView = view;
+  if (updateHash) {
+    history.replaceState(null, "", `#${view}`);
+  }
+  renderActiveView();
 }
 
 function renderMetrics() {
@@ -306,9 +340,14 @@ async function handleClick(event) {
 }
 
 document.addEventListener("click", handleClick);
+qs('[data-view="main"]').addEventListener("click", () => setView("main"));
+qs('[data-view="projects"]').addEventListener("click", () => setView("projects"));
+qs('[data-view="stats"]').addEventListener("click", () => setView("stats"));
 $("projectForm").addEventListener("submit", createProject);
 $("refreshBtn").addEventListener("click", () => loadAll());
 $("usagePeriod").addEventListener("change", () => loadAll());
+
+setView(location.hash.replace("#", ""), { updateHash: false });
 
 loadAll().catch((error) => {
   document.body.innerHTML = `<main class="workspace"><section class="panel"><h1>Load failed</h1><pre>${escapeHtml(error.message)}</pre></section></main>`;

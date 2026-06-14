@@ -10,6 +10,7 @@ __pycache__/
 
 data/
 downloads/
+docs/private/
 logs/
 prompts/local_system.md
 run/

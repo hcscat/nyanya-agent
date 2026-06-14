@@ -86,16 +86,21 @@ select {
   margin-top: 28px;
 }
 
-.nav a {
+.nav-item {
   min-height: 40px;
   padding: 10px 12px;
+  border: 0;
   border-radius: 8px;
+  background: transparent;
   color: #c8d3df;
+  cursor: pointer;
+  text-align: left;
   text-decoration: none;
 }
 
-.nav a:hover,
-.nav a:focus-visible {
+.nav-item:hover,
+.nav-item:focus-visible,
+.nav-item.active {
   background: #1f2b38;
   color: #ffffff;
 }
@@ -104,6 +109,10 @@ select {
   width: min(1520px, 100%);
   min-width: 0;
   padding: 24px;
+}
+
+.view[hidden] {
+  display: none;
 }
 
 .topbar,
@@ -477,7 +486,11 @@ th {
   }
 
   .nav {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .nav-item {
+    text-align: center;
   }
 
   .metrics,
