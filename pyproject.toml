@@ -23,6 +23,7 @@ nyanyactl = "nyanya_agent.manager:main"
 nyanya-discord = "nyanya_agent.discord_bridge:main"
 nyanya-telegram = "nyanya_agent.telegram_bridge:main"
 nyanya-dashboard = "nyanya_agent.dashboard_api:main"
+nyanya-memory-worker = "nyanya_agent.memory_worker:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -70,6 +70,10 @@ def load_config(path: pathlib.Path) -> dict[str, Any]:
             "model": model,
             "base_url": base_url.rstrip("/"),
             "system_prompt_path": os.getenv("NYANYA_SYSTEM_PROMPT_PATH", data.get("system_prompt_path", "prompts/system.md")),
+            "agent_memory_path": os.getenv(
+                "NYANYA_AGENT_MEMORY_PATH",
+                data.get("agent_memory_path", "prompts/agent_memory.md"),
+            ),
             "sessions_dir": os.getenv("NYANYA_SESSIONS_DIR", data.get("sessions_dir", "sessions")),
             "temperature": float(os.getenv("NYANYA_TEMPERATURE", data.get("temperature", 0.3))),
             "timeout_seconds": int(os.getenv("NYANYA_TIMEOUT_SECONDS", data.get("timeout_seconds", 120))),
@@ -96,6 +100,47 @@ def read_system_prompt(config: dict[str, Any]) -> str:
     if not prompt_path.is_absolute():
         prompt_path = PROJECT_ROOT / prompt_path
     return prompt_path.read_text(encoding="utf-8")
+
+
+def read_agent_memory(config: dict[str, Any]) -> str:
+    memory_path_value = str(config.get("agent_memory_path", "")).strip()
+    if not memory_path_value:
+        return ""
+    memory_path = pathlib.Path(memory_path_value)
+    if not memory_path.is_absolute():
+        memory_path = PROJECT_ROOT / memory_path
+    if not memory_path.exists():
+        return ""
+    return memory_path.read_text(encoding="utf-8")
+
+
+def build_system_context(config: dict[str, Any]) -> str:
+    system_prompt = read_system_prompt(config).strip()
+    agent_memory = read_agent_memory(config).strip()
+    if not agent_memory:
+        return system_prompt
+    return f"{system_prompt}\n\n# NyaNya Agent Memory\n\n{agent_memory}"
+
+
+def build_dynamic_memory_context(prompt: str, *, owner_key: str | None = None, limit: int | None = None) -> str:
+    if not parse_bool(os.getenv("NYANYA_MEMORY_RETRIEVAL_ENABLED", "true")):
+        return ""
+    if not prompt.strip():
+        return ""
+    try:
+        from nyanya_agent import dashboard_store
+
+        memories = dashboard_store.search_approved_memories(
+            prompt,
+            owner_key=owner_key,
+            limit=limit or int(os.getenv("NYANYA_MEMORY_RETRIEVAL_LIMIT", "5")),
+        )
+        return dashboard_store.format_memory_context(
+            memories,
+            char_limit=int(os.getenv("NYANYA_MEMORY_CONTEXT_MAX_CHARS", "1800")),
+        )
+    except Exception as exc:  # noqa: BLE001 - memory retrieval must never break the main answer path.
+        return f"Long-term memory retrieval failed and should be ignored for this turn: {type(exc).__name__}: {exc}"
 
 
 def request_json(url: str, payload: dict[str, Any] | None, timeout: int, headers: dict[str, str] | None = None) -> Any:
@@ -426,11 +471,14 @@ def save_session(config: dict[str, Any], messages: list[dict[str, str]]) -> path
 
 
 def build_messages(config: dict[str, Any]) -> list[dict[str, str]]:
-    return [{"role": "system", "content": read_system_prompt(config)}]
+    return [{"role": "system", "content": build_system_context(config)}]
 
 
 def run_single_prompt(config: dict[str, Any], prompt: str) -> int:
     messages = build_messages(config)
+    dynamic_memory = build_dynamic_memory_context(prompt)
+    if dynamic_memory:
+        messages.append({"role": "system", "content": dynamic_memory})
     messages.append({"role": "user", "content": prompt})
     try:
         answer = chat_once(config, messages)
@@ -472,6 +520,9 @@ def run_repl(config: dict[str, Any]) -> int:
             print(json.dumps(visible, ensure_ascii=False, indent=2))
             continue
 
+        dynamic_memory = build_dynamic_memory_context(user_text)
+        if dynamic_memory:
+            messages.append({"role": "system", "content": dynamic_memory})
         messages.append({"role": "user", "content": user_text})
         try:
             answer = chat_once(config, messages)

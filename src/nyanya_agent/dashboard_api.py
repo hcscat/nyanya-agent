@@ -32,6 +32,12 @@ class PhaseUpdate(BaseModel):
     requires_confirmation: bool | None = None
 
 
+class MemoryUpdate(BaseModel):
+    status: str | None = Field(default=None, pattern="^(pending|approved|rejected|archived)$")
+    importance: float | None = Field(default=None, ge=0, le=100)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+
+
 def create_app(db_path: str | Path | None = None) -> FastAPI:
     store.init_db(db_path)
     app = FastAPI(title="NyaNya Agent Dashboard", version="0.1.0")
@@ -130,6 +136,44 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
     @app.get("/v1/audit-log")
     def audit_log(limit: int = Query(default=50, ge=1, le=200)) -> list[dict[str, Any]]:
         return store.audit_log(limit=limit, db_path=app.state.db_path)
+
+    @app.get("/v1/memories")
+    def list_memories(
+        status: str | None = Query(default=None, pattern="^(pending|approved|rejected|archived)$"),
+        limit: int = Query(default=100, ge=1, le=300),
+    ) -> list[dict[str, Any]]:
+        return store.list_memories(status=status, limit=limit, db_path=app.state.db_path)
+
+    @app.post("/v1/memories/extract")
+    def extract_memories(limit: int = Query(default=50, ge=1, le=200)) -> dict[str, Any]:
+        return store.extract_memory_candidates_from_requests(limit=limit, db_path=app.state.db_path)
+
+    @app.patch("/v1/memories/{memory_id}")
+    def update_memory(memory_id: str, payload: MemoryUpdate) -> dict[str, Any]:
+        memory = store.update_memory(
+            memory_id,
+            status=payload.status,
+            importance=payload.importance,
+            confidence=payload.confidence,
+            db_path=app.state.db_path,
+        )
+        if memory is None:
+            raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
+        return memory
+
+    @app.get("/v1/memory-graph")
+    def memory_graph(
+        status: str | None = Query(default=None, pattern="^(pending|approved|rejected|archived)$"),
+        limit: int = Query(default=80, ge=1, le=200),
+    ) -> dict[str, Any]:
+        return store.memory_graph(status=status, limit=limit, db_path=app.state.db_path)
+
+    @app.get("/v1/tech-stack-graph")
+    def tech_stack_graph(
+        status: str | None = Query(default=None, pattern="^(pending|approved|rejected|archived)$"),
+        limit: int = Query(default=120, ge=1, le=300),
+    ) -> dict[str, Any]:
+        return store.tech_stack_graph(status=status, limit=limit, db_path=app.state.db_path)
 
     return app
 

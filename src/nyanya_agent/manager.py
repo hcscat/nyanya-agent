@@ -21,10 +21,12 @@ from nyanya_agent import core as nyanya
 
 DISCORD_LABEL = "com.hcs.nyanya.discord"
 DASHBOARD_LABEL = "com.hcs.nyanya.dashboard"
+MEMORY_WORKER_LABEL = "com.hcs.nyanya.memory-worker"
 CODEX_LABEL = "com.hcs.codex.app"
 CODEX_APP_NAME = "Codex"
 CODEX_APP_PATH = pathlib.Path("/Applications/Codex.app")
 LABEL = DISCORD_LABEL
+DEFAULT_RUNTIME_PATH = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 
 def run(command: list[str], *, check: bool = False) -> subprocess.CompletedProcess[str]:
@@ -116,6 +118,7 @@ def write_discord_plist() -> pathlib.Path:
     payload: dict[str, Any] = {
         "Label": LABEL,
         "ProgramArguments": [str(project_root() / "scripts" / "run_discord_bridge.sh")],
+        "EnvironmentVariables": {"PATH": DEFAULT_RUNTIME_PATH},
         "RunAtLoad": True,
         "KeepAlive": True,
         "StandardOutPath": str(project_root() / "logs" / "discord.launchd.out.log"),
@@ -133,6 +136,7 @@ def write_codex_plist() -> pathlib.Path:
     payload: dict[str, Any] = {
         "Label": CODEX_LABEL,
         "ProgramArguments": ["/usr/bin/open", "-a", CODEX_APP_NAME],
+        "EnvironmentVariables": {"PATH": DEFAULT_RUNTIME_PATH},
         "RunAtLoad": True,
         "KeepAlive": False,
         "StandardOutPath": str(project_root() / "logs" / "codex.launchd.out.log"),
@@ -150,6 +154,7 @@ def write_dashboard_plist() -> pathlib.Path:
     payload: dict[str, Any] = {
         "Label": DASHBOARD_LABEL,
         "ProgramArguments": [str(project_root() / "scripts" / "run_dashboard.sh")],
+        "EnvironmentVariables": {"PATH": DEFAULT_RUNTIME_PATH},
         "RunAtLoad": True,
         "KeepAlive": True,
         "StandardOutPath": str(project_root() / "logs" / "dashboard.launchd.out.log"),
@@ -157,6 +162,24 @@ def write_dashboard_plist() -> pathlib.Path:
         "WorkingDirectory": str(project_root()),
     }
     path = plist_path(DASHBOARD_LABEL)
+    with path.open("wb") as f:
+        plistlib.dump(payload, f)
+    return path
+
+
+def write_memory_worker_plist() -> pathlib.Path:
+    ensure_dirs()
+    payload: dict[str, Any] = {
+        "Label": MEMORY_WORKER_LABEL,
+        "ProgramArguments": [str(project_root() / "scripts" / "run_memory_worker.sh")],
+        "EnvironmentVariables": {"PATH": DEFAULT_RUNTIME_PATH},
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "StandardOutPath": str(project_root() / "logs" / "memory-worker.launchd.out.log"),
+        "StandardErrorPath": str(project_root() / "logs" / "memory-worker.launchd.err.log"),
+        "WorkingDirectory": str(project_root()),
+    }
+    path = plist_path(MEMORY_WORKER_LABEL)
     with path.open("wb") as f:
         plistlib.dump(payload, f)
     return path
@@ -249,19 +272,23 @@ def status() -> int:
 def start_all() -> int:
     print("runtime_entrypoint=discord_bridge")
     print("dashboard=nyanya_dashboard")
+    print("memory_worker=nyanya_memory_worker")
     print("codex_policy=separate_recovery_channel_not_managed_by_start_all")
     discord_rc = start()
     dashboard_rc = dashboard_start()
-    return 0 if discord_rc == 0 and dashboard_rc == 0 else 1
+    memory_rc = memory_worker_start()
+    return 0 if discord_rc == 0 and dashboard_rc == 0 and memory_rc == 0 else 1
 
 
 def restart_all() -> int:
     print("runtime_entrypoint=discord_bridge")
     print("dashboard=nyanya_dashboard")
+    print("memory_worker=nyanya_memory_worker")
     print("codex_policy=separate_recovery_channel_not_managed_by_restart_all")
     discord_rc = restart()
     dashboard_rc = dashboard_restart()
-    return 0 if discord_rc == 0 and dashboard_rc == 0 else 1
+    memory_rc = memory_worker_restart()
+    return 0 if discord_rc == 0 and dashboard_rc == 0 and memory_rc == 0 else 1
 
 
 def status_all() -> int:
@@ -271,9 +298,11 @@ def status_all() -> int:
     discord_rc = status()
     print("[dashboard]")
     dashboard_rc = dashboard_status()
+    print("[memory_worker]")
+    memory_rc = memory_worker_status()
     print("[codex]")
     codex_rc = codex_status()
-    return 0 if discord_rc == 0 and dashboard_rc == 0 and codex_rc in (0, 1) else 1
+    return 0 if discord_rc == 0 and dashboard_rc == 0 and memory_rc == 0 and codex_rc in (0, 1) else 1
 
 
 def check_config(*, include_backend: bool = True) -> int:
@@ -530,6 +559,72 @@ def dashboard_health() -> int:
         return 1
 
 
+def memory_worker_install() -> int:
+    path = write_memory_worker_plist()
+    bootout(MEMORY_WORKER_LABEL)
+    result = bootstrap(path)
+    if result.returncode != 0:
+        sys.stderr.write(result.stderr or result.stdout)
+        return result.returncode
+    kick = kickstart(MEMORY_WORKER_LABEL)
+    if kick.returncode != 0:
+        sys.stderr.write(kick.stderr or kick.stdout)
+        return kick.returncode
+    print(f"installed={MEMORY_WORKER_LABEL}")
+    print(f"plist={path}")
+    return 0
+
+
+def memory_worker_start() -> int:
+    path = plist_path(MEMORY_WORKER_LABEL)
+    if not path.exists():
+        write_memory_worker_plist()
+    result = bootstrap(path)
+    if result.returncode not in (0, 5):
+        sys.stderr.write(result.stderr or result.stdout)
+        return result.returncode
+    kick = kickstart(MEMORY_WORKER_LABEL)
+    if kick.returncode != 0:
+        sys.stderr.write(kick.stderr or kick.stdout)
+        return kick.returncode
+    print(f"started={MEMORY_WORKER_LABEL}")
+    return 0
+
+
+def memory_worker_stop() -> int:
+    bootout(MEMORY_WORKER_LABEL)
+    print(f"stopped={MEMORY_WORKER_LABEL}")
+    return 0
+
+
+def memory_worker_restart() -> int:
+    bootout(MEMORY_WORKER_LABEL)
+    return memory_worker_install()
+
+
+def memory_worker_uninstall() -> int:
+    bootout(MEMORY_WORKER_LABEL)
+    plist_path(MEMORY_WORKER_LABEL).unlink(missing_ok=True)
+    print(f"removed={MEMORY_WORKER_LABEL}")
+    return 0
+
+
+def memory_worker_status() -> int:
+    rc, lines = launch_status(MEMORY_WORKER_LABEL)
+    for line in lines:
+        print(line)
+    return 0 if rc == 0 else 1
+
+
+def memory_worker_once() -> int:
+    result = run([python_executable(), "-m", "nyanya_agent.memory_worker", "--once"], check=False)
+    if result.stdout:
+        print(result.stdout.strip())
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+    return result.returncode
+
+
 def discord_api(method: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     token = discord_token()
     if not token:
@@ -587,6 +682,13 @@ def parse_args() -> argparse.Namespace:
         "dashboard-uninstall",
         "dashboard-status",
         "dashboard-health",
+        "memory-worker-install",
+        "memory-worker-start",
+        "memory-worker-stop",
+        "memory-worker-restart",
+        "memory-worker-uninstall",
+        "memory-worker-status",
+        "memory-worker-once",
         "codex-status",
         "codex-start",
         "codex-install",
@@ -647,6 +749,20 @@ def main() -> int:
         return dashboard_status()
     if args.command == "dashboard-health":
         return dashboard_health()
+    if args.command == "memory-worker-install":
+        return memory_worker_install()
+    if args.command == "memory-worker-start":
+        return memory_worker_start()
+    if args.command == "memory-worker-stop":
+        return memory_worker_stop()
+    if args.command == "memory-worker-restart":
+        return memory_worker_restart()
+    if args.command == "memory-worker-uninstall":
+        return memory_worker_uninstall()
+    if args.command == "memory-worker-status":
+        return memory_worker_status()
+    if args.command == "memory-worker-once":
+        return memory_worker_once()
     if args.command == "codex-status":
         return codex_status()
     if args.command == "codex-start":
