@@ -5,6 +5,11 @@ const state = {
   usage: [],
   projects: [],
   audit: [],
+  memories: [],
+  memoryGraph: { nodes: [], edges: [], stats: {} },
+  techStackGraph: { nodes: [], edges: [], stats: {} },
+  cy: null,
+  techCy: null,
 };
 
 const labels = {
@@ -29,6 +34,18 @@ const labels = {
   red: "위험",
   needs_confirmation: "확인 필요",
   ok: "정상",
+  pending: "검토 대기",
+  approved: "승인",
+  rejected: "거부",
+  preference: "사용자 선호",
+  workflow: "작업 방식",
+  report_style: "결과 보고",
+  project_fact: "프로젝트 사실",
+  decision: "결정 사항",
+  correction: "정정/피드백",
+  failure_pattern: "실패 패턴",
+  safety_rule: "안전 규칙",
+  artifact: "산출물",
 };
 
 function $(id) {
@@ -87,18 +104,24 @@ async function api(path, options = {}) {
 
 async function loadAll() {
   const period = $("usagePeriod")?.value || "daily";
-  const [summary, requests, usage, projects, audit] = await Promise.all([
+  const [summary, requests, usage, projects, audit, memories, memoryGraph, techStackGraph] = await Promise.all([
     api("/v1/summary"),
     api("/v1/requests?limit=50"),
     api(`/v1/usage?period=${encodeURIComponent(period)}&limit=30`),
     api("/v1/projects"),
     api("/v1/audit-log?limit=40"),
+    api("/v1/memories?limit=120"),
+    api("/v1/memory-graph?limit=120"),
+    api("/v1/tech-stack-graph?limit=120"),
   ]);
   state.summary = summary;
   state.requests = requests;
   state.usage = usage;
   state.projects = await Promise.all(projects.map((project) => api(`/v1/projects/${project.id}`)));
   state.audit = audit;
+  state.memories = memories;
+  state.memoryGraph = memoryGraph;
+  state.techStackGraph = techStackGraph;
   render();
 }
 
@@ -110,6 +133,7 @@ function render() {
   renderRequests();
   renderUsage();
   renderProjects();
+  renderMemories();
   renderAudit();
 }
 
@@ -127,7 +151,7 @@ function renderActiveView() {
 }
 
 function setView(view, { updateHash = true } = {}) {
-  if (!["main", "projects", "stats"].includes(view)) {
+  if (!["main", "projects", "memory", "stats"].includes(view)) {
     view = "main";
   }
   state.activeView = view;
@@ -135,6 +159,21 @@ function setView(view, { updateHash = true } = {}) {
     history.replaceState(null, "", `#${view}`);
   }
   renderActiveView();
+  if (view === "memory") {
+    window.setTimeout(() => {
+      renderMemoryGraph();
+      renderTechStackGraph();
+      state.cy?.fit(undefined, 24);
+      state.techCy?.fit(undefined, 24);
+    }, 30);
+  }
+}
+
+function memoryTone(memory) {
+  if (memory.status === "approved") return "green";
+  if (memory.status === "rejected") return "red";
+  if ((memory.importance || 0) >= 70) return "amber";
+  return "";
 }
 
 function renderMetrics() {
@@ -309,6 +348,154 @@ function renderAudit() {
           .join("");
 }
 
+function renderMemories() {
+  if (!$("memorySummary")) return;
+  const stats = state.memoryGraph?.stats || {};
+  const cards = [
+    ["전체 기억", stats.memories ?? state.memories.length, ""],
+    ["검토 대기", stats.pending ?? 0, "warn"],
+    ["승인", stats.approved ?? 0, "info"],
+    ["타입", stats.types ?? 0, ""],
+  ];
+  $("memorySummary").innerHTML = cards
+    .map(
+      ([title, value, tone]) => `
+        <article class="metric-card memory ${tone}">
+          <div><span>${escapeHtml(title)}</span><strong>${escapeHtml(value)}</strong></div>
+          <div class="metric-tone" aria-hidden="true"></div>
+        </article>
+      `,
+    )
+    .join("");
+
+  $("memoryList").innerHTML =
+    state.memories.length === 0
+      ? `<div class="empty">기억 후보 없음. 요청 이력에서 후보를 추출하세요.</div>`
+      : state.memories
+          .map(
+            (memory) => `
+              <article class="memory-item ${memoryTone(memory)}">
+                <div>
+                  ${badge(memory.status)}
+                  <strong>${escapeHtml(memory.title)}</strong>
+                  <p>${escapeHtml(memory.content)}</p>
+                  <span class="meta">${escapeHtml(label(memory.memory_type))} · 중요도 ${Math.round(memory.importance || 0)} · 신뢰도 ${Math.round((memory.confidence || 0) * 100)}%</span>
+                </div>
+                <div class="memory-actions">
+                  <button class="button small secondary" data-action="memory-approve" data-memory="${escapeHtml(memory.id)}" type="button">승인</button>
+                  <button class="button small secondary" data-action="memory-reject" data-memory="${escapeHtml(memory.id)}" type="button">거부</button>
+                </div>
+              </article>
+            `,
+          )
+          .join("");
+
+  renderMemoryGraph();
+  renderTechStackGraph();
+}
+
+function graphElements(graph) {
+  return [
+    ...(graph.nodes || []).map((node) => ({
+      data: {
+        id: node.id,
+        label: node.label,
+        kind: node.kind,
+        status: node.status,
+        importance: node.importance || 1,
+      },
+    })),
+    ...(graph.edges || []).map((edge, index) => ({
+      data: {
+        id: `edge-${index}`,
+        source: edge.source,
+        target: edge.target,
+        label: edge.label,
+        weight: edge.weight || 1,
+      },
+    })),
+  ];
+}
+
+function graphStyle() {
+  return [
+    {
+      selector: "node",
+      style: {
+        label: "data(label)",
+        "background-color": "#1d63c7",
+        color: "#1e2732",
+        "font-size": 11,
+        "text-valign": "bottom",
+        "text-halign": "center",
+        "text-wrap": "wrap",
+        "text-max-width": 120,
+        width: "mapData(importance, 1, 100, 24, 64)",
+        height: "mapData(importance, 1, 100, 24, 64)",
+      },
+    },
+    { selector: 'node[kind = "root"]', style: { "background-color": "#f0bd4a", width: 72, height: 72, "font-weight": 800 } },
+    { selector: 'node[kind = "type"]', style: { "background-color": "#0d748a", color: "#0d3340", "font-weight": 700 } },
+    { selector: 'node[kind = "technology"]', style: { "background-color": "#14764c", color: "#123524", "font-weight": 700 } },
+    { selector: 'node[status = "pending"]', style: { "border-color": "#9a5a08", "border-width": 3 } },
+    { selector: 'node[status = "approved"]', style: { "border-color": "#14764c", "border-width": 3 } },
+    {
+      selector: "edge",
+      style: {
+        width: "mapData(weight, 1, 10, 1, 5)",
+        "line-color": "#a8b4c2",
+        "target-arrow-color": "#a8b4c2",
+        "target-arrow-shape": "triangle",
+        "curve-style": "bezier",
+      },
+    },
+  ];
+}
+
+function renderGraph({ containerId, graph, cyKey, emptyText }) {
+  const container = $(containerId);
+  if (!container) return;
+  if (!window.cytoscape) {
+    container.innerHTML = `<div class="empty">Cytoscape.js 로드 실패. 그래프 외 목록은 계속 사용할 수 있습니다.</div>`;
+    return;
+  }
+  const elements = graphElements(graph || { nodes: [], edges: [] });
+  if (elements.length <= 1) {
+    container.innerHTML = `<div class="empty">${escapeHtml(emptyText)}</div>`;
+    return;
+  }
+  if (!state[cyKey]) {
+    state[cyKey] = cytoscape({
+      container,
+      style: graphStyle(),
+      elements,
+      layout: { name: "cose", animate: false, fit: true, padding: 24 },
+    });
+  } else {
+    state[cyKey].elements().remove();
+    state[cyKey].add(elements);
+    state[cyKey].layout({ name: "cose", animate: false, fit: true, padding: 24 }).run();
+  }
+}
+
+function renderMemoryGraph() {
+  renderGraph({
+    containerId: "memoryGraph",
+    graph: state.memoryGraph,
+    cyKey: "cy",
+    emptyText: "표시할 기억 그래프 없음",
+  });
+}
+
+function renderTechStackGraph() {
+  renderGraph({
+    containerId: "techStackGraph",
+    graph: state.techStackGraph,
+    cyKey: "techCy",
+    emptyText: "표시할 기술스택 그래프 없음",
+  });
+}
+
 async function createProject(event) {
   event.preventDefault();
   const name = $("projectNameInput").value.trim();
@@ -332,6 +519,13 @@ async function handleClick(event) {
       await api(`/v1/projects/${button.dataset.project}/phases/${button.dataset.phase}/check`, { method: "POST" });
       await loadAll();
     }
+    if (button.dataset.action === "memory-approve" || button.dataset.action === "memory-reject") {
+      await api(`/v1/memories/${button.dataset.memory}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: button.dataset.action === "memory-approve" ? "approved" : "rejected" }),
+      });
+      await loadAll();
+    }
   } catch (error) {
     alert(error.message);
   } finally {
@@ -342,10 +536,22 @@ async function handleClick(event) {
 document.addEventListener("click", handleClick);
 qs('[data-view="main"]').addEventListener("click", () => setView("main"));
 qs('[data-view="projects"]').addEventListener("click", () => setView("projects"));
+qs('[data-view="memory"]').addEventListener("click", () => setView("memory"));
 qs('[data-view="stats"]').addEventListener("click", () => setView("stats"));
 $("projectForm").addEventListener("submit", createProject);
 $("refreshBtn").addEventListener("click", () => loadAll());
 $("usagePeriod").addEventListener("change", () => loadAll());
+$("extractMemoryBtn").addEventListener("click", async () => {
+  $("extractMemoryBtn").disabled = true;
+  try {
+    await api("/v1/memories/extract?limit=80", { method: "POST" });
+    await loadAll();
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    $("extractMemoryBtn").disabled = false;
+  }
+});
 
 setView(location.hash.replace("#", ""), { updateHash: false });
 

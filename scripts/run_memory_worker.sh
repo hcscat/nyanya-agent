@@ -9,4 +9,4 @@ export PYTHONPATH="$ROOT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
 if [[ -z "${PYTHON:-}" && -x "$ROOT_DIR/.venv/bin/python" ]]; then
   PYTHON="$ROOT_DIR/.venv/bin/python"
 fi
-exec "${PYTHON:-python3}" -m nyanya_agent.dashboard_api "$@"
+exec "${PYTHON:-python3}" -m nyanya_agent.memory_worker "$@"

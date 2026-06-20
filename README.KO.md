@@ -29,6 +29,7 @@ src/nyanya_agent/bridge_runtime.py    # Codex 위임과 runtime helper
 src/nyanya_agent/bridge_store.py      # 대화 저장소와 사용자별 task queue
 src/nyanya_agent/dashboard_store.py   # SQLite dashboard/event store
 src/nyanya_agent/dashboard_api.py     # FastAPI dashboard server
+src/nyanya_agent/memory_worker.py     # 장기기억 후보를 정리하는 background worker
 src/nyanya_agent/discord_bridge.py    # Discord bridge
 src/nyanya_agent/telegram_bridge.py   # Telegram bridge
 ```
@@ -62,22 +63,34 @@ python -m pip install -e ".[bots,dashboard,dev]"
 NYANYA_PROVIDER=gemini_cli
 NYANYA_GEMINI_CLI=gemini
 NYANYA_WORKSPACE_ROOTS=/absolute/workspace/path
+NYANYA_TRUSTED_WORKSPACE_ROOTS=/absolute/trusted/path
 NYANYA_SYSTEM_PROMPT_PATH=prompts/system.md
+NYANYA_AGENT_MEMORY_PATH=prompts/agent_memory.md
 NYANYA_DISCORD_BOT_TOKEN=
 NYANYA_DISCORD_PREFIX=!nyanya
 NYANYA_DISCORD_RESPOND_IN_ALLOWED_CHANNELS=false
 NYANYA_DISCORD_ALLOWED_CHANNEL_IDS=
 NYANYA_DISCORD_ALLOWED_USER_IDS=
 NYANYA_DISCORD_FILE_SHARE_CHANNEL_IDS=
+NYANYA_DISCORD_FILE_SHARE_CHANNEL_NAMES=
 NYANYA_CODEX_ENABLED=false
 NYANYA_CODEX_WRITE_ENABLED=false
 NYANYA_DASHBOARD_RECORDING_ENABLED=true
 NYANYA_DASHBOARD_HOST=127.0.0.1
 NYANYA_DASHBOARD_PORT=8765
 NYANYA_DASHBOARD_DB_PATH=data/nyanya_dashboard.db
+NYANYA_MEMORY_RETRIEVAL_ENABLED=true
+NYANYA_MEMORY_WORKER_INTERVAL_SECONDS=1800
+NYANYA_MEMORY_WORKER_LLM_REFINEMENT=false
 ```
 
 workspace root는 필요한 범위만 좁게 지정한다. NyaNya Agent는 sandbox가 아니라 routing과 policy layer다.
+
+workspace tier:
+
+- `NYANYA_WORKSPACE_ROOTS`는 bridge가 접근 가능한 경로다.
+- `NYANYA_TRUSTED_WORKSPACE_ROOTS`는 일상 작업이 예상되는 더 안전한 하위 범위다.
+- allowed root 안이지만 trusted root 밖인 경로는 더 엄격한 위험도 기준을 적용한다.
 
 ## 터미널 실행
 
@@ -131,6 +144,13 @@ Discord bridge 직접 실행:
 | `!nyanya codex-work <prompt>` | 쓰기 위임이 켜져 있을 때 코드/파일 변경 작업을 Codex에 위임 |
 | `!nyanya cancel` | 현재 사용자의 대기/실행 작업 취소 |
 
+중요 작업 정책:
+
+- 파일 생성, 수정, 삭제, 이동, 권한 변경, 시스템 설정, 네트워크 설정, 설치, 배포, 외부 side effect가 있는 작업은 고위험 작업으로 본다.
+- 고위험 요청은 바로 실행하지 않고 계획을 먼저 반환한 뒤 명시 승인을 요구한다.
+- trusted root 밖이지만 allowed root 안인 작업은 더 엄격하게 점수화한다.
+- 웹 또는 타인 자료에 숨은 프롬프트형 지시가 의심되면 해당 지시를 따르지 않고 보고한다.
+
 파일 업로드 처리 순서:
 
 1. 요청된 파일 경로를 사용자 workspace 기준으로 해석한다.
@@ -163,12 +183,13 @@ Dashboard 직접 실행:
 http://127.0.0.1:8765
 ```
 
-대시보드는 세 화면으로 나뉜다.
+대시보드는 네 화면으로 나뉜다.
 
 | 화면 | 목적 | 주요 내용 |
 |---|---|---|
 | 메인 | 현재 운영 상태 확인 | 전체 요청, 오늘 요청, 실행 중 요청, 실패, 확인 필요 단계 |
 | 프로젝트 | 프로젝트와 단계 운영 | 프로젝트 생성, 목표 입력, 단계 카드, 단계 체크 |
+| 메모리 | 장기기억 검토 | pending/approved 기억 후보, memory graph, technology graph |
 | 통계 | 과거 이력 분석 | 사용량 추이, 요청 원장, 감사 로그 |
 
 기본 DB:
@@ -206,6 +227,39 @@ POST /v1/projects/{project_id}/phases/{phase_key}/check
 
 단계에 `next_action`이 있으면 결과가 `needs_confirmation`이 되고 Discord 확인 메시지 후보가 생성된다. 다음 작업이 없으면 결과는 `ok`다.
 
+## 장기기억
+
+NyaNya는 두 가지 기억 계층을 사용한다.
+
+| 계층 | 목적 | 저장 위치 |
+|---|---|---|
+| 기본 기억 | 시스템 프롬프트에 들어가는 압축된 운영 사실 | `prompts/agent_memory.md` |
+| 동적 기억 | 요청 기록에서 추출하고 검토할 수 있는 기억 후보 | SQLite `memory_items` |
+
+동적 기억 흐름:
+
+1. Discord, Telegram, CLI, dashboard 요청을 SQLite에 기록한다.
+2. memory worker가 완료 상태 요청을 스캔한다.
+3. 규칙 기반 추출로 `pending` 기억 후보를 만든다.
+4. 민감 내용은 redaction하거나 skip한다.
+5. 필요한 경우에만 LLM refinement를 켤 수 있다.
+6. dashboard에서 후보를 승인 또는 거절한다.
+7. `approved`이면서 민감하지 않은 기억만 이후 프롬프트에 검색 주입된다.
+
+worker 1회 실행:
+
+```bash
+./scripts/nyanya_ctl.sh memory-worker-once
+```
+
+background worker 관리:
+
+```bash
+./scripts/nyanya_ctl.sh memory-worker-start
+./scripts/nyanya_ctl.sh memory-worker-status
+./scripts/nyanya_ctl.sh memory-worker-restart
+```
+
 ## macOS 서비스 관리
 
 NyaNya는 macOS LaunchAgent 관리 명령을 제공한다.
@@ -215,6 +269,7 @@ NyaNya는 macOS LaunchAgent 관리 명령을 제공한다.
 ```bash
 ./scripts/nyanya_ctl.sh install
 ./scripts/nyanya_ctl.sh dashboard-install
+./scripts/nyanya_ctl.sh memory-worker-install
 ./scripts/nyanya_ctl.sh start-all
 ```
 
@@ -243,6 +298,7 @@ Codex 정책:
 
 - Discord bridge가 messenger 요청의 runtime entrypoint다.
 - Dashboard는 별도 로컬 관측 프로세스다.
+- Memory worker는 별도 저비용 유지보수 프로세스다.
 - Codex는 별도 복구/위임 채널이다.
 - `start-all`, `restart-all`, `health`, `repair`는 Codex를 agent 프로세스에 포함하거나 관리하지 않는다.
 - Codex 앱 lifecycle은 `codex-status`, `codex-start`, `codex-install`, `codex-uninstall`로 확인한다.
@@ -265,9 +321,12 @@ NyaNya Agent는 sandbox가 아니다. routing, policy, operations layer다.
 핵심 guardrail:
 
 - allowed workspace roots,
+- trusted workspace roots,
 - protected delete paths,
 - per-user task queue,
+- 고위험 작업의 계획 우선 승인,
 - SQLite request/audit ledger,
+- approved memory만 검색 주입,
 - local `.env` secrets,
 - optional Codex sandbox settings.
 
@@ -308,14 +367,10 @@ FastAPI dashboard를 인증 없이 공인 인터넷에 직접 노출하지 않�
 PYTHONPATH=src .venv/bin/python -m pytest -q
 ```
 
-Dashboard 관련 focused lint:
+전체 lint:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m ruff check \
-  src/nyanya_agent/dashboard_api.py \
-  src/nyanya_agent/dashboard_store.py \
-  tests/test_dashboard_store.py \
-  tests/test_bridge_dashboard_recording.py
+.venv/bin/ruff check src/nyanya_agent tests
 ```
 
 Dashboard JavaScript 문법 확인:
@@ -327,10 +382,16 @@ node --check src/nyanya_agent/dashboard_static/app.js
 Python compile:
 
 ```bash
-.venv/bin/python -m compileall -q src
+PYTHONPATH=src .venv/bin/python -m py_compile \
+  src/nyanya_agent/core.py \
+  src/nyanya_agent/bridge_policy.py \
+  src/nyanya_agent/bridge_runtime.py \
+  src/nyanya_agent/bridge_store.py \
+  src/nyanya_agent/dashboard_store.py \
+  src/nyanya_agent/memory_worker.py \
+  src/nyanya_agent/manager.py \
+  src/nyanya_agent/telegram_bridge.py
 ```
-
-현재 참고 사항: 전체 저장소 Ruff는 bridge compatibility module의 기존 wildcard import로 인해 실패할 수 있다. 이는 별도 cleanup 작업으로 분리한다.
 
 ## 문서
 

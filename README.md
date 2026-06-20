@@ -29,6 +29,7 @@ src/nyanya_agent/bridge_runtime.py    # Codex delegation and runtime helpers
 src/nyanya_agent/bridge_store.py      # conversation store and per-user task queue
 src/nyanya_agent/dashboard_store.py   # SQLite dashboard/event store
 src/nyanya_agent/dashboard_api.py     # FastAPI dashboard server
+src/nyanya_agent/memory_worker.py     # background long-term memory candidate worker
 src/nyanya_agent/discord_bridge.py    # Discord bridge
 src/nyanya_agent/telegram_bridge.py   # Telegram bridge
 ```
@@ -62,22 +63,34 @@ Important environment variables:
 NYANYA_PROVIDER=gemini_cli
 NYANYA_GEMINI_CLI=gemini
 NYANYA_WORKSPACE_ROOTS=/absolute/workspace/path
+NYANYA_TRUSTED_WORKSPACE_ROOTS=/absolute/trusted/path
 NYANYA_SYSTEM_PROMPT_PATH=prompts/system.md
+NYANYA_AGENT_MEMORY_PATH=prompts/agent_memory.md
 NYANYA_DISCORD_BOT_TOKEN=
 NYANYA_DISCORD_PREFIX=!nyanya
 NYANYA_DISCORD_RESPOND_IN_ALLOWED_CHANNELS=false
 NYANYA_DISCORD_ALLOWED_CHANNEL_IDS=
 NYANYA_DISCORD_ALLOWED_USER_IDS=
 NYANYA_DISCORD_FILE_SHARE_CHANNEL_IDS=
+NYANYA_DISCORD_FILE_SHARE_CHANNEL_NAMES=
 NYANYA_CODEX_ENABLED=false
 NYANYA_CODEX_WRITE_ENABLED=false
 NYANYA_DASHBOARD_RECORDING_ENABLED=true
 NYANYA_DASHBOARD_HOST=127.0.0.1
 NYANYA_DASHBOARD_PORT=8765
 NYANYA_DASHBOARD_DB_PATH=data/nyanya_dashboard.db
+NYANYA_MEMORY_RETRIEVAL_ENABLED=true
+NYANYA_MEMORY_WORKER_INTERVAL_SECONDS=1800
+NYANYA_MEMORY_WORKER_LLM_REFINEMENT=false
 ```
 
 Keep workspace roots narrow. NyaNya Agent is a router and policy layer, not a sandbox.
+
+Workspace tiers:
+
+- `NYANYA_WORKSPACE_ROOTS` defines the paths the bridge may access.
+- `NYANYA_TRUSTED_WORKSPACE_ROOTS` defines the safer subset where routine work is expected.
+- Work inside allowed roots but outside trusted roots uses stricter risk handling.
 
 ## Run From Terminal
 
@@ -131,6 +144,13 @@ Useful Discord commands:
 | `!nyanya codex-work <prompt>` | Delegate file/code-changing work to Codex when write delegation is enabled. |
 | `!nyanya cancel` | Cancel the current user's queued/running task. |
 
+Important work policy:
+
+- file creation, editing, deletion, moves, permission changes, system settings, network settings, installs, deploys, and other external side effects are treated as higher-risk work;
+- higher-risk requests return a plan first and require explicit approval before execution;
+- work outside trusted roots but still inside allowed roots uses stricter risk scoring;
+- web or third-party material that appears to contain hidden prompt-like instructions is treated as untrusted and reported instead of followed.
+
 File upload behavior:
 
 1. Resolve the requested file path relative to the user's workspace.
@@ -163,12 +183,13 @@ Default local URL:
 http://127.0.0.1:8765
 ```
 
-The dashboard is split into three screens:
+The dashboard is split into four screens:
 
 | Screen | Purpose | Main contents |
 |---|---|---|
 | Main | Current operational state | Total requests, today's requests, running queue, failures, phase confirmations. |
 | Projects | Project and phase operation | Project creation, goal entry, phase cards, phase checks. |
+| Memory | Long-term memory review | Pending/approved memory candidates, memory graph, technology graph. |
 | Stats | Historical analysis | Usage trend, request ledger, audit log. |
 
 The dashboard uses SQLite by default:
@@ -206,6 +227,39 @@ POST /v1/projects/{project_id}/phases/{phase_key}/check
 
 If a phase has a `next_action`, the check result becomes `needs_confirmation` and a Discord confirmation message candidate is produced. If no next action exists, the check result is `ok`.
 
+## Long-Term Memory
+
+NyaNya has two memory layers:
+
+| Layer | Purpose | Storage |
+|---|---|---|
+| Baseline memory | Compact operating facts loaded into the system prompt. | `prompts/agent_memory.md` |
+| Dynamic memory | Request-derived candidates that can be reviewed and approved. | SQLite `memory_items` |
+
+Dynamic memory flow:
+
+1. Discord, Telegram, CLI, or dashboard requests are recorded in SQLite.
+2. The memory worker scans terminal requests.
+3. Rule-based extraction creates `pending` memory candidates.
+4. Sensitive content is redacted or skipped.
+5. Optional LLM refinement can be enabled for important candidates.
+6. The dashboard can approve or reject candidates.
+7. Only `approved` and non-sensitive memories are retrieved for future prompts.
+
+Run the worker once:
+
+```bash
+./scripts/nyanya_ctl.sh memory-worker-once
+```
+
+Manage the background worker:
+
+```bash
+./scripts/nyanya_ctl.sh memory-worker-start
+./scripts/nyanya_ctl.sh memory-worker-status
+./scripts/nyanya_ctl.sh memory-worker-restart
+```
+
 ## macOS Service Management
 
 NyaNya includes a manager for macOS LaunchAgents.
@@ -215,6 +269,7 @@ Install and start services:
 ```bash
 ./scripts/nyanya_ctl.sh install
 ./scripts/nyanya_ctl.sh dashboard-install
+./scripts/nyanya_ctl.sh memory-worker-install
 ./scripts/nyanya_ctl.sh start-all
 ```
 
@@ -243,6 +298,7 @@ Codex policy:
 
 - The Discord bridge is the runtime entry point for messenger requests.
 - The dashboard is a separate local observability process.
+- The memory worker is a separate low-cost maintenance process.
 - Codex remains a separate recovery and delegation channel.
 - `start-all`, `restart-all`, `health`, and `repair` do not embed or manage Codex as part of the agent process.
 - Use `codex-status`, `codex-start`, `codex-install`, and `codex-uninstall` for Codex app lifecycle checks.
@@ -265,9 +321,12 @@ NyaNya Agent is not a sandbox. It is a routing, policy, and operations layer.
 Core guardrails:
 
 - allowed workspace roots,
+- trusted workspace roots,
 - protected delete paths,
 - per-user task queue,
+- plan-first approval for higher-risk work,
 - SQLite request/audit ledger,
+- approved-only memory retrieval,
 - local `.env` secrets,
 - optional Codex sandbox settings.
 
@@ -311,11 +370,7 @@ PYTHONPATH=src .venv/bin/python -m pytest -q
 Run focused dashboard lint:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m ruff check \
-  src/nyanya_agent/dashboard_api.py \
-  src/nyanya_agent/dashboard_store.py \
-  tests/test_dashboard_store.py \
-  tests/test_bridge_dashboard_recording.py
+.venv/bin/ruff check src/nyanya_agent tests
 ```
 
 Check dashboard JavaScript syntax:
@@ -327,10 +382,16 @@ node --check src/nyanya_agent/dashboard_static/app.js
 Compile Python sources:
 
 ```bash
-.venv/bin/python -m compileall -q src
+PYTHONPATH=src .venv/bin/python -m py_compile \
+  src/nyanya_agent/core.py \
+  src/nyanya_agent/bridge_policy.py \
+  src/nyanya_agent/bridge_runtime.py \
+  src/nyanya_agent/bridge_store.py \
+  src/nyanya_agent/dashboard_store.py \
+  src/nyanya_agent/memory_worker.py \
+  src/nyanya_agent/manager.py \
+  src/nyanya_agent/telegram_bridge.py
 ```
-
-Current note: full-repository Ruff may report pre-existing wildcard import findings in the bridge compatibility modules. Treat that as a separate cleanup task.
 
 ## Documentation
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: F403,F405
 """Compatibility exports for NyaNya messenger bridge helpers."""
 
 from __future__ import annotations

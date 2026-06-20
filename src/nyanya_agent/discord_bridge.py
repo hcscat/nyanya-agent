@@ -95,6 +95,7 @@ def main() -> int:
     allowed_channel_ids = parse_id_set(os.getenv("NYANYA_DISCORD_ALLOWED_CHANNEL_IDS"))
     allowed_user_ids = parse_id_set(os.getenv("NYANYA_DISCORD_ALLOWED_USER_IDS"))
     file_share_channel_ids = parse_id_set(os.getenv("NYANYA_DISCORD_FILE_SHARE_CHANNEL_IDS"))
+    file_share_channel_names = parse_id_set(os.getenv("NYANYA_DISCORD_FILE_SHARE_CHANNEL_NAMES"))
     store = NyaNyaConversationStore(config)
 
     intents = discord.Intents.default()
@@ -292,7 +293,8 @@ def main() -> int:
             await message.channel.send(chunk)
 
     def is_file_share_channel(message: discord.Message) -> bool:
-        return str(message.channel.id) in file_share_channel_ids or getattr(message.channel, "name", "") == "자료공유"
+        channel_name = str(getattr(message.channel, "name", ""))
+        return str(message.channel.id) in file_share_channel_ids or channel_name in file_share_channel_names
 
     async def handle_command(message: discord.Message, text: str, attachment_note: str = "", request_id: str | None = None) -> str:
         owner_key = f"discord-user:{message.author.id}"

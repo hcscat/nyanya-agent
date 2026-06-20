@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: F403,F405
 """Workspace, command, and routing policy helpers for NyaNya bridges."""
 
 from __future__ import annotations
@@ -6,6 +7,7 @@ from __future__ import annotations
 import os
 import pathlib
 import re
+from typing import Any
 
 from nyanya_agent import core as nyanya
 from nyanya_agent.bridge_constants import *
@@ -40,6 +42,25 @@ def workspace_roots() -> list[pathlib.Path]:
 
 def workspace_root() -> pathlib.Path:
     return workspace_roots()[0]
+
+
+def trusted_workspace_roots() -> list[pathlib.Path]:
+    raw_roots = os.getenv("NYANYA_TRUSTED_WORKSPACE_ROOTS", "").strip()
+    if raw_roots:
+        roots = [
+            _resolve_configured_path(item.strip(), default_base=pathlib.Path.home())
+            for item in raw_roots.split(",")
+            if item.strip()
+        ]
+    else:
+        roots = [nyanya.PROJECT_ROOT, pathlib.Path.home() / "HCS", pathlib.Path.home() / "NEB"]
+
+    unique: list[pathlib.Path] = []
+    for root in roots:
+        if root == pathlib.Path("/") or root in unique:
+            continue
+        unique.append(root)
+    return unique
 
 
 def workspace_config_path() -> pathlib.Path:
@@ -79,6 +100,23 @@ def is_allowed_workspace_path(path: pathlib.Path) -> bool:
     return False
 
 
+def is_trusted_workspace_path(path: pathlib.Path) -> bool:
+    resolved = path.expanduser().resolve(strict=False)
+    for root in trusted_workspace_roots():
+        try:
+            resolved.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def workspace_risk_tier(path: pathlib.Path) -> str:
+    if not is_allowed_workspace_path(path):
+        return "blocked"
+    return "trusted" if is_trusted_workspace_path(path) else "extended"
+
+
 def default_codex_workdir() -> pathlib.Path:
     configured_workdir = os.getenv("NYANYA_CODEX_WORKDIR", "").strip()
     workdir = pathlib.Path(configured_workdir).expanduser() if configured_workdir else workspace_root()
@@ -110,6 +148,237 @@ def deletion_like_action_requested(prompt: str) -> bool:
     for phrase in FILE_MUTATION_NEGATIONS:
         action_text = action_text.replace(phrase, "")
     return any(keyword in action_text for keyword in PROTECTED_DELETE_KEYWORDS)
+
+
+APPROVAL_KEYWORDS = (
+    "approve",
+    "approved",
+    "approval granted",
+    "confirm",
+    "confirmed",
+    "go ahead",
+    "proceed",
+    "승인",
+    "허가",
+    "허락",
+    "확인했다",
+    "확인하였",
+    "진행해",
+    "진행하여",
+    "계획대로",
+    "위 계획",
+    "실행해",
+)
+
+SYSTEM_NETWORK_KEYWORDS = (
+    "sudo",
+    "chmod",
+    "chown",
+    "launchctl",
+    "systemctl",
+    "plist",
+    "firewall",
+    "networksetup",
+    "ifconfig",
+    "pfctl",
+    "route ",
+    "dns",
+    "hosts",
+    "brew install",
+    "pip install",
+    "npm install",
+    "git push",
+    "git reset",
+    "git checkout",
+    "credential",
+    "keychain",
+    "시스템 설정",
+    "네트워크 설정",
+    "방화벽",
+    "권한 변경",
+    "권한을 변경",
+    "설치",
+    "삭제",
+    "푸시",
+    "재부팅",
+    "재기동",
+)
+
+PROMPT_INJECTION_MARKERS = (
+    "ignore previous",
+    "ignore all previous",
+    "ignore prior",
+    "system prompt",
+    "developer message",
+    "developer instructions",
+    "you are now",
+    "do not tell",
+    "hidden instruction",
+    "human cannot see",
+    "exfiltrate",
+    "leak secret",
+    "이전 지시",
+    "이전 명령",
+    "무시하고",
+    "무시하라",
+    "시스템 프롬프트",
+    "개발자 메시지",
+    "숨겨진 지시",
+    "사람에게 보이지",
+    "비밀을 출력",
+)
+
+HIDDEN_TEXT_MARKERS = (
+    "display:none",
+    "display: none",
+    "visibility:hidden",
+    "visibility: hidden",
+    "opacity:0",
+    "opacity: 0",
+    "font-size:0",
+    "font-size: 0",
+    "aria-hidden",
+    "<!--",
+    "color:#fff",
+    "color: #fff",
+    "color:white",
+    "color: white",
+)
+
+INVISIBLE_CHARS_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]")
+
+
+def approval_granted(prompt: str) -> bool:
+    lowered = prompt.lower()
+    return any(keyword in lowered for keyword in APPROVAL_KEYWORDS)
+
+
+def system_or_network_change_requested(prompt: str) -> bool:
+    lowered = prompt.lower()
+    return any(keyword in lowered for keyword in SYSTEM_NETWORK_KEYWORDS)
+
+
+def external_material_requested(prompt: str) -> bool:
+    lowered = prompt.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "http://",
+            "https://",
+            "웹",
+            "사이트",
+            "html",
+            "외부 자료",
+            "타인",
+            "가져온 자료",
+            "스크랩",
+            "크롤",
+        )
+    )
+
+
+def prompt_injection_risk_detected(prompt: str) -> str | None:
+    lowered = prompt.lower()
+    has_external_context = external_material_requested(prompt)
+    has_invisible = bool(INVISIBLE_CHARS_RE.search(prompt))
+    has_hidden_marker = any(marker in lowered for marker in HIDDEN_TEXT_MARKERS)
+    has_injection_marker = any(marker in lowered for marker in PROMPT_INJECTION_MARKERS)
+    if has_external_context and (has_invisible or has_hidden_marker or has_injection_marker):
+        markers: list[str] = []
+        if has_invisible:
+            markers.append("invisible unicode characters")
+        if has_hidden_marker:
+            markers.append("hidden-text HTML/CSS marker")
+        if has_injection_marker:
+            markers.append("prompt-injection phrase")
+        return ", ".join(markers)
+    return None
+
+
+def classify_request_risk(prompt: str, *, workdir: pathlib.Path) -> dict[str, Any]:
+    tier = workspace_risk_tier(workdir)
+    mutation = file_mutation_requested_for_policy(prompt)
+    deletion = deletion_like_action_requested(prompt)
+    system_network = system_or_network_change_requested(prompt)
+    outside_trusted = tier == "extended"
+    blocked = tier == "blocked"
+    injection = prompt_injection_risk_detected(prompt)
+
+    severity = "low"
+    reasons: list[str] = []
+    requires_approval = False
+    stop = False
+
+    if blocked:
+        severity = "blocked"
+        stop = True
+        reasons.append("작업 경로가 허용 workspace roots 밖입니다.")
+    if injection:
+        severity = "blocked"
+        stop = True
+        reasons.append(f"외부 자료 안에서 의심스러운 프롬프트형 텍스트를 감지했습니다: {injection}.")
+    if deletion:
+        severity = "high"
+        requires_approval = True
+        reasons.append("삭제/이동/이름 변경/초기화로 해석될 수 있는 작업입니다.")
+    elif mutation:
+        severity = "medium" if severity == "low" else severity
+        requires_approval = True
+        reasons.append("파일 추가/수정/쓰기 작업입니다.")
+    if system_network:
+        severity = "high"
+        requires_approval = True
+        reasons.append("시스템/네트워크/권한/설치/배포 설정에 영향을 줄 수 있습니다.")
+    if outside_trusted:
+        if severity == "low":
+            severity = "medium"
+        if mutation or deletion or system_network:
+            severity = "high"
+            requires_approval = True
+        reasons.append("기본 신뢰 workspace 밖의 확장 허용 경로에서 동작합니다.")
+
+    return {
+        "severity": severity,
+        "workspace_tier": tier,
+        "requires_approval": requires_approval,
+        "approval_granted": approval_granted(prompt),
+        "stop": stop,
+        "reasons": reasons,
+    }
+
+
+def file_mutation_requested_for_policy(prompt: str) -> bool:
+    lowered = prompt.lower()
+    action_text = lowered
+    for phrase in FILE_MUTATION_NEGATIONS:
+        action_text = action_text.replace(phrase, "")
+    return any(keyword in action_text for keyword in FILE_MUTATION_KEYWORDS)
+
+
+def risk_plan_response(prompt: str, risk: dict[str, Any], *, workdir: pathlib.Path) -> str:
+    reasons = risk.get("reasons") or ["중요 작업으로 분류되었습니다."]
+    reason_text = "\n".join(f"- {reason}" for reason in reasons)
+    if risk.get("stop"):
+        return (
+            "작업을 중지했습니다.\n"
+            f"위험도={risk.get('severity')} workspace_tier={risk.get('workspace_tier')} workdir={workdir}\n"
+            f"{reason_text}\n\n"
+            "외부 자료의 숨은 지시나 허용 범위 밖 작업은 사용자 명령보다 우선하지 않습니다. "
+            "자료를 정리해 다시 제공하거나 허용 workspace 정책을 먼저 변경해야 합니다."
+        )
+    return (
+        "이 요청은 바로 실행하지 않고 계획만 제시합니다.\n"
+        f"위험도={risk.get('severity')} workspace_tier={risk.get('workspace_tier')} workdir={workdir}\n"
+        f"{reason_text}\n\n"
+        "실행 전 계획:\n"
+        "1. 대상 파일/경로와 변경 범위를 먼저 확인합니다.\n"
+        "2. 필요한 변경사항을 최소 단위로 나눕니다.\n"
+        "3. 보호 경로, 비밀값, 시스템/네트워크 영향 여부를 재확인합니다.\n"
+        "4. 변경 전후 검증 방법을 정합니다.\n"
+        "5. 사용자가 명시적으로 승인한 뒤에만 실제 작업을 진행합니다.\n\n"
+        "진행하려면 `승인: 위 계획대로 진행`처럼 명시적으로 허락해 주세요.\n\n"
+        f"원 요청:\n{prompt}"
+    )
 
 
 def _path_touches_protected_delete_path(path: pathlib.Path) -> pathlib.Path | None:

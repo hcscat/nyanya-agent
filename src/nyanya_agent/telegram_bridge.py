@@ -107,7 +107,10 @@ class TelegramBridge:
 
     def handle_command(self, owner_key: str, conversation_key: str, chat_id: str, user_id: str, text: str) -> str:
         command = command_name(text)
-        responder = lambda response: self.send(chat_id, response)
+
+        def responder(response: str) -> None:
+            self.send(chat_id, response)
+
         if command in CANCEL_ALL_COMMANDS:
             if not self.store.is_owner(user_id):
                 return "전체 취소는 관리자만 사용할 수 있습니다."

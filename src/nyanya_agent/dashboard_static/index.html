@@ -19,6 +19,7 @@
         <nav class="nav">
           <button class="nav-item active" type="button" data-view="main">메인</button>
           <button class="nav-item" type="button" data-view="projects">프로젝트</button>
+          <button class="nav-item" type="button" data-view="memory">메모리</button>
           <button class="nav-item" type="button" data-view="stats">통계</button>
         </nav>
       </aside>
@@ -77,6 +78,53 @@
           </section>
         </section>
 
+        <section id="memoryView" class="view" data-view-panel="memory" hidden>
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Long-term Memory</p>
+                <h2>기억 후보와 마인드맵</h2>
+              </div>
+              <div class="topbar-actions">
+                <button id="extractMemoryBtn" class="button" type="button">요청 이력에서 후보 추출</button>
+              </div>
+            </div>
+            <div id="memorySummary" class="memory-summary"></div>
+          </section>
+
+          <div class="memory-grid">
+            <section class="panel">
+              <div class="panel-heading compact">
+                <div>
+                  <p class="eyebrow">Mind Map</p>
+                  <h2>기억 토큰 그래프</h2>
+                </div>
+              </div>
+              <div id="memoryGraph" class="memory-graph"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading compact">
+                <div>
+                  <p class="eyebrow">Tech Stack</p>
+                  <h2>관심사 기술스택 그래프</h2>
+                </div>
+              </div>
+              <div id="techStackGraph" class="memory-graph"></div>
+            </section>
+
+            <aside class="panel">
+              <div class="panel-heading compact">
+                <div>
+                  <p class="eyebrow">Candidates</p>
+                  <h2>기억 목록</h2>
+                </div>
+              </div>
+              <div id="memoryList" class="memory-list"></div>
+            </aside>
+          </div>
+        </section>
+
         <section id="statsView" class="view" data-view-panel="stats" hidden>
           <section id="usage" class="panel">
             <div class="panel-heading">
@@ -116,6 +164,7 @@
       </main>
     </div>
 
+    <script src="https://unpkg.com/cytoscape@3/dist/cytoscape.min.js"></script>
     <script src="/static/app.js"></script>
   </body>
 </html>

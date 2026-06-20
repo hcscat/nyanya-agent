@@ -6,6 +6,7 @@
   "temperature": 0.3,
   "timeout_seconds": 180,
   "system_prompt_path": "prompts/system.md",
+  "agent_memory_path": "prompts/agent_memory.md",
   "sessions_dir": "sessions",
   "save_transcripts": true
 }
