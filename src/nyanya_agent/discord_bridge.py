@@ -23,6 +23,7 @@ from nyanya_agent.bridge_common import (
     HELP_COMMANDS,
     NyaNyaConversationStore,
     SET_HOME_COMMANDS,
+    TASK_STATUS_COMMANDS,
     UNSET_HOME_COMMANDS,
     command_name,
     default_codex_workdir,
@@ -133,6 +134,7 @@ def main() -> int:
             "/resource",
             "리소스",
             "/리소스",
+            *TASK_STATUS_COMMANDS,
             "취소",
             "/cancel",
             "cancel",
@@ -398,10 +400,18 @@ def main() -> int:
                 (
                     "NyaNya Agent bridge is running.\n"
                     f"provider={store.config.get('provider')}\n"
-                    f"model={store.config.get('model')}"
+                    f"model={store.config.get('model')}\n"
+                    f"작업 목록: {prefix} tasks"
                 ),
                 mode="control",
             )
+        if command in TASK_STATUS_COMMANDS:
+            parts = text.split(maxsplit=1)
+            scope = parts[1].strip().lower() if len(parts) > 1 else ""
+            show_all = scope in {"all", "전체", "global"} and store.is_owner(str(message.author.id))
+            if scope in {"all", "전체", "global"} and not show_all:
+                return finish("전체 작업 목록은 관리자만 조회할 수 있습니다.", status="failed", error="owner required", mode="control")
+            return finish(store.task_status_text(None if show_all else owner_key), mode="control")
         if command in {"config", "/config"}:
             return finish(store.status_text(), mode="control")
         if command in {"gemini", "/gemini"}:

@@ -21,6 +21,7 @@ from nyanya_agent.bridge_common import (
     HELP_COMMANDS,
     NyaNyaConversationStore,
     SET_HOME_COMMANDS,
+    TASK_STATUS_COMMANDS,
     UNSET_HOME_COMMANDS,
     command_name,
     env_first,
@@ -169,8 +170,16 @@ class TelegramBridge:
             return (
                 "NyaNya bridge is running.\n"
                 f"provider={self.store.config.get('provider')}\n"
-                f"model={self.store.config.get('model')}"
+                f"model={self.store.config.get('model')}\n"
+                "작업 목록: /tasks"
             )
+        if command in TASK_STATUS_COMMANDS:
+            parts = text.split(maxsplit=1)
+            scope = parts[1].strip().lower() if len(parts) > 1 else ""
+            show_all = scope in {"all", "전체", "global"} and self.store.is_owner(user_id)
+            if scope in {"all", "전체", "global"} and not show_all:
+                return "전체 작업 목록은 관리자만 조회할 수 있습니다."
+            return self.store.task_status_text(None if show_all else owner_key)
         if command == "/config":
             return self.store.status_text()
         if command == "/gemini":

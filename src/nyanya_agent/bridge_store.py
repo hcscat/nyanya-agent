@@ -26,6 +26,8 @@ class NyaNyaTask:
     responder: Callable[[str], None]
     request_id: str | None = None
     cancel_event: threading.Event = field(default_factory=threading.Event)
+    created_at: float = field(default_factory=time.monotonic)
+    started_at: float | None = None
 
 
 class NyaNyaConversationStore:
@@ -153,6 +155,7 @@ class NyaNyaConversationStore:
         status = visible_config(self.config)
         status["bridge_runtime"] = {
             "task_queue_max_per_user": self.task_queue_max,
+            "task_progress_interval_seconds": progress_interval_seconds(),
             "codex_enabled": parse_bool(os.getenv("NYANYA_CODEX_ENABLED"), False),
             "codex_auto_enabled": parse_bool(os.getenv("NYANYA_CODEX_AUTO_ENABLED"), True),
             "codex_model": os.getenv("NYANYA_CODEX_MODEL", "").strip() or "<codex default>",
@@ -166,6 +169,53 @@ class NyaNyaConversationStore:
             "workspace_assignments": self.workspace_assignment_count(),
         }
         return json.dumps(status, ensure_ascii=False, indent=2)
+
+    def task_status_text(self, owner_key: str | None = None) -> str:
+        with self._task_lock:
+            owners = [(owner_key, self._state_for_owner(owner_key))] if owner_key else sorted(self._tasks_by_owner.items())
+            running_lines: list[str] = []
+            queued_lines: list[str] = []
+            for _state_owner, state in owners:
+                current = state["current"]
+                if current is not None:
+                    running_lines.append(self._format_task_line(current, "진행 중"))
+                for index, task in enumerate(state["queue"], start=1):
+                    queued_lines.append(self._format_task_line(task, "대기", position=index))
+
+        scope = "내 작업" if owner_key else "전체 작업"
+        if not running_lines and not queued_lines:
+            return (
+                f"{scope} 목록\n"
+                "- 펜딩: 0개\n"
+                "- 진행 중: 0개\n"
+                "- 대기열: 0개\n"
+                "현재 진행 중이거나 대기 중인 작업이 없습니다."
+            )
+
+        lines = [
+            f"{scope} 목록",
+            "- 펜딩: 0개",
+            f"- 진행 중: {len(running_lines)}개",
+            f"- 대기열: {len(queued_lines)}개",
+        ]
+        if running_lines:
+            lines.append("\n진행 중")
+            lines.extend(running_lines)
+        if queued_lines:
+            lines.append("\n대기열")
+            lines.extend(queued_lines)
+        lines.append("\n취소: `취소` 또는 `cancel`")
+        return "\n".join(lines)
+
+    def _format_task_line(self, task: NyaNyaTask, status: str, *, position: int | None = None) -> str:
+        base_time = task.started_at if task.started_at is not None else task.created_at
+        elapsed = max(0, int(time.monotonic() - base_time))
+        request = f", request_id={task.request_id}" if task.request_id else ""
+        prefix = f"{position}. " if position is not None else "- "
+        return (
+            f"{prefix}{status}: owner={task.owner_key}, mode={task.mode}, elapsed={elapsed}s{request}\n"
+            f"   prompt={preview_text(task.prompt)}"
+        )
 
     def codex(self, prompt: str, *, write: bool = False) -> str:
         return run_codex_task(prompt, write=write)
@@ -318,9 +368,9 @@ class NyaNyaConversationStore:
                 queued = len(queue)
         if start_now:
             self._start_task(task)
-            return "요청을 접수했습니다. 처리 중입니다. 취소하려면 `취소`라고 보내세요."
+            return self._task_ack_text(task, queued=0, started=True)
         self._dashboard_mark(task, "queued", event_type="queued", message=f"Queued at position {queued}")
-        return f"요청을 대기열에 넣었습니다. 대기 {queued}/{self.task_queue_max}. 취소하려면 `취소`라고 보내세요."
+        return self._task_ack_text(task, queued=queued, started=False)
 
     def cancel_owner(self, owner_key: str) -> str:
         with self._task_lock:
@@ -362,10 +412,17 @@ class NyaNyaConversationStore:
         return user_id in owner_ids
 
     def _start_task(self, task: NyaNyaTask) -> None:
+        delay = task_start_delay_seconds()
+        if delay > 0:
+            timer = threading.Timer(delay, self._run_task, args=(task,))
+            timer.daemon = True
+            timer.start()
+            return
         thread = threading.Thread(target=self._run_task, args=(task,), daemon=True)
         thread.start()
 
     def _run_task(self, task: NyaNyaTask) -> None:
+        task.started_at = time.monotonic()
         self._dashboard_mark(
             task,
             "running",
@@ -375,21 +432,36 @@ class NyaNyaConversationStore:
             provider=str(self.config.get("provider") or ""),
             model=str(self.config.get("model") or ""),
         )
+        self._notify_progress(
+            task,
+            (
+                "작업을 시작했습니다.\n"
+                f"- mode={task.mode}\n"
+                f"- request_id={task.request_id or '-'}\n"
+                f"- 상태 확인: `tasks` 또는 `작업목록`"
+            ),
+            event_type="task_progress_started",
+        )
+        heartbeat_stop = self._start_progress_heartbeat(task)
         failed = False
         try:
             if task.cancel_event.is_set():
                 answer = "요청이 취소되었습니다."
             elif task.mode == "auto":
+                self._notify_progress(task, "요청을 분석하고 자동 라우팅 여부를 판단합니다.", event_type="task_progress_route")
                 answer = self._answer_sync(task, auto_route=True)
             elif task.mode == "gemini":
+                self._notify_progress(task, "설정된 Google/Gemini 계열 backend에 요청을 전달합니다.", event_type="task_progress_backend")
                 answer = self._answer_sync(task, auto_route=False)
             elif task.mode == "codex":
+                self._notify_progress(task, "Codex CLI 읽기 전용 작업으로 위임합니다.", event_type="task_progress_codex")
                 answer = run_codex_task(
                     task.prompt,
                     cancel_event=task.cancel_event,
                     workdir=self.workspace_for_owner(task.owner_key),
                 )
             elif task.mode == "codex_write":
+                self._notify_progress(task, "Codex CLI 쓰기 작업으로 위임합니다. 안전 정책과 승인 조건을 함께 적용합니다.", event_type="task_progress_codex_write")
                 answer = run_codex_task(
                     task.prompt,
                     write=True,
@@ -402,6 +474,8 @@ class NyaNyaConversationStore:
             answer = task_failure_text(exc)
             failed = True
         try:
+            if heartbeat_stop is not None:
+                heartbeat_stop.set()
             task.responder(answer)
             if task.cancel_event.is_set() or answer.strip() == "요청이 취소되었습니다.":
                 self._dashboard_mark(task, "cancelled", event_type="task_cancelled", message=answer, result_summary=answer)
@@ -424,6 +498,61 @@ class NyaNyaConversationStore:
                 state["current"] = next_task
         if next_task is not None:
             self._start_task(next_task)
+
+    def _task_ack_text(self, task: NyaNyaTask, *, queued: int, started: bool) -> str:
+        state_line = "즉시 실행을 시작합니다." if started else f"대기열에 등록했습니다. 현재 위치 {queued}/{self.task_queue_max}."
+        route_line = {
+            "auto": "요청 분석 후 Antigravity/Gemini backend 또는 Codex 위임 여부를 결정합니다.",
+            "gemini": "설정된 Google/Gemini 계열 backend로 직접 처리합니다.",
+            "codex": "Codex CLI 읽기 전용 작업으로 위임합니다.",
+            "codex_write": "Codex CLI 쓰기 작업으로 위임하며 안전 정책과 승인 조건을 적용합니다.",
+        }.get(task.mode, f"{task.mode} 모드로 처리합니다.")
+        return (
+            "요청을 접수했습니다.\n"
+            "처리 계획:\n"
+            "1. 요청 내용, 첨부파일, 사용자 홈워크스페이스를 확인합니다.\n"
+            f"2. {route_line}\n"
+            "3. 작업 중에는 시작/라우팅/장시간 진행 상태를 중간 메시지로 알립니다.\n"
+            "4. 완료되면 최종 결과를 별도 메시지로 전송합니다.\n"
+            f"현재 상태: {state_line}\n"
+            "상태 확인: `tasks`, `queue`, `작업목록`\n"
+            "취소: `취소` 또는 `cancel`"
+        )
+
+    def _notify_progress(self, task: NyaNyaTask, message: str, *, event_type: str = "task_progress") -> None:
+        self._dashboard_event(task, event_type, message)
+        try:
+            task.responder(f"[진행상태]\n{message}")
+        except Exception as exc:  # noqa: BLE001 - progress must not break final handling.
+            self._dashboard_event(task, "task_progress_send_failed", str(exc))
+
+    def _start_progress_heartbeat(self, task: NyaNyaTask) -> threading.Event | None:
+        interval = progress_interval_seconds()
+        if interval <= 0:
+            return None
+        stop = threading.Event()
+
+        def heartbeat() -> None:
+            while not stop.wait(interval):
+                if task.cancel_event.is_set():
+                    return
+                elapsed = 0
+                if task.started_at is not None:
+                    elapsed = max(0, int(time.monotonic() - task.started_at))
+                self._notify_progress(
+                    task,
+                    (
+                        "작업이 계속 진행 중입니다.\n"
+                        f"- 경과: {elapsed}초\n"
+                        "- 아직 backend/Codex 응답을 기다리는 중입니다.\n"
+                        "- 상태 확인: `tasks` 또는 `작업목록`"
+                    ),
+                    event_type="task_progress_heartbeat",
+                )
+
+        thread = threading.Thread(target=heartbeat, daemon=True)
+        thread.start()
+        return stop
 
     def _trim(self, messages: list[dict[str, str]]) -> None:
         if self.max_messages <= 0:
@@ -449,3 +578,24 @@ def split_message(text: str, limit: int) -> list[str]:
     if current:
         chunks.append(current)
     return chunks
+
+
+def preview_text(text: str, limit: int = 96) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 1].rstrip() + "…"
+
+
+def progress_interval_seconds() -> int:
+    try:
+        return max(0, int(os.getenv("NYANYA_TASK_PROGRESS_INTERVAL_SECONDS", "60")))
+    except ValueError:
+        return 60
+
+
+def task_start_delay_seconds() -> float:
+    try:
+        return max(0.0, float(os.getenv("NYANYA_TASK_START_DELAY_SECONDS", "0.25")))
+    except ValueError:
+        return 0.25
