@@ -138,11 +138,20 @@ Discord bridge 직접 실행:
 | `!nyanya reset` | 현재 사용자/채널 대화 context 초기화 |
 | `!nyanya save` | session 저장이 켜져 있을 때 현재 대화 저장 |
 | `!nyanya resources` | 로컬 시스템 리소스 정보 확인 |
+| `!nyanya tasks` | 현재 사용자의 펜딩/진행/대기 작업 목록 확인 |
+| `!nyanya tasks all` | 전체 사용자의 작업 목록 확인, 관리자 전용 |
 | `!nyanya upload <file_path>` | 로컬 workspace 파일을 현재 Discord 채널에 업로드 |
 | `!nyanya gemini <prompt>` | 설정된 Google/Gemini 계열 backend에 직접 질의 |
 | `!nyanya codex <prompt>` | 검토 또는 조사 작업을 Codex에 위임 |
 | `!nyanya codex-work <prompt>` | 쓰기 위임이 켜져 있을 때 코드/파일 변경 작업을 Codex에 위임 |
 | `!nyanya cancel` | 현재 사용자의 대기/실행 작업 취소 |
+
+장시간 작업 가시성:
+
+- 첫 응답은 작업 계획과 현재 queue 상태를 먼저 반환한다.
+- worker 시작, routing, backend/Codex 위임 단계는 진행 메시지로 별도 전송한다.
+- `NYANYA_TASK_PROGRESS_INTERVAL_SECONDS` 값으로 backend 또는 Codex 응답 대기 중 heartbeat 주기를 조정한다.
+- `NYANYA_TASK_START_DELAY_SECONDS` 값으로 worker 실행을 아주 짧게 지연해 계획 응답이 채팅에 먼저 표시되도록 한다.
 
 중요 작업 정책:
 

@@ -24,6 +24,22 @@ SET_HOME_COMMANDS = {"set_home", "/set_home", "홈설정", "/홈설정"}
 GET_HOME_COMMANDS = {"home", "/home", "get_home", "/get_home", "홈", "/홈"}
 UNSET_HOME_COMMANDS = {"unset_home", "/unset_home", "홈해제", "/홈해제"}
 HELP_COMMANDS = {"help", "/help", "commands", "/commands", "명령어", "/명령어", "도움말", "/도움말"}
+TASK_STATUS_COMMANDS = {
+    "tasks",
+    "/tasks",
+    "task",
+    "/task",
+    "queue",
+    "/queue",
+    "작업",
+    "/작업",
+    "작업목록",
+    "/작업목록",
+    "대기열",
+    "/대기열",
+    "진행상태",
+    "/진행상태",
+}
 RESOURCE_KEYWORDS = (
     "resource",
     "resources",

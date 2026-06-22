@@ -138,11 +138,20 @@ Useful Discord commands:
 | `!nyanya reset` | Reset the conversation context for the current user/channel. |
 | `!nyanya save` | Save the current conversation session when session saving is enabled. |
 | `!nyanya resources` | Show local system resource information. |
+| `!nyanya tasks` | Show the current user's pending, running, and queued tasks. |
+| `!nyanya tasks all` | Show all users' tasks. Admin only. |
 | `!nyanya upload <file_path>` | Upload a local workspace file to the current Discord channel. |
 | `!nyanya gemini <prompt>` | Send a prompt directly through the configured Google/Gemini-style backend. |
 | `!nyanya codex <prompt>` | Delegate review or investigation work to Codex. |
 | `!nyanya codex-work <prompt>` | Delegate file/code-changing work to Codex when write delegation is enabled. |
 | `!nyanya cancel` | Cancel the current user's queued/running task. |
+
+Long-running task visibility:
+
+- the first reply is an operational plan and current queue state;
+- worker start, routing, and backend delegation are sent as progress messages;
+- `NYANYA_TASK_PROGRESS_INTERVAL_SECONDS` controls heartbeat updates while a backend or Codex task is still running;
+- `NYANYA_TASK_START_DELAY_SECONDS` leaves a short delay before worker execution so the plan reply appears first in chat.
 
 Important work policy:
 
