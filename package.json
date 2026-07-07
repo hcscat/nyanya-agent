@@ -1,5 +1,5 @@
 {
-  "name": "@hcscat-dev/nyanya-agent",
+  "name": "@hcscat/nyanya-agent",
   "version": "0.1.0",
   "description": "TypeScript CLI and Python runtime package for NyaNya Agent.",
   "license": "MIT",
