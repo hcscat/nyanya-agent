@@ -318,7 +318,7 @@ Codex policy:
 The project is Python-based, but it includes an npm wrapper for easier sharing:
 
 ```bash
-npm install -g @hcscat-dev/nyanya-agent
+npm install -g @hcscat/nyanya-agent
 nyanya setup
 nyanya doctor
 ```
