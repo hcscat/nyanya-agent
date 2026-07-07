@@ -1,0 +1,18 @@
+# Local/private/generated paths that must not be released.
+.env
+.venv/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+data/
+downloads/
+logs/
+run/
+config/user_workspaces.json
+docs/private/
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.pyc
+.DS_Store

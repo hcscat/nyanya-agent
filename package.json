@@ -1,7 +1,7 @@
 {
-  "name": "@hcscat/nyanya-agent",
+  "name": "@hcscat-dev/nyanya-agent",
   "version": "0.1.0",
-  "description": "NPM wrapper for the Python-based NyaNya Agent.",
+  "description": "TypeScript CLI and Python runtime package for NyaNya Agent.",
   "license": "MIT",
   "private": false,
   "type": "commonjs",
@@ -10,14 +10,17 @@
     "url": "git+https://github.com/hcscat/nyanya-agent.git"
   },
   "bin": {
-    "nyanya-agent": "bin/nyanya-agent.js",
-    "nyanyactl": "bin/nyanyactl.js",
-    "nyanya-discord": "bin/nyanya-discord.js",
-    "nyanya-telegram": "bin/nyanya-telegram.js",
-    "nyanya-memory-worker": "bin/nyanya-memory-worker.js"
+    "nyanya": "dist/bin/nyanya.js",
+    "nyanya-agent": "dist/bin/nyanya-agent.js",
+    "nyanyactl": "dist/bin/nyanyactl.js",
+    "nyanya-discord": "dist/bin/nyanya-discord.js",
+    "nyanya-telegram": "dist/bin/nyanya-telegram.js",
+    "nyanya-dashboard": "dist/bin/nyanya-dashboard.js",
+    "nyanya-memory-worker": "dist/bin/nyanya-memory-worker.js"
   },
   "files": [
-    "bin/*.js",
+    "dist/**/*.js",
+    "cli/src/**/*.ts",
     "src/nyanya_agent/*.py",
     "config/nyanya.json",
     "config/user_workspaces.example.json",
@@ -26,7 +29,17 @@
     "scripts/*.sh",
     "prompts/system.md",
     "prompts/agent_memory.md",
+    "tsconfig.json",
     "README.md",
+    "README.KO.md",
+    "LICENSE",
+    "packaging/README.md",
+    "packaging/install/*.sh",
+    "packaging/install/*.ps1",
+    "packaging/homebrew/Formula/*.template",
+    "packaging/launchd/*.template",
+    "packaging/release/*.sh",
+    "packaging/release/*.txt",
     ".env.example",
     "pyproject.toml"
   ],
@@ -34,6 +47,13 @@
     "node": ">=18"
   },
   "scripts": {
-    "check": "python3 -m py_compile src/nyanya_agent/core.py src/nyanya_agent/bridge_common.py src/nyanya_agent/discord_bridge.py src/nyanya_agent/telegram_bridge.py"
+    "build": "tsc && node scripts/mark_dist_executable.js",
+    "typecheck": "tsc --noEmit",
+    "prepack": "npm run build",
+    "check": "npm run typecheck && python3 -m py_compile src/nyanya_agent/core.py src/nyanya_agent/bridge_common.py src/nyanya_agent/discord_bridge.py src/nyanya_agent/telegram_bridge.py"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "typescript": "^5.9.3"
   }
 }

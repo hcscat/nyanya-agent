@@ -1,0 +1,37 @@
+class NyanyaAgent < Formula
+  include Language::Python::Virtualenv
+
+  desc "Lightweight local agent wrapper with messenger bridges and dashboard"
+  homepage "https://github.com/hcscat/nyanya-agent"
+  url "https://github.com/hcscat/nyanya-agent/archive/refs/tags/v{{VERSION}}.tar.gz"
+  sha256 "{{SHA256}}"
+  license "MIT"
+
+  depends_on "python@3.12"
+
+  # Regenerate Python resources in the Homebrew tap with:
+  #   brew update-python-resources nyanya-agent
+
+  def install
+    virtualenv_install_with_resources
+
+    (bin/"nyanya").write_env_script libexec/"bin/nyanya", NYANYA_PROJECT_ROOT: libexec
+    (bin/"nyanya-agent").write_env_script libexec/"bin/nyanya", NYANYA_PROJECT_ROOT: libexec
+    (bin/"nyanyactl").write_env_script libexec/"bin/nyanyactl", NYANYA_PROJECT_ROOT: libexec
+  end
+
+  def caveats
+    <<~EOS
+      Start with:
+        nyanya --check
+        nyanya
+
+      Runtime configuration is created from .env.example by the setup flow.
+      Do not store bot tokens in this formula or tap repository.
+    EOS
+  end
+
+  test do
+    assert_match "NyaNya Agent", shell_output("#{bin}/nyanya --help")
+  end
+end

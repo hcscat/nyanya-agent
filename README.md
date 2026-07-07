@@ -140,7 +140,7 @@ Useful Discord commands:
 | `!nyanya resources` | Show local system resource information. |
 | `!nyanya tasks` | Show the current user's pending, running, and queued tasks. |
 | `!nyanya tasks all` | Show all users' tasks. Admin only. |
-| `!nyanya upload <file_path>` | Upload a local workspace file to the current Discord channel. |
+| `!nyanya upload <file_path>` | Upload a local workspace file. Outside a configured file-share channel, the file is sent to `NYANYA_DISCORD_FILE_SHARE_CHANNEL_IDS`. |
 | `!nyanya gemini <prompt>` | Send a prompt directly through the configured Google/Gemini-style backend. |
 | `!nyanya codex <prompt>` | Delegate review or investigation work to Codex. |
 | `!nyanya codex-work <prompt>` | Delegate file/code-changing work to Codex when write delegation is enabled. |
@@ -165,8 +165,9 @@ File upload behavior:
 1. Resolve the requested file path relative to the user's workspace.
 2. Verify that the path is inside an allowed workspace root.
 3. Verify that the target exists and is a file.
-4. Upload it as a Discord attachment.
-5. Record the upload request in the dashboard ledger when dashboard recording is enabled.
+4. Upload it to the current channel when the command is sent inside a configured file-share channel.
+5. When the command is sent from another allowed channel, upload it to the first configured `NYANYA_DISCORD_FILE_SHARE_CHANNEL_IDS` channel and reply with a confirmation in the request channel.
+6. Record the upload request in the dashboard ledger when dashboard recording is enabled.
 
 ## Telegram Bridge
 
@@ -317,11 +318,14 @@ Codex policy:
 The project is Python-based, but it includes an npm wrapper for easier sharing:
 
 ```bash
-npm install -g @hcscat/nyanya-agent
-nyanya-agent --help
+npm install -g @hcscat-dev/nyanya-agent
+nyanya setup
+nyanya doctor
 ```
 
-The npm package launches `python3` with the bundled `src/` package on `PYTHONPATH`. It does not replace Python.
+The npm package ships a TypeScript-authored CLI compiled to JavaScript. It does not replace Python; `nyanya setup` prepares the Python runtime and dependencies.
+
+The current install/distribution plan is documented in [NyaNya Agent install/distribution final plan](docs/nyanya_install_distribution_final_plan_20260707.md). The direction is to keep the Python agent runtime and move the npm CLI/setup layer to TypeScript.
 
 ## Security Model
 
