@@ -299,25 +299,25 @@ npm organization: hcscat-dev
   hcscat-dev organization scope
 ```
 
-현재 `package.json`은 사용자 scope 배포 기준에 맞춰 아래 이름을 사용한다.
+현재 `package.json`은 organization scope 배포 기준에 맞춰 아래 이름을 사용한다.
 
 ```json
 {
-  "name": "@hcscat/nyanya-agent"
+  "name": "@hcscat-dev/nyanya-agent"
 }
 ```
 
 최신 선택:
 
 ```text
-현재 npm 배포:
+개인 사용자 scope 대안:
   @hcscat/nyanya-agent
 
-나중에 organization 권한/2FA 정책을 정리한 뒤 검토:
+현재 npm 배포:
   @hcscat-dev/nyanya-agent
 ```
 
-이번 배포는 organization scope가 아니라 사용자 scope인 `@hcscat/nyanya-agent`로 진행한다.
+이번 배포는 사용자가 publish token을 등록한 organization scope인 `@hcscat-dev/nyanya-agent`로 진행한다.
 
 ### 8.1 사용자가 직접 해야 하는 작업
 
@@ -389,7 +389,7 @@ nyanya setup
 
 권장 작업 순서는 다음이다.
 
-1. npm package name을 `@hcscat/nyanya-agent`로 확정
+1. npm package name을 `@hcscat-dev/nyanya-agent`로 확정
 2. 기존 `bin/*.js` 중복 제거
 3. TypeScript build 체계 추가
 4. TypeScript 기반 `nyanya setup` skeleton 구현
@@ -453,7 +453,7 @@ Python dependency:
   curl installer는 Git 없는 경우 tarball fallback 제공
 
 npm scope:
-  현재 배포는 @hcscat/nyanya-agent 사용
+  현재 배포는 @hcscat-dev/nyanya-agent 사용
 
 Homebrew:
   npm 안정화 후 전용 tap repository로 진행
