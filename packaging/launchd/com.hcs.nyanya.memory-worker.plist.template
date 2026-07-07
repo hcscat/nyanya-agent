@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.hcs.nyanya.memory-worker</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{INSTALL_DIR}}/.venv/bin/python</string>
+    <string>-m</string>
+    <string>nyanya_agent.memory_worker</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NYANYA_PROJECT_ROOT</key>
+    <string>{{INSTALL_DIR}}</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>WorkingDirectory</key>
+  <string>{{INSTALL_DIR}}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>{{INSTALL_DIR}}/logs/memory-worker.launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{INSTALL_DIR}}/logs/memory-worker.launchd.err.log</string>
+</dict>
+</plist>

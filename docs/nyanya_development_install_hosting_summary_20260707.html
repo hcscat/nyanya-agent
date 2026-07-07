@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>NyaNya Agent 개발 목록, 설치/배포 계획, 외부 접속 호스팅 조사</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      color: #10203f;
+      background-color: #eef4ff;
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      color: #f8fafc;
+      background-color: transparent;
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    html { -webkit-text-size-adjust: 100%; }
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <style>
+  :root {
+    --bg: #f5f7fb;
+    --paper: #ffffff;
+    --ink: #172033;
+    --muted: #5d6a80;
+    --line: #d8e1ed;
+    --accent: #0f5ec7;
+    --accent-2: #134e4a;
+    --code-bg: #eef4ff;
+    --code-fg: #10203f;
+    --pre-bg: #111827;
+    --pre-fg: #f8fafc;
+    --table-head: #e7f0fb;
+  }
+  html {
+    background-color: var(--bg);
+  }
+  body {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 28px 18px 56px;
+    background-color: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    line-height: 1.68;
+  }
+  h1, h2, h3 {
+    color: #0f172a;
+    line-height: 1.3;
+  }
+  h1 {
+    margin-top: 0;
+    padding-bottom: 14px;
+    border-bottom: 3px solid var(--accent);
+  }
+  h2 {
+    margin-top: 34px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+  }
+  a {
+    color: var(--accent);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 18px 0;
+    font-size: 0.95rem;
+  }
+  th, td {
+    border: 1px solid var(--line);
+    padding: 9px 10px;
+    vertical-align: top;
+  }
+  th {
+    background-color: var(--table-head);
+    color: #10203f;
+  }
+  code {
+    color: var(--code-fg);
+    background-color: var(--code-bg);
+    border: 1px solid #cdd9ea;
+    border-radius: 5px;
+    padding: 0.1em 0.35em;
+    font-size: 0.92em;
+  }
+  pre {
+    background-color: var(--pre-bg);
+    color: var(--pre-fg);
+    padding: 16px;
+    overflow-x: auto;
+    border-radius: 8px;
+  }
+  pre code {
+    color: var(--pre-fg);
+    background-color: transparent;
+    border: 0;
+    padding: 0;
+  }
+  div.sourceCode {
+    background-color: var(--pre-bg) !important;
+    color: var(--pre-fg) !important;
+    border-radius: 8px;
+    margin: 18px 0;
+    overflow-x: auto;
+  }
+  div.sourceCode pre.sourceCode,
+  pre.sourceCode {
+    background-color: var(--pre-bg) !important;
+    color: var(--pre-fg) !important;
+    margin: 0;
+    padding: 16px;
+    border-radius: 8px;
+  }
+  pre.sourceCode code,
+  code.sourceCode,
+  code.sourceCode span,
+  code.sourceCode span *,
+  div.sourceCode a {
+    color: var(--pre-fg) !important;
+    background-color: transparent !important;
+  }
+  blockquote {
+    background-color: #fff7e6;
+    color: #3f2d0a;
+    border-left: 4px solid #d97706;
+    margin: 18px 0;
+    padding: 10px 16px;
+  }
+  @media (max-width: 760px) {
+    body {
+      padding: 18px 12px 42px;
+    }
+    table {
+      display: block;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+  }
+  </style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">NyaNya Agent 개발 목록, 설치/배포 계획, 외부 접속
+호스팅 조사</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a
+href="#nyanya-agent-개발-목록-설치배포-계획-외부-접속-호스팅-조사"
+id="toc-nyanya-agent-개발-목록-설치배포-계획-외부-접속-호스팅-조사">NyaNya
+Agent 개발 목록, 설치/배포 계획, 외부 접속 호스팅 조사</a>
+<ul>
+<li><a href="#요약-결론" id="toc-요약-결론">1. 요약 결론</a></li>
+<li><a href="#개발해야-하는-목록" id="toc-개발해야-하는-목록">2.
+개발해야 하는 목록</a></li>
+<li><a href="#설치배포-개선을-먼저-해야-하는-이유"
+id="toc-설치배포-개선을-먼저-해야-하는-이유">3. 설치/배포 개선을 먼저
+해야 하는 이유</a></li>
+<li><a href="#설치배포-개선-기준" id="toc-설치배포-개선-기준">4.
+설치/배포 개선 기준</a></li>
+<li><a href="#설치배포에-필요한-기능" id="toc-설치배포에-필요한-기능">5.
+설치/배포에 필요한 기능</a>
+<ul>
+<li><a href="#cli-명령" id="toc-cli-명령">5.1 CLI 명령</a></li>
+<li><a href="#init에서-해야-할-일" id="toc-init에서-해야-할-일">5.2
+<code>init</code>에서 해야 할 일</a></li>
+<li><a href="#doctor에서-확인할-일" id="toc-doctor에서-확인할-일">5.3
+<code>doctor</code>에서 확인할 일</a></li>
+</ul></li>
+<li><a href="#설치배포-기술-스택" id="toc-설치배포-기술-스택">6.
+설치/배포 기술 스택</a></li>
+<li><a href="#npm-배포-계획" id="toc-npm-배포-계획">7. npm 배포
+계획</a></li>
+<li><a href="#homebrew-배포-계획" id="toc-homebrew-배포-계획">8.
+Homebrew 배포 계획</a></li>
+<li><a href="#외부-접속-가능한-에이전트-시스템-선택지"
+id="toc-외부-접속-가능한-에이전트-시스템-선택지">9. 외부 접속 가능한
+에이전트 시스템 선택지</a></li>
+<li><a href="#외부-접속-권장안" id="toc-외부-접속-권장안">10. 외부 접속
+권장안</a>
+<ul>
+<li><a href="#순위-mac-mini-runtime-cloudflare-tunnel"
+id="toc-순위-mac-mini-runtime-cloudflare-tunnel">10.1 1순위: Mac mini
+runtime + Cloudflare Tunnel</a></li>
+<li><a href="#순위-cloudflare-pages-workers-d1kv"
+id="toc-순위-cloudflare-pages-workers-d1kv">10.2 2순위: Cloudflare Pages
++ Workers + D1/KV</a></li>
+<li><a href="#순위-oracle-cloud-always-free-vm"
+id="toc-순위-oracle-cloud-always-free-vm">10.3 3순위: Oracle Cloud
+Always Free VM</a></li>
+</ul></li>
+<li><a href="#무료조건부-무료-서비스-비교"
+id="toc-무료조건부-무료-서비스-비교">11. 무료/조건부 무료 서비스
+비교</a></li>
+<li><a href="#외부-접속-방식별-추천" id="toc-외부-접속-방식별-추천">12.
+외부 접속 방식별 추천</a></li>
+<li><a href="#권장-단계별-실행-계획" id="toc-권장-단계별-실행-계획">13.
+권장 단계별 실행 계획</a>
+<ul>
+<li><a href="#phase-1-설치배포-mvp" id="toc-phase-1-설치배포-mvp">Phase
+1: 설치/배포 MVP</a></li>
+<li><a href="#phase-2-외부-접속-mvp"
+id="toc-phase-2-외부-접속-mvp">Phase 2: 외부 접속 MVP</a></li>
+<li><a href="#phase-3-배포-자동화" id="toc-phase-3-배포-자동화">Phase 3:
+배포 자동화</a></li>
+<li><a href="#phase-4-멀티에이전트-기반"
+id="toc-phase-4-멀티에이전트-기반">Phase 4: 멀티에이전트 기반</a></li>
+<li><a href="#phase-5-오케스트레이션승인"
+id="toc-phase-5-오케스트레이션승인">Phase 5:
+오케스트레이션/승인</a></li>
+</ul></li>
+<li><a href="#최종-권고" id="toc-최종-권고">14. 최종 권고</a></li>
+</ul></li>
+</ul>
+</nav>
+<h1
+id="nyanya-agent-개발-목록-설치배포-계획-외부-접속-호스팅-조사">NyaNya
+Agent 개발 목록, 설치/배포 계획, 외부 접속 호스팅 조사</h1>
+<p>작성일: 2026-07-07 KST</p>
+<h2 id="요약-결론">1. 요약 결론</h2>
+<p>NyaNya Agent를 단기간에 완성형 멀티에이전트 플랫폼으로 만드는 것은
+현실적이지 않다. 우선순위를 나누면 다음 순서가 가장 안전하다.</p>
+<ol type="1">
+<li>설치/배포 개선</li>
+<li>에이전트 프로필 시스템</li>
+<li>여러 Discord/Telegram connector 관리</li>
+<li>중앙 task/orchestrator</li>
+<li>dashboard 관리 UI 확장</li>
+<li>파일 변경 승인 시스템</li>
+<li>agent별 memory/policy 학습</li>
+<li>외부 접속 구조</li>
+</ol>
+<p>외부 접속은 처음부터 모든 것을 클라우드로 옮기기보다, 현재 Mac
+mini에서 NyaNya를 계속 실행하고
+<code>Cloudflare Tunnel + Cloudflare Access</code>로 dashboard/API만
+안전하게 노출하는 방식이 가장 현실적이다. Discord bot처럼 계속
+연결되어야 하는 런타임은 무료 serverless hosting과 잘 맞지 않는다.</p>
+<h2 id="개발해야-하는-목록">2. 개발해야 하는 목록</h2>
+<table style="width:100%;">
+<colgroup>
+<col style="width: 30%" />
+<col style="width: 23%" />
+<col style="width: 23%" />
+<col style="width: 23%" />
+</colgroup>
+<thead>
+<tr>
+<th style="text-align: right;">순서</th>
+<th>개발 항목</th>
+<th>핵심 산출물</th>
+<th>이유</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;">1</td>
+<td>설치/배포 개선</td>
+<td><code>nyanya init</code>, <code>nyanya doctor</code>, npm, Homebrew,
+pipx/PyPI 계획</td>
+<td>사용자가 쉽게 설치/업데이트/복구할 수 있어야 함</td>
+</tr>
+<tr>
+<td style="text-align: right;">2</td>
+<td>에이전트 프로필</td>
+<td>agent별 이름, 역할, prompt, memory, token reference, workspace,
+권한</td>
+<td>A/B/C 서브 에이전트를 분리 운영하기 위함</td>
+</tr>
+<tr>
+<td style="text-align: right;">3</td>
+<td>다중 SNS connector</td>
+<td>profile별 Discord/Telegram token, prefix, channel allowlist</td>
+<td>여러 봇을 각각 다른 token으로 연결하기 위함</td>
+</tr>
+<tr>
+<td style="text-align: right;">4</td>
+<td>중앙 관리 runtime</td>
+<td>모든 agent start/stop/status/restart 관리</td>
+<td>NyaNya가 control plane 역할을 해야 함</td>
+</tr>
+<tr>
+<td style="text-align: right;">5</td>
+<td>task/orchestrator</td>
+<td>planner/reviewer/worker 순서 제어, turn limit, timeout</td>
+<td>agent끼리 무한 대화하지 않고 목적 있게 협업해야 함</td>
+</tr>
+<tr>
+<td style="text-align: right;">6</td>
+<td>dashboard 관리 UI</td>
+<td>Agents, Connectors, Tasks, Approvals, Projects, Memory 화면</td>
+<td>현재 어떤 에이전트와 작업이 돌고 있는지 확인해야 함</td>
+</tr>
+<tr>
+<td style="text-align: right;">7</td>
+<td>결과 보고 aggregator</td>
+<td>sub-agent 결과 수집, 요약, 최종 보고</td>
+<td>최종 책임자는 중앙 NyaNya여야 함</td>
+</tr>
+<tr>
+<td style="text-align: right;">8</td>
+<td>파일 변경 승인 시스템</td>
+<td>plan 제출, risk scoring, diff 검토, 승인/거절</td>
+<td>sub-agent가 임의로 파일을 바꾸지 못하게 해야 함</td>
+</tr>
+<tr>
+<td style="text-align: right;">9</td>
+<td>memory/policy 학습</td>
+<td>agent별 memory namespace, 승인/거절 사례 저장</td>
+<td>반복 작업에서 판단 품질을 개선하기 위함</td>
+</tr>
+<tr>
+<td style="text-align: right;">10</td>
+<td>외부 접속</td>
+<td>Cloudflare Tunnel, Access, HTTPS, 인증, 배포 문서</td>
+<td>집 밖에서도 dashboard/API 접근 가능하게 하기 위함</td>
+</tr>
+<tr>
+<td style="text-align: right;">11</td>
+<td>테스트/보안</td>
+<td>token leak check, package whitelist, loop guard, audit log</td>
+<td>공개 배포와 멀티 agent 운영 안정성 확보</td>
+</tr>
+<tr>
+<td style="text-align: right;">12</td>
+<td>배포 자동화</td>
+<td>GitHub Actions, release tag, npm publish, Homebrew formula
+update</td>
+<td>반복 가능한 release 절차 필요</td>
+</tr>
+</tbody>
+</table>
+<h2 id="설치배포-개선을-먼저-해야-하는-이유">3. 설치/배포 개선을 먼저
+해야 하는 이유</h2>
+<p>설치/배포가 먼저 안정화되어야 이후 기능 개발의 기준점이 생긴다. 현재
+NyaNya는 로컬에서 동작하지만, 설치 절차가 수동에 가깝고 다음 문제가 남아
+있다.</p>
+<ul>
+<li>Python 가상환경 생성과 dependency 설치가 사용자의 책임이다.</li>
+<li>npm wrapper는 있지만 Python dependency bootstrap을 완전히 해결하지
+않는다.</li>
+<li>Homebrew formula/tap이 없다.</li>
+<li><code>doctor</code>, <code>init</code>, <code>upgrade</code>,
+<code>uninstall</code>, <code>repair</code> 같은 사용자 친화적 명령이
+부족하다.</li>
+<li><code>.env</code>, <code>data</code>, <code>logs</code>,
+<code>docs/private</code> 같은 민감/개인 파일이 package에 들어가지
+않는지 release 전에 검증해야 한다.</li>
+</ul>
+<h2 id="설치배포-개선-기준">4. 설치/배포 개선 기준</h2>
+<p>설치 기능을 설계할 때 기준은 다음과 같다.</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>기준</th>
+<th>설명</th>
+<th>확인 방법</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>쉬운 설치</td>
+<td>사용자가 1~3개 명령으로 설치 가능</td>
+<td>fresh macOS에서 설치 테스트</td>
+</tr>
+<tr>
+<td>안전한 설정</td>
+<td>token, <code>.env</code>, DB, 로그가 package/repo에 포함되지
+않음</td>
+<td><code>npm pack --dry-run</code>, 보안 grep</td>
+</tr>
+<tr>
+<td>복구 가능성</td>
+<td>서비스 재시작, health check, repair 가능</td>
+<td><code>nyanyactl doctor</code>, <code>nyanyactl repair</code></td>
+</tr>
+<tr>
+<td>업데이트 가능성</td>
+<td>npm/brew/pipx 업데이트 경로 존재</td>
+<td>release tag 기준 upgrade test</td>
+</tr>
+<tr>
+<td>macOS 친화성</td>
+<td>LaunchAgent 자동 실행 지원</td>
+<td>reboot 후 status 확인</td>
+</tr>
+<tr>
+<td>Python 의존성 관리</td>
+<td>venv 또는 pipx로 dependencies 격리</td>
+<td>전역 Python 오염 없음</td>
+</tr>
+<tr>
+<td>문서화</td>
+<td>설치/설정/토큰/권한/문제 해결 문서</td>
+<td>README와 install guide</td>
+</tr>
+<tr>
+<td>배포 재현성</td>
+<td>GitHub release, checksum, package whitelist</td>
+<td>CI에서 release artifact 검증</td>
+</tr>
+</tbody>
+</table>
+<h2 id="설치배포에-필요한-기능">5. 설치/배포에 필요한 기능</h2>
+<h3 id="cli-명령">5.1 CLI 명령</h3>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanya</span> init</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanya</span> doctor</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanya</span> config validate</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanya</span> bootstrap</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanya</span> update</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanya</span> uninstall</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanya</span> version</span></code></pre></div>
+<p><code>nyanyactl</code>에는 운영 명령을 강화한다.</p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanyactl</span> install</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanyactl</span> start-all</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanyactl</span> stop-all</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanyactl</span> restart-all</span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanyactl</span> status-all</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanyactl</span> repair</span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanyactl</span> logs</span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanyactl</span> dashboard-open</span></code></pre></div>
+<h3 id="init에서-해야-할-일">5.2 <code>init</code>에서 해야 할 일</h3>
+<ol type="1">
+<li>Python 버전 확인</li>
+<li><code>.venv</code> 생성 여부 확인</li>
+<li>필요한 dependency 설치</li>
+<li><code>.env.example</code>에서 <code>.env</code> 생성</li>
+<li>workspace root 설정</li>
+<li>dashboard port 충돌 확인</li>
+<li>Discord/Telegram token 입력은 직접 입력 또는 keychain reference 방식
+제공</li>
+<li>LaunchAgent 설치 여부 질문</li>
+<li><code>doctor</code> 자동 실행</li>
+</ol>
+<h3 id="doctor에서-확인할-일">5.3 <code>doctor</code>에서 확인할 일</h3>
+<table>
+<thead>
+<tr>
+<th>검사</th>
+<th>예시</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Python</td>
+<td><code>python &gt;= 3.11</code></td>
+</tr>
+<tr>
+<td>package import</td>
+<td><code>nyanya_agent.core</code> import 가능</td>
+</tr>
+<tr>
+<td>optional deps</td>
+<td><code>discord.py</code>, <code>fastapi</code>,
+<code>uvicorn</code></td>
+</tr>
+<tr>
+<td>env</td>
+<td>token 존재 여부는 true/false만 표시</td>
+</tr>
+<tr>
+<td>workspace</td>
+<td>allowed/trusted root 유효성</td>
+</tr>
+<tr>
+<td>dashboard</td>
+<td>port 사용 가능 또는 현재 응답</td>
+</tr>
+<tr>
+<td>LaunchAgent</td>
+<td>loaded/running/last exit code</td>
+</tr>
+<tr>
+<td>Codex</td>
+<td>CLI 존재 여부, app server 상태</td>
+</tr>
+<tr>
+<td>Discord</td>
+<td>bot token API check, channel permission check</td>
+</tr>
+<tr>
+<td>보안</td>
+<td><code>.env</code>, DB, logs package 포함 여부</td>
+</tr>
+</tbody>
+</table>
+<h2 id="설치배포-기술-스택">6. 설치/배포 기술 스택</h2>
+<table>
+<colgroup>
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+<col style="width: 20%" />
+</colgroup>
+<thead>
+<tr>
+<th>경로</th>
+<th>역할</th>
+<th>장점</th>
+<th>단점</th>
+<th>우선순위</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>npm</td>
+<td>가장 쉬운 global CLI 진입점</td>
+<td>Node 사용자는 익숙함, wrapper 이미 존재</td>
+<td>Python dependency bootstrap 필요</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>Homebrew</td>
+<td>macOS 사용자용 정석 설치</td>
+<td>LaunchAgent와 잘 맞음, update 쉬움</td>
+<td>formula/tap/release checksum 필요</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>pipx/PyPI</td>
+<td>Python CLI 정석</td>
+<td>Python dependency 격리 우수</td>
+<td>비개발자에게는 pipx 설치가 장벽</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>GitHub Releases</td>
+<td>brew formula와 수동 설치 기준</td>
+<td>tag/tarball/checksum 명확</td>
+<td>release 자동화 필요</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>GitHub Actions</td>
+<td>빌드/검증/배포 자동화</td>
+<td>release 품질 안정화</td>
+<td>secrets 관리 필요</td>
+<td>P1</td>
+</tr>
+</tbody>
+</table>
+<h2 id="npm-배포-계획">7. npm 배포 계획</h2>
+<p>npm 공식 문서는 scoped public package를 공개할 때
+<code>npm publish --access public</code>을 사용한다고 설명한다. 또한
+package 공개 전 민감정보, private key, password, PII를 제거하라고
+안내한다.</p>
+<p>출처: <a
+href="https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/">npm
+scoped public packages</a></p>
+<p>현재 <code>package.json</code>에는 이미
+<code>@hcscat/nyanya-agent</code>와 <code>bin/*.js</code> wrapper가
+존재한다. 우선 개발할 것은 wrapper의 완성도다.</p>
+<p>필요 작업:</p>
+<ol type="1">
+<li><code>npm pack --dry-run</code> 검증 추가</li>
+<li>package <code>files</code> whitelist 재검토</li>
+<li><code>.env</code>, <code>data</code>, <code>logs</code>,
+<code>docs/private</code>, <code>.venv</code> 제외 검증</li>
+<li><code>nyanya-agent init</code> 구현</li>
+<li>첫 실행 시 <code>.venv</code> 생성 또는 pipx 설치 방식 결정</li>
+<li><code>npm run check</code>에 py_compile/test/security scan 포함</li>
+<li>GitHub Actions에서 npm package artifact 생성</li>
+</ol>
+<p>권장 설치 UX:</p>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> install <span class="at">-g</span> @hcscat/nyanya-agent</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanya-agent</span> init</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanya-agent</span> doctor</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanyactl</span> install</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanyactl</span> start-all</span></code></pre></div>
+<h2 id="homebrew-배포-계획">8. Homebrew 배포 계획</h2>
+<p>Homebrew 공식 문서는 tap 저장소 이름을 <code>homebrew-</code>
+prefix로 만드는 것을 권장한다. Python formula는 application과 library를
+구분하고, application dependency는 resource stanza로 고정할 수 있다.</p>
+<p>출처:</p>
+<ul>
+<li><a
+href="https://docs.brew.sh/How-to-Create-and-Maintain-a-Tap">Homebrew
+Tap</a></li>
+<li><a href="https://docs.brew.sh/Formula-Cookbook">Homebrew Formula
+Cookbook</a></li>
+<li><a href="https://docs.brew.sh/Python-for-Formula-Authors">Homebrew
+Python for Formula Authors</a></li>
+</ul>
+<p>필요 작업:</p>
+<ol type="1">
+<li><code>hcscat/homebrew-nyanya</code> 저장소 생성</li>
+<li><code>Formula/nyanya-agent.rb</code> 작성</li>
+<li>GitHub release tarball URL과 <code>sha256</code> 고정</li>
+<li>Python dependencies resource stanza 생성</li>
+<li><code>brew test nyanya-agent</code> 추가</li>
+<li>설치 후 <code>nyanya</code>, <code>nyanyactl</code> 실행 확인</li>
+<li>LaunchAgent plist 생성은 사용자가 명시적으로
+<code>nyanyactl install</code> 실행할 때만 수행</li>
+</ol>
+<p>권장 설치 UX:</p>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">brew</span> tap hcscat/nyanya</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="ex">brew</span> install nyanya-agent</span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanya</span> init</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanya</span> doctor</span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanyactl</span> install</span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanyactl</span> start-all</span></code></pre></div>
+<h2 id="외부-접속-가능한-에이전트-시스템-선택지">9. 외부 접속 가능한
+에이전트 시스템 선택지</h2>
+<p>외부 접속에는 두 종류가 있다.</p>
+<ol type="1">
+<li>dashboard/API를 외부에서 보는 것</li>
+<li>에이전트 런타임 자체를 클라우드에서 계속 실행하는 것</li>
+</ol>
+<p>두 요구는 다르다. dashboard/API는 무료 serverless나 tunnel로
+가능하다. 그러나 Discord bot gateway, memory worker, Codex 연동처럼 계속
+살아 있어야 하는 런타임은 무료 serverless와 잘 맞지 않는다.</p>
+<h2 id="외부-접속-권장안">10. 외부 접속 권장안</h2>
+<h3 id="순위-mac-mini-runtime-cloudflare-tunnel">10.1 1순위: Mac mini
+runtime + Cloudflare Tunnel</h3>
+<p>가장 현실적인 방식이다.</p>
+<pre class="text"><code>사용자 브라우저
+  -&gt; Cloudflare Access 인증
+  -&gt; Cloudflare Tunnel
+  -&gt; Mac mini의 NyaNya dashboard/API</code></pre>
+<p>장점:</p>
+<ul>
+<li>NyaNya가 현재처럼 로컬 파일과 Codex를 사용할 수 있다.</li>
+<li>Discord token과 workspace를 클라우드로 옮기지 않아도 된다.</li>
+<li>공유기 port forwarding이 필요 없다.</li>
+<li>Cloudflare Access 무료 플랜을 이용할 수 있다.</li>
+</ul>
+<p>Cloudflare Tunnel 공식 문서는 private network/application access와
+public application publishing에 사용하는 connector로 설명한다.
+Cloudflare Zero Trust pricing은 Free Plan을 제공한다.</p>
+<p>출처:</p>
+<ul>
+<li><a
+href="https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/">Cloudflare
+Tunnel</a></li>
+<li><a
+href="https://www.cloudflare.com/plans/zero-trust-services/">Cloudflare
+Zero Trust Pricing</a></li>
+</ul>
+<p>주의:</p>
+<ul>
+<li>dashboard 인증은 반드시 필요하다.</li>
+<li>public URL에 dashboard를 인증 없이 열면 안 된다.</li>
+<li>파일 수정/삭제 API는 외부에서 직접 호출하지 못하게 해야 한다.</li>
+</ul>
+<h3 id="순위-cloudflare-pages-workers-d1kv">10.2 2순위: Cloudflare Pages
++ Workers + D1/KV</h3>
+<p>dashboard frontend는 Cloudflare Pages, 간단한 API는 Workers, 상태
+저장은 D1/KV로 처리하는 방식이다.</p>
+<p>Cloudflare Workers Free plan은 일일 요청 제한이 있고, Free plan CPU
+time은 짧다. Pages는 무료 플랜에서 static site에 강하다.</p>
+<p>출처:</p>
+<ul>
+<li><a
+href="https://developers.cloudflare.com/workers/platform/limits/">Cloudflare
+Workers limits</a></li>
+<li><a
+href="https://developers.cloudflare.com/workers/platform/pricing/">Cloudflare
+Workers pricing</a></li>
+<li><a href="https://pages.cloudflare.com/">Cloudflare Pages</a></li>
+</ul>
+<p>적합:</p>
+<ul>
+<li>dashboard frontend</li>
+<li>간단한 상태 API</li>
+<li>webhook receiver</li>
+<li>agent command relay</li>
+</ul>
+<p>부적합:</p>
+<ul>
+<li>장시간 실행되는 Discord bot runtime</li>
+<li>무거운 Python/Codex 작업</li>
+<li>지속 WebSocket gateway client</li>
+</ul>
+<h3 id="순위-oracle-cloud-always-free-vm">10.3 3순위: Oracle Cloud
+Always Free VM</h3>
+<p>진짜 클라우드에서 계속 켜져 있는 agent runtime을 원하면 Always Free
+VM이 후보가 될 수 있다.</p>
+<p>Oracle Cloud는 Always Free 서비스를 무기한 제공하고, Free Trial에는
+30일 또는 크레딧 소진 시점까지 사용할 수 있는 크레딧을 제공한다고
+설명한다.</p>
+<p>출처:</p>
+<ul>
+<li><a href="https://www.oracle.com/cloud/free/">Oracle Cloud Free
+Tier</a></li>
+<li><a
+href="https://docs.oracle.com/iaas/Content/FreeTier/freetier.htm">OCI
+Free Tier documentation</a></li>
+</ul>
+<p>장점:</p>
+<ul>
+<li>항상 켜진 VM 구조가 가능하다.</li>
+<li>Discord bot, FastAPI, memory worker를 직접 띄울 수 있다.</li>
+</ul>
+<p>단점:</p>
+<ul>
+<li>서버 운영 부담이 크다.</li>
+<li>보안 패치, SSH, firewall, backup, secret 관리가 필요하다.</li>
+<li>Codex Desktop/Mac local workspace 연동과는 맞지 않는다.</li>
+</ul>
+<h2 id="무료조건부-무료-서비스-비교">11. 무료/조건부 무료 서비스
+비교</h2>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>서비스</th>
+<th>무료/조건부 무료 내용</th>
+<th>NyaNya에 적합한 용도</th>
+<th>주의점</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cloudflare Tunnel/Access</td>
+<td>Zero Trust Free Plan 제공</td>
+<td>Mac mini dashboard/API 외부 접속</td>
+<td>인증 필수, 공개 API 최소화</td>
+</tr>
+<tr>
+<td>Cloudflare Pages</td>
+<td>무료 static hosting, 500 builds/month 등</td>
+<td>dashboard frontend</td>
+<td>backend runtime 아님</td>
+</tr>
+<tr>
+<td>Cloudflare Workers</td>
+<td>Free plan 일일 요청 제한, 짧은 CPU time</td>
+<td>relay/webhook/light API</td>
+<td>long-running agent 부적합</td>
+</tr>
+<tr>
+<td>Firebase Hosting</td>
+<td>Spark plan no-cost hosting 가능</td>
+<td>static dashboard frontend</td>
+<td>App Hosting/Functions는 Blaze 필요 가능</td>
+</tr>
+<tr>
+<td>Firebase App Hosting</td>
+<td>Blaze 필요, no-cost quota 존재</td>
+<td>Next.js류 app hosting</td>
+<td>billing account 필요, 초과 과금 주의</td>
+</tr>
+<tr>
+<td>Vercel Hobby</td>
+<td>free personal projects</td>
+<td>frontend/serverless dashboard prototype</td>
+<td>persistent bot runtime 부적합</td>
+</tr>
+<tr>
+<td>Netlify Free</td>
+<td>free deploy, functions 포함</td>
+<td>frontend/static dashboard</td>
+<td>long-running agent 부적합</td>
+</tr>
+<tr>
+<td>Supabase Free</td>
+<td>DB/Auth/storage free project</td>
+<td>remote metadata DB/Auth</td>
+<td>project inactivity pause, agent runtime 아님</td>
+</tr>
+<tr>
+<td>Neon Free</td>
+<td>serverless Postgres free tier</td>
+<td>remote DB</td>
+<td>storage/compute limit</td>
+</tr>
+<tr>
+<td>Render Free</td>
+<td>free web service 가능</td>
+<td>demo API</td>
+<td>15분 idle spin down, Discord bot 부적합</td>
+</tr>
+<tr>
+<td>Railway Free</td>
+<td>trial/credit 중심</td>
+<td>short prototype</td>
+<td>항상 무료 runtime으로 보기 어려움</td>
+</tr>
+<tr>
+<td>Koyeb Free Instance</td>
+<td>1개 free instance, 제한된 CPU/RAM</td>
+<td>소형 demo backend</td>
+<td>production 비권장, resource 작음</td>
+</tr>
+<tr>
+<td>Oracle Always Free</td>
+<td>Always Free VM 제공</td>
+<td>always-on cloud runtime</td>
+<td>서버 운영 부담 큼</td>
+</tr>
+</tbody>
+</table>
+<p>관련 출처:</p>
+<ul>
+<li><a href="https://firebase.google.com/pricing">Firebase
+Pricing</a></li>
+<li><a
+href="https://firebase.google.com/docs/app-hosting/costs">Firebase App
+Hosting costs</a></li>
+<li><a href="https://vercel.com/docs/plans/hobby">Vercel Hobby
+Plan</a></li>
+<li><a href="https://www.netlify.com/pricing/">Netlify Pricing</a></li>
+<li><a href="https://supabase.com/pricing">Supabase Pricing</a></li>
+<li><a href="https://neon.com/pricing">Neon Pricing</a></li>
+<li><a href="https://render.com/docs/free">Render Free</a></li>
+<li><a href="https://railway.com/pricing">Railway Pricing</a></li>
+<li><a href="https://www.koyeb.com/docs/reference/instances">Koyeb
+Instances</a></li>
+<li><a href="https://fly.io/docs/about/cost-management/">Fly.io cost
+management</a></li>
+</ul>
+<h2 id="외부-접속-방식별-추천">12. 외부 접속 방식별 추천</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>목표</th>
+<th>추천 방식</th>
+<th>이유</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>집 밖에서 dashboard 보기</td>
+<td>Mac mini + Cloudflare Tunnel + Access</td>
+<td>무료/안전/현재 구조 유지</td>
+</tr>
+<tr>
+<td>정적 소개 페이지 공유</td>
+<td>Cloudflare Pages 또는 Firebase Hosting</td>
+<td>무료 static hosting에 적합</td>
+</tr>
+<tr>
+<td>간단한 remote command relay</td>
+<td>Cloudflare Workers</td>
+<td>가벼운 API에 적합</td>
+</tr>
+<tr>
+<td>DB/Auth를 클라우드에 두기</td>
+<td>Supabase 또는 Neon</td>
+<td>무료 DB/Auth prototype 가능</td>
+</tr>
+<tr>
+<td>완전 클라우드 agent runtime</td>
+<td>Oracle Always Free VM 또는 저가 VPS</td>
+<td>persistent process 필요</td>
+</tr>
+<tr>
+<td>빠른 demo backend</td>
+<td>Koyeb/Render/Railway</td>
+<td>prototype은 가능하나 안정 운영에는 한계</td>
+</tr>
+</tbody>
+</table>
+<h2 id="권장-단계별-실행-계획">13. 권장 단계별 실행 계획</h2>
+<h3 id="phase-1-설치배포-mvp">Phase 1: 설치/배포 MVP</h3>
+<p>목표:</p>
+<ul>
+<li><code>nyanya init</code></li>
+<li><code>nyanya doctor</code></li>
+<li>npm package 검증</li>
+<li>Homebrew formula 초안</li>
+<li>README install guide 정리</li>
+</ul>
+<p>완료 기준:</p>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> pack <span class="at">--dry-run</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> install <span class="at">-g</span> ./package.tgz</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanya</span> init</span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanya</span> doctor</span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="ex">nyanyactl</span> start-all</span></code></pre></div>
+<h3 id="phase-2-외부-접속-mvp">Phase 2: 외부 접속 MVP</h3>
+<p>목표:</p>
+<ul>
+<li>local dashboard 인증 강화</li>
+<li>Cloudflare Tunnel guide 작성</li>
+<li>Access 정책 설정 guide 작성</li>
+<li>dashboard 외부 접속 smoke test</li>
+</ul>
+<p>완료 기준:</p>
+<pre class="text"><code>외부 URL 접속
+-&gt; Cloudflare Access 인증
+-&gt; NyaNya dashboard 표시
+-&gt; health endpoint 정상
+-&gt; 파일 변경 API는 외부에서 직접 실행 불가</code></pre>
+<h3 id="phase-3-배포-자동화">Phase 3: 배포 자동화</h3>
+<p>목표:</p>
+<ul>
+<li>GitHub Actions로 test/package 검증</li>
+<li>GitHub Release 생성</li>
+<li>npm publish dry-run</li>
+<li>Homebrew formula checksum 자동 갱신</li>
+</ul>
+<h3 id="phase-4-멀티에이전트-기반">Phase 4: 멀티에이전트 기반</h3>
+<p>목표:</p>
+<ul>
+<li><code>agent_profiles</code> table</li>
+<li><code>nyanyactl agent create/list/start/stop</code></li>
+<li>profile별 Discord token reference</li>
+<li>dashboard Agents 화면</li>
+</ul>
+<h3 id="phase-5-오케스트레이션승인">Phase 5: 오케스트레이션/승인</h3>
+<p>목표:</p>
+<ul>
+<li>planner/reviewer/worker workflow</li>
+<li>agent-to-agent event log</li>
+<li>approval queue</li>
+<li>승인/거절 memory 저장</li>
+</ul>
+<h2 id="최종-권고">14. 최종 권고</h2>
+<p>가장 먼저 개발할 것은 설치/배포 개선이다. 이 작업은 이후
+멀티에이전트, 외부 접속, 대시보드 확장을 안정적으로 검증하는 기반이
+된다.</p>
+<p>외부 접속은 다음 결론을 따른다.</p>
+<ol type="1">
+<li>NyaNya runtime은 당분간 Mac mini에서 유지한다.</li>
+<li>dashboard/API만 Cloudflare Tunnel로 외부 접속시킨다.</li>
+<li>static 문서나 소개 페이지는 Cloudflare Pages 또는 Firebase Hosting을
+쓴다.</li>
+<li>cloud DB가 필요해지면 Supabase 또는 Neon을 검토한다.</li>
+<li>완전 cloud runtime이 필요할 때만 Oracle Always Free VM 또는 저가
+VPS를 검토한다.</li>
+</ol>
+<p>무료 hosting은 많지만, “항상 실행되는 agent”에는 대부분 맞지 않는다.
+NyaNya의 핵심은 로컬 workspace, Codex, Discord bridge, memory
+worker이므로 처음에는 로컬 runtime + 안전한 외부 tunnel이 가장
+효율적이다.</p>
+</body>
+</html>

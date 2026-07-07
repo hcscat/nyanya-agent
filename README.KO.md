@@ -140,7 +140,7 @@ Discord bridge 직접 실행:
 | `!nyanya resources` | 로컬 시스템 리소스 정보 확인 |
 | `!nyanya tasks` | 현재 사용자의 펜딩/진행/대기 작업 목록 확인 |
 | `!nyanya tasks all` | 전체 사용자의 작업 목록 확인, 관리자 전용 |
-| `!nyanya upload <file_path>` | 로컬 workspace 파일을 현재 Discord 채널에 업로드 |
+| `!nyanya upload <file_path>` | 로컬 workspace 파일 업로드. 설정된 파일공유 채널 밖에서 실행하면 `NYANYA_DISCORD_FILE_SHARE_CHANNEL_IDS` 채널로 전송 |
 | `!nyanya gemini <prompt>` | 설정된 Google/Gemini 계열 backend에 직접 질의 |
 | `!nyanya codex <prompt>` | 검토 또는 조사 작업을 Codex에 위임 |
 | `!nyanya codex-work <prompt>` | 쓰기 위임이 켜져 있을 때 코드/파일 변경 작업을 Codex에 위임 |
@@ -165,8 +165,9 @@ Discord bridge 직접 실행:
 1. 요청된 파일 경로를 사용자 workspace 기준으로 해석한다.
 2. 경로가 허용된 workspace root 내부인지 확인한다.
 3. 대상이 존재하고 파일인지 확인한다.
-4. Discord attachment로 업로드한다.
-5. dashboard recording이 켜져 있으면 요청 원장에 기록한다.
+4. 설정된 파일공유 채널 안에서 실행한 경우 현재 채널에 Discord attachment로 업로드한다.
+5. 일반 허용 채널에서 실행한 경우 첫 번째 `NYANYA_DISCORD_FILE_SHARE_CHANNEL_IDS` 채널로 업로드하고 요청 채널에는 완료 확인만 반환한다.
+6. dashboard recording이 켜져 있으면 요청 원장에 기록한다.
 
 ## Telegram Bridge
 
@@ -317,11 +318,14 @@ Codex 정책:
 이 프로젝트는 Python 기반이지만 공유 편의를 위해 npm wrapper를 제공한다.
 
 ```bash
-npm install -g @hcscat/nyanya-agent
-nyanya-agent --help
+npm install -g @hcscat-dev/nyanya-agent
+nyanya setup
+nyanya doctor
 ```
 
-npm package는 `python3`와 bundled `src/` package를 실행한다. Python을 대체하지 않는다.
+npm package는 TypeScript로 개발한 CLI를 JavaScript로 빌드해서 배포한다. Python을 대체하지 않고, `nyanya setup`에서 Python runtime과 dependency를 준비한다.
+
+설치/배포 개선의 최신 권장안은 [NyaNya Agent 설치/배포 최종 권장안](docs/nyanya_install_distribution_final_plan_20260707.md)에 정리되어 있다. 핵심 방향은 npm CLI 계층은 TypeScript로 전환하고, Python dependency, dashboard, Discord bridge, memory worker, LaunchAgent 설정은 `nyanya setup`에서 한 번에 처리하는 것이다.
 
 ## 보안 모델
 

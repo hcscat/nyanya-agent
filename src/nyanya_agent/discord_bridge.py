@@ -298,6 +298,20 @@ def main() -> int:
         channel_name = str(getattr(message.channel, "name", ""))
         return str(message.channel.id) in file_share_channel_ids or channel_name in file_share_channel_names
 
+    def is_file_share_target(channel: object) -> bool:
+        channel_name = str(getattr(channel, "name", ""))
+        return str(getattr(channel, "id", "")) in file_share_channel_ids or channel_name in file_share_channel_names
+
+    async def upload_destination_channel(message: discord.Message):
+        if is_file_share_channel(message) or not file_share_channel_ids:
+            return message.channel
+        for channel_id in file_share_channel_ids:
+            try:
+                return client.get_channel(int(channel_id)) or await client.fetch_channel(int(channel_id))
+            except Exception as exc:  # noqa: BLE001 - try the next configured share channel.
+                print(f"Discord file-share channel lookup failed: channel_id={channel_id} error={exc}", file=sys.stderr, flush=True)
+        return message.channel
+
     async def handle_command(message: discord.Message, text: str, attachment_note: str = "", request_id: str | None = None) -> str:
         owner_key = f"discord-user:{message.author.id}"
         conversation_key = f"discord:{message.channel.id}:user:{message.author.id}"
@@ -486,21 +500,30 @@ def main() -> int:
                 return finish(f"지정한 경로는 파일이 아닙니다: {resolved_path}", status="failed", error="not a file", mode="upload")
 
             try:
+                upload_channel = await upload_destination_channel(message)
+                upload_to_current_channel = str(getattr(upload_channel, "id", "")) == str(message.channel.id)
                 with open(resolved_path, "rb") as f:
                     discord_file = discord.File(f, filename=resolved_path.name)
-                    content = None if is_file_share_channel(message) else f"요청하신 파일({resolved_path.name})을 업로드합니다."
-                    await message.channel.send(content=content, file=discord_file)
+                    content = None if is_file_share_target(upload_channel) else f"일반 채널 요청 파일 공유: {resolved_path.name}"
+                    await upload_channel.send(content=content, file=discord_file)
+                target_name = str(getattr(upload_channel, "name", "") or upload_channel.id)
+                result = (
+                    ""
+                    if upload_to_current_channel and is_file_share_channel(message)
+                    else f"파일을 `{target_name}` 채널에 업로드했습니다: `{resolved_path.name}`"
+                )
+                summary = f"uploaded={resolved_path.name} target_channel={target_name}"
                 mark_dashboard_request(
                     request_id,
                     "completed",
                     event_type="file_uploaded",
-                    message=f"uploaded={resolved_path.name}",
-                    result_summary=f"uploaded={resolved_path.name}",
+                    message=summary,
+                    result_summary=summary,
                     mode="upload",
                     provider=str(config.get("provider") or ""),
                     model=str(config.get("model") or ""),
                 )
-                return ""
+                return result
             except Exception as e:
                 return finish(f"파일 업로드 실패: {e}", status="failed", error=str(e), mode="upload")
         return store.submit(

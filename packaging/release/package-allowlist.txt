@@ -1,0 +1,15 @@
+# Files and directories expected in release packages.
+LICENSE
+README.md
+README.KO.md
+pyproject.toml
+package.json
+.env.example
+bin/
+config/nyanya.json
+config/user_workspaces.example.json
+docs/
+packaging/
+prompts/
+scripts/
+src/

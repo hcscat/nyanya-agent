@@ -1,4 +1,4 @@
 #!/usr/bin/env node
-const { main } = require("../dist/bin/nyanya.js");
+import { main } from "./nyanya";
 
 process.exit(main(process.argv.slice(2)));
