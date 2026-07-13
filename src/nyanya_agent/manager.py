@@ -19,9 +19,11 @@ from typing import Any
 from nyanya_agent import core as nyanya
 
 
-DISCORD_LABEL = "com.hcs.nyanya.discord"
-DASHBOARD_LABEL = "com.hcs.nyanya.dashboard"
-MEMORY_WORKER_LABEL = "com.hcs.nyanya.memory-worker"
+nyanya.load_env(nyanya.DEFAULT_ENV)
+SERVICE_LABEL_PREFIX = os.getenv("NYANYA_SERVICE_LABEL_PREFIX", "com.hcs.nyanya").strip().rstrip(".") or "com.hcs.nyanya"
+DISCORD_LABEL = f"{SERVICE_LABEL_PREFIX}.discord"
+DASHBOARD_LABEL = f"{SERVICE_LABEL_PREFIX}.dashboard"
+MEMORY_WORKER_LABEL = f"{SERVICE_LABEL_PREFIX}.memory-worker"
 CODEX_LABEL = "com.hcs.codex.app"
 CODEX_APP_NAME = "Codex"
 CODEX_APP_PATH = pathlib.Path("/Applications/Codex.app")
@@ -49,8 +51,14 @@ def project_root() -> pathlib.Path:
     return nyanya.PROJECT_ROOT
 
 
+def state_root() -> pathlib.Path:
+    return nyanya.STATE_ROOT
+
+
 def python_executable() -> str:
-    local_python = project_root() / ".venv" / "bin" / "python"
+    local_python = state_root() / ".venv" / "bin" / "python"
+    if sys.platform.startswith("win"):
+        local_python = state_root() / ".venv" / "Scripts" / "python.exe"
     if local_python.exists() and os.access(local_python, os.X_OK):
         return str(local_python)
     return sys.executable
@@ -58,8 +66,8 @@ def python_executable() -> str:
 
 def ensure_dirs() -> None:
     launch_agents_dir().mkdir(parents=True, exist_ok=True)
-    (project_root() / "logs").mkdir(parents=True, exist_ok=True)
-    (project_root() / "run").mkdir(parents=True, exist_ok=True)
+    (state_root() / "logs").mkdir(parents=True, exist_ok=True)
+    (state_root() / "run").mkdir(parents=True, exist_ok=True)
 
 
 def load_env() -> None:
@@ -98,6 +106,16 @@ def configured_codex_cli() -> str | None:
     return None
 
 
+def launch_environment() -> dict[str, str]:
+    return {
+        "PATH": DEFAULT_RUNTIME_PATH,
+        "PYTHONPATH": str(project_root() / "src"),
+        "NYANYA_PROJECT_ROOT": str(project_root()),
+        "NYANYA_HOME": str(state_root()),
+        "NYANYA_ENV_FILE": str(nyanya.DEFAULT_ENV),
+    }
+
+
 def matching_processes(pattern: str) -> list[str]:
     result = run(["ps", "-axo", "pid=,command="], check=False)
     if result.returncode != 0:
@@ -117,12 +135,12 @@ def write_discord_plist() -> pathlib.Path:
     ensure_dirs()
     payload: dict[str, Any] = {
         "Label": LABEL,
-        "ProgramArguments": [str(project_root() / "scripts" / "run_discord_bridge.sh")],
-        "EnvironmentVariables": {"PATH": DEFAULT_RUNTIME_PATH},
+        "ProgramArguments": [python_executable(), "-m", "nyanya_agent.discord_bridge"],
+        "EnvironmentVariables": launch_environment(),
         "RunAtLoad": True,
         "KeepAlive": True,
-        "StandardOutPath": str(project_root() / "logs" / "discord.launchd.out.log"),
-        "StandardErrorPath": str(project_root() / "logs" / "discord.launchd.err.log"),
+        "StandardOutPath": str(state_root() / "logs" / "discord.launchd.out.log"),
+        "StandardErrorPath": str(state_root() / "logs" / "discord.launchd.err.log"),
         "WorkingDirectory": str(project_root()),
     }
     path = plist_path()
@@ -136,11 +154,11 @@ def write_codex_plist() -> pathlib.Path:
     payload: dict[str, Any] = {
         "Label": CODEX_LABEL,
         "ProgramArguments": ["/usr/bin/open", "-a", CODEX_APP_NAME],
-        "EnvironmentVariables": {"PATH": DEFAULT_RUNTIME_PATH},
+        "EnvironmentVariables": launch_environment(),
         "RunAtLoad": True,
         "KeepAlive": False,
-        "StandardOutPath": str(project_root() / "logs" / "codex.launchd.out.log"),
-        "StandardErrorPath": str(project_root() / "logs" / "codex.launchd.err.log"),
+        "StandardOutPath": str(state_root() / "logs" / "codex.launchd.out.log"),
+        "StandardErrorPath": str(state_root() / "logs" / "codex.launchd.err.log"),
         "WorkingDirectory": str(pathlib.Path.home()),
     }
     path = plist_path(CODEX_LABEL)
@@ -153,12 +171,12 @@ def write_dashboard_plist() -> pathlib.Path:
     ensure_dirs()
     payload: dict[str, Any] = {
         "Label": DASHBOARD_LABEL,
-        "ProgramArguments": [str(project_root() / "scripts" / "run_dashboard.sh")],
-        "EnvironmentVariables": {"PATH": DEFAULT_RUNTIME_PATH},
+        "ProgramArguments": [python_executable(), "-m", "nyanya_agent.dashboard_api"],
+        "EnvironmentVariables": launch_environment(),
         "RunAtLoad": True,
         "KeepAlive": True,
-        "StandardOutPath": str(project_root() / "logs" / "dashboard.launchd.out.log"),
-        "StandardErrorPath": str(project_root() / "logs" / "dashboard.launchd.err.log"),
+        "StandardOutPath": str(state_root() / "logs" / "dashboard.launchd.out.log"),
+        "StandardErrorPath": str(state_root() / "logs" / "dashboard.launchd.err.log"),
         "WorkingDirectory": str(project_root()),
     }
     path = plist_path(DASHBOARD_LABEL)
@@ -171,12 +189,12 @@ def write_memory_worker_plist() -> pathlib.Path:
     ensure_dirs()
     payload: dict[str, Any] = {
         "Label": MEMORY_WORKER_LABEL,
-        "ProgramArguments": [str(project_root() / "scripts" / "run_memory_worker.sh")],
-        "EnvironmentVariables": {"PATH": DEFAULT_RUNTIME_PATH},
+        "ProgramArguments": [python_executable(), "-m", "nyanya_agent.memory_worker"],
+        "EnvironmentVariables": launch_environment(),
         "RunAtLoad": True,
         "KeepAlive": True,
-        "StandardOutPath": str(project_root() / "logs" / "memory-worker.launchd.out.log"),
-        "StandardErrorPath": str(project_root() / "logs" / "memory-worker.launchd.err.log"),
+        "StandardOutPath": str(state_root() / "logs" / "memory-worker.launchd.out.log"),
+        "StandardErrorPath": str(state_root() / "logs" / "memory-worker.launchd.err.log"),
         "WorkingDirectory": str(project_root()),
     }
     path = plist_path(MEMORY_WORKER_LABEL)
@@ -274,7 +292,11 @@ def start_all() -> int:
     print("dashboard=nyanya_dashboard")
     print("memory_worker=nyanya_memory_worker")
     print("codex_policy=separate_recovery_channel_not_managed_by_start_all")
-    discord_rc = start()
+    if discord_token():
+        discord_rc = start()
+    else:
+        print("discord_bridge=skipped reason=token_not_configured")
+        discord_rc = 0
     dashboard_rc = dashboard_start()
     memory_rc = memory_worker_start()
     return 0 if discord_rc == 0 and dashboard_rc == 0 and memory_rc == 0 else 1
@@ -285,9 +307,36 @@ def restart_all() -> int:
     print("dashboard=nyanya_dashboard")
     print("memory_worker=nyanya_memory_worker")
     print("codex_policy=separate_recovery_channel_not_managed_by_restart_all")
-    discord_rc = restart()
+    if discord_token():
+        discord_rc = restart()
+    else:
+        bootout(DISCORD_LABEL)
+        print("discord_bridge=skipped reason=token_not_configured")
+        discord_rc = 0
     dashboard_rc = dashboard_restart()
     memory_rc = memory_worker_restart()
+    return 0 if discord_rc == 0 and dashboard_rc == 0 and memory_rc == 0 else 1
+
+
+def stop_all() -> int:
+    print("runtime_entrypoint=discord_bridge")
+    print("dashboard=nyanya_dashboard")
+    print("memory_worker=nyanya_memory_worker")
+    print("codex_policy=separate_recovery_channel_not_managed_by_stop_all")
+    discord_rc = stop()
+    dashboard_rc = dashboard_stop()
+    memory_rc = memory_worker_stop()
+    return 0 if discord_rc == 0 and dashboard_rc == 0 and memory_rc == 0 else 1
+
+
+def uninstall_all() -> int:
+    print("runtime_entrypoint=discord_bridge")
+    print("dashboard=nyanya_dashboard")
+    print("memory_worker=nyanya_memory_worker")
+    print("codex_policy=separate_recovery_channel_not_managed_by_uninstall_all")
+    discord_rc = uninstall()
+    dashboard_rc = dashboard_uninstall()
+    memory_rc = memory_worker_uninstall()
     return 0 if discord_rc == 0 and dashboard_rc == 0 and memory_rc == 0 else 1
 
 
@@ -295,7 +344,11 @@ def status_all() -> int:
     print("runtime_entrypoint=discord_bridge")
     print("codex_policy=separate_recovery_channel")
     print("[discord_bridge]")
-    discord_rc = status()
+    if discord_token():
+        discord_rc = status()
+    else:
+        print("state = disabled (token not configured)")
+        discord_rc = 0
     print("[dashboard]")
     dashboard_rc = dashboard_status()
     print("[memory_worker]")
@@ -326,23 +379,31 @@ def health() -> int:
     rc = 0
     print("runtime_entrypoint=discord_bridge")
     print("codex_policy=separate_recovery_channel")
-    print("[launchagent]")
-    launch_rc, lines = launch_status(DISCORD_LABEL)
-    for line in lines:
-        print(line)
-    if launch_rc != 0:
-        rc = max(rc, 1)
+    print(f"code_root={project_root()}")
+    print(f"state_root={state_root()}")
+    print("[discord_bridge]")
+    if discord_token():
+        launch_rc, lines = launch_status(DISCORD_LABEL)
+        for line in lines:
+            print(line)
+        if launch_rc != 0:
+            rc = max(rc, 1)
+        rc = max(rc, check_config(include_backend=False))
+        try:
+            data = discord_api("GET")
+            print(f"discord_api_ok=true bot_username={data.get('username', '<unknown>')}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"discord_api_ok=false reason={exc}", file=sys.stderr)
+            rc = max(rc, 1)
+    else:
+        print("state=disabled reason=token_not_configured")
 
-    print("[config]")
-    rc = max(rc, check_config(include_backend=False))
+    print("[dashboard]")
+    rc = max(rc, dashboard_status())
+    rc = max(rc, dashboard_health())
 
-    print("[discord_api]")
-    try:
-        data = discord_api("GET")
-        print(f"bot_username={data.get('username', '<unknown>')}")
-    except Exception as exc:  # noqa: BLE001
-        print(f"discord_api_ok=false reason={exc}", file=sys.stderr)
-        rc = max(rc, 1)
+    print("[memory_worker]")
+    rc = max(rc, memory_worker_status())
 
     print("[codex_separate]")
     codex_cli = configured_codex_cli()
@@ -390,24 +451,27 @@ def smoke() -> int:
         print(f"protected_delete_guard_ok=false reason={exc}", file=sys.stderr)
         rc = 1
 
-    try:
-        data = discord_api("GET")
-        print(f"discord_api_ok=true bot_username={data.get('username', '<unknown>')}")
-    except Exception as exc:  # noqa: BLE001
-        print(f"discord_api_ok=false reason={exc}", file=sys.stderr)
-        rc = 1
+    if discord_token():
+        try:
+            data = discord_api("GET")
+            print(f"discord_api_ok=true bot_username={data.get('username', '<unknown>')}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"discord_api_ok=false reason={exc}", file=sys.stderr)
+            rc = 1
+    else:
+        print("discord_api_ok=skipped reason=token_not_configured")
     return rc
 
 
 def repair() -> int:
-    print("repair_target=discord_bridge")
+    print("repair_target=nyanya_services")
     print("codex_policy=separate_recovery_channel_not_repaired_here")
     rc = health()
     if rc == 0:
         print("repair_needed=false")
         return 0
     print("repair_needed=true")
-    return restart()
+    return restart_all()
 
 
 def auth() -> int:
@@ -633,7 +697,7 @@ def discord_api(method: str, payload: dict[str, Any] | None = None) -> dict[str,
     request = urllib.request.Request("https://discord.com/api/v10/users/@me", data=data, method=method)
     request.add_header("Authorization", f"Bot {token}")
     request.add_header("Content-Type", "application/json")
-    request.add_header("User-Agent", "nyanya-agent/0.1.0")
+    request.add_header("User-Agent", "nyanya-agent/0.2.0")
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
 
@@ -669,7 +733,9 @@ def parse_args() -> argparse.Namespace:
         "preflight",
         "auth",
         "start-all",
+        "stop-all",
         "restart-all",
+        "uninstall-all",
         "status-all",
         "health",
         "deep-health",
@@ -711,12 +777,16 @@ def main() -> int:
         return start_all()
     if args.command == "stop":
         return stop()
+    if args.command == "stop-all":
+        return stop_all()
     if args.command == "restart":
         return restart()
     if args.command == "restart-all":
         return restart_all()
     if args.command == "uninstall":
         return uninstall()
+    if args.command == "uninstall-all":
+        return uninstall_all()
     if args.command == "status":
         return status()
     if args.command == "status-all":

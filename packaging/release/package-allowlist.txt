@@ -4,8 +4,12 @@ README.md
 README.KO.md
 pyproject.toml
 package.json
+package-lock.json
+tsconfig.json
 .env.example
 bin/
+cli/
+dist/
 config/nyanya.json
 config/user_workspaces.example.json
 docs/

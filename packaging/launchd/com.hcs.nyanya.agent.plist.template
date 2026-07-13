@@ -7,7 +7,7 @@
   <string>com.hcs.nyanya.agent</string>
   <key>ProgramArguments</key>
   <array>
-    <string>{{INSTALL_DIR}}/.venv/bin/python</string>
+    <string>{{STATE_DIR}}/.venv/bin/python</string>
     <string>-m</string>
     <string>nyanya_agent.discord_bridge</string>
   </array>
@@ -15,6 +15,12 @@
   <dict>
     <key>NYANYA_PROJECT_ROOT</key>
     <string>{{INSTALL_DIR}}</string>
+    <key>NYANYA_HOME</key>
+    <string>{{STATE_DIR}}</string>
+    <key>NYANYA_ENV_FILE</key>
+    <string>{{STATE_DIR}}/.env</string>
+    <key>PYTHONPATH</key>
+    <string>{{INSTALL_DIR}}/src</string>
     <key>PATH</key>
     <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
@@ -25,8 +31,8 @@
   <key>KeepAlive</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>{{INSTALL_DIR}}/logs/agent.launchd.out.log</string>
+  <string>{{STATE_DIR}}/logs/agent.launchd.out.log</string>
   <key>StandardErrorPath</key>
-  <string>{{INSTALL_DIR}}/logs/agent.launchd.err.log</string>
+  <string>{{STATE_DIR}}/logs/agent.launchd.err.log</string>
 </dict>
 </plist>

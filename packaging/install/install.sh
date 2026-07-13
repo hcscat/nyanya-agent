@@ -10,7 +10,8 @@ Usage:
 
 Options:
   --source PATH        Install from a local checkout instead of the script repository.
-  --install-dir PATH   Install directory. Default: ~/.local/share/nyanya-agent
+  --install-dir PATH   Immutable code directory. Default: ~/.local/lib/nyanya-agent
+  --state-dir PATH     Mutable user state directory. OS-specific default.
   --bin-dir PATH       Command directory. Default: ~/.local/bin
   --repo-url URL       Git repository URL for clone installs.
   --force              Replace the existing install directory backup.
@@ -19,12 +20,19 @@ Options:
 
 Environment:
   NYANYA_INSTALL_DIR
+  NYANYA_HOME
   NYANYA_BIN_DIR
   NYANYA_REPO_URL
 USAGE
 }
 
-INSTALL_DIR="${NYANYA_INSTALL_DIR:-$HOME/.local/share/nyanya-agent}"
+INSTALL_DIR="${NYANYA_INSTALL_DIR:-$HOME/.local/lib/nyanya-agent}"
+if [ "$(uname -s)" = "Darwin" ]; then
+  DEFAULT_STATE_DIR="$HOME/Library/Application Support/NyaNya Agent"
+else
+  DEFAULT_STATE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/nyanya-agent"
+fi
+STATE_DIR="${NYANYA_HOME:-$DEFAULT_STATE_DIR}"
 BIN_DIR="${NYANYA_BIN_DIR:-$HOME/.local/bin}"
 REPO_URL="${NYANYA_REPO_URL:-https://github.com/hcscat/nyanya-agent.git}"
 SOURCE_DIR=""
@@ -43,6 +51,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --bin-dir)
       BIN_DIR="${2:?missing value for --bin-dir}"
+      shift 2
+      ;;
+    --state-dir)
+      STATE_DIR="${2:?missing value for --state-dir}"
       shift 2
       ;;
     --repo-url)
@@ -111,7 +123,12 @@ write_launcher() {
 #!/usr/bin/env bash
 set -euo pipefail
 export NYANYA_PROJECT_ROOT="$INSTALL_DIR"
-exec "$INSTALL_DIR/.venv/bin/python" -m "$module" "\$@"
+export NYANYA_HOME="$STATE_DIR"
+export NYANYA_ENV_FILE="$STATE_DIR/.env"
+if [ "$name" = "nyanya" ] && command -v node >/dev/null 2>&1; then
+  exec node "$INSTALL_DIR/dist/bin/nyanya.js" "\$@"
+fi
+exec "$STATE_DIR/.venv/bin/python" -m "$module" "\$@"
 EOF
   chmod 0755 "$path"
 }
@@ -120,6 +137,7 @@ require_command python3
 require_command tar
 
 INSTALL_DIR="$(resolve_path "$INSTALL_DIR")"
+STATE_DIR="$(resolve_path "$STATE_DIR")"
 BIN_DIR="$(resolve_path "$BIN_DIR")"
 mkdir -p "$BIN_DIR"
 
@@ -148,15 +166,17 @@ fi
 
 copy_source "$SOURCE_DIR" "$INSTALL_DIR"
 
-if [ ! -f "$INSTALL_DIR/.env" ] && [ -f "$INSTALL_DIR/.env.example" ]; then
-  cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
-  chmod 0600 "$INSTALL_DIR/.env"
+mkdir -p "$STATE_DIR/config" "$STATE_DIR/data" "$STATE_DIR/downloads" "$STATE_DIR/logs" "$STATE_DIR/run" "$STATE_DIR/sessions"
+chmod 0700 "$STATE_DIR" "$STATE_DIR/config" "$STATE_DIR/data" "$STATE_DIR/downloads" "$STATE_DIR/logs" "$STATE_DIR/run" "$STATE_DIR/sessions"
+if [ ! -f "$STATE_DIR/.env" ] && [ -f "$INSTALL_DIR/.env.example" ]; then
+  cp "$INSTALL_DIR/.env.example" "$STATE_DIR/.env"
+  chmod 0600 "$STATE_DIR/.env"
 fi
 
-python3 -m venv "$INSTALL_DIR/.venv"
+python3 -m venv "$STATE_DIR/.venv"
 if [ "$SKIP_DEPS" -eq 0 ]; then
-  "$INSTALL_DIR/.venv/bin/python" -m pip install --upgrade pip
-  "$INSTALL_DIR/.venv/bin/python" -m pip install -e "$INSTALL_DIR[bots,dashboard]"
+  "$STATE_DIR/.venv/bin/python" -m pip install --upgrade pip
+  "$STATE_DIR/.venv/bin/python" -m pip install --upgrade "$INSTALL_DIR[bots,dashboard]"
 fi
 
 write_launcher nyanya nyanya_agent.core
@@ -175,10 +195,12 @@ cat <<EOF
 NyaNya Agent installed.
 
 Install dir: $INSTALL_DIR
+State dir: $STATE_DIR
 Command dir: $BIN_DIR
 
 Next:
-  nyanya --check
+  nyanya config
+  nyanya doctor
   nyanya
 
 If '$BIN_DIR' is not on PATH, add it to your shell profile.

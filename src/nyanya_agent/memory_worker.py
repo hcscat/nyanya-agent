@@ -120,6 +120,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    core.load_env(core.DEFAULT_ENV)
     args = parse_args()
     if args.once:
         result = run_once(limit=args.limit)

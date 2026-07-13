@@ -18,6 +18,8 @@ English guide: [README.md](README.md)
 
 이 저장소는 독립적인 경량 프로젝트다. 공식 Hermes Agent가 아니며, 다른 agent 프로젝트의 소스 트리를 포함하거나 복사하지 않는다.
 
+현재 소스는 `0.2.0` 배포 후보이며 npm registry의 공개 최신 버전은 아직 `0.1.0`이다. `0.2.0` 검증과 GitHub 반영을 마친 뒤 별도 npm publish 단계로 공개한다.
+
 주요 구현 파일:
 
 ```text
@@ -34,7 +36,60 @@ src/nyanya_agent/discord_bridge.py    # Discord bridge
 src/nyanya_agent/telegram_bridge.py   # Telegram bridge
 ```
 
-## 설치
+## npm 설치
+
+일반 사용자는 npm으로 CLI를 설치한 뒤 `setup`을 먼저 실행한다. `doctor`는 setup 이후에 실행한다.
+
+```bash
+npm install -g @hcscat-dev/nyanya-agent
+nyanya setup --all
+nyanya doctor
+```
+
+`npm install`은 Node/TypeScript CLI만 설치한다. Python 가상환경과 `discord.py`, `fastapi`, `uvicorn` 같은 Python 의존성은 `nyanya setup`에서 생성/설치한다. 대화형 터미널에서는 LLM provider와 Discord/Telegram 연결 설정을 바로 선택할 수 있다. 자동 설치 환경에서는 `nyanya setup --all --non-interactive`를 사용한다.
+
+`--all`은 macOS에서 dashboard, Discord bridge, memory worker LaunchAgent를 함께 구성한다. Discord token이 없으면 Discord bridge만 안전하게 건너뛰고 dashboard와 memory worker를 시작한다. `postinstall`은 Python 부재와 설치 side effect 문제 때문에 사용하지 않는다.
+
+npm 패키지 코드와 사용자 상태는 분리된다. 기본 상태 경로:
+
+| OS | `NYANYA_HOME` 기본값 |
+|---|---|
+| macOS | `~/Library/Application Support/NyaNya Agent` |
+| Linux | `${XDG_DATA_HOME:-~/.local/share}/nyanya-agent` |
+| Windows | `%LOCALAPPDATA%\NyaNya Agent` |
+
+`.env`, `.venv`, SQLite DB, logs, sessions는 `NYANYA_HOME` 아래에 유지되므로 npm 업데이트로 삭제되지 않는다. 기존 소스 checkout에 `.env`가 있으면 호환을 위해 해당 소스 폴더를 상태 경로로 계속 사용한다.
+
+설정과 상태 확인:
+
+```bash
+nyanya config             # LLM과 SNS 대화형 설정
+nyanya config show        # 비밀값을 제외한 설정 상태
+nyanya config validate    # 설정 변경 시 사용하는 내장 검증
+nyanya auth               # LLM provider 설정만 변경
+nyanya paths              # code/state/env/dashboard 경로 확인
+nyanya state backup       # 설정, DB, session 백업
+```
+
+Discord, Telegram token을 설정하지 않으면 해당 bridge는 비활성 상태다. Slack connector는 아직 포함되지 않는다.
+
+서비스 제어:
+
+```bash
+nyanya service start
+nyanya service status
+nyanya service stop
+nyanya service uninstall
+nyanya update
+```
+
+`nyanya service stop`은 NyaNya Agent가 관리하는 Discord bridge, dashboard, memory worker 서비스를 함께 중지한다. 격리 테스트에서는 `NYANYA_SERVICE_LABEL_PREFIX`를 별도로 지정해 운영 서비스가 아닌 테스트 서비스만 제어한다.
+
+업데이트는 `npm update -g @hcscat-dev/nyanya-agent` 후 `nyanya setup --non-interactive`를 실행한다. 삭제할 때는 먼저 `nyanya service uninstall`을 실행하고 `npm uninstall -g @hcscat-dev/nyanya-agent`를 실행한다. npm package를 삭제해도 `NYANYA_HOME` 데이터는 자동 삭제하지 않는다.
+
+`0.1.x` 설치본에서 package directory 안에 실제 `.env`나 DB를 만든 경우에는 `0.2.0`으로 업데이트하기 전에 해당 파일을 별도 경로에 백업해야 한다. `0.2.0` 이후에는 `nyanya state backup`과 `nyanya state migrate`를 사용한다. 현재 소스 checkout 운영은 legacy state 자동 감지로 기존 경로를 유지한다.
+
+## 소스 설치
 
 저장소를 clone하고 패키지를 설치한다.
 
@@ -83,6 +138,8 @@ NYANYA_MEMORY_RETRIEVAL_ENABLED=true
 NYANYA_MEMORY_WORKER_INTERVAL_SECONDS=1800
 NYANYA_MEMORY_WORKER_LLM_REFINEMENT=false
 ```
+
+`NYANYA_HOME`은 `.env`를 찾기 전에 결정해야 하므로 shell 또는 LaunchAgent 환경에서 설정한다. `.env` 안의 상대 경로는 mutable data의 경우 `NYANYA_HOME`, system prompt 같은 package asset은 code root 기준으로 해석한다.
 
 workspace root는 필요한 범위만 좁게 지정한다. NyaNya Agent는 sandbox가 아니라 routing과 policy layer다.
 
@@ -319,7 +376,7 @@ Codex 정책:
 
 ```bash
 npm install -g @hcscat-dev/nyanya-agent
-nyanya setup
+nyanya setup --all
 nyanya doctor
 ```
 

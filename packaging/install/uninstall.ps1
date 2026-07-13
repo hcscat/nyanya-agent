@@ -1,5 +1,6 @@
 param(
-    [string]$InstallDir = "$env:LOCALAPPDATA\nyanya-agent",
+    [string]$InstallDir = "$env:LOCALAPPDATA\Programs\NyaNya Agent",
+    [string]$StateDir = "$env:LOCALAPPDATA\NyaNya Agent",
     [string]$BinDir = "$env:USERPROFILE\.local\bin",
     [switch]$PurgeData
 )
@@ -13,12 +14,17 @@ foreach ($command in @("nyanya", "nyanya-agent", "nyanyactl", "nyanya-discord", 
     }
 }
 
+if (Test-Path $InstallDir) {
+    Remove-Item -Recurse -Force $InstallDir
+}
+Write-Host "Removed code directory: $InstallDir"
+
 if ($PurgeData) {
-    if (Test-Path $InstallDir) {
-        Remove-Item -Recurse -Force $InstallDir
+    if (Test-Path $StateDir) {
+        Remove-Item -Recurse -Force $StateDir
     }
-    Write-Host "Removed install directory: $InstallDir"
+    Write-Host "Removed state directory: $StateDir"
 } else {
-    Write-Host "Commands removed. Install directory kept: $InstallDir"
+    Write-Host "User state kept: $StateDir"
     Write-Host "Run with -PurgeData to remove local config/data as well."
 }

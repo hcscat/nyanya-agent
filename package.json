@@ -1,6 +1,6 @@
 {
   "name": "@hcscat-dev/nyanya-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "TypeScript CLI and Python runtime package for NyaNya Agent.",
   "license": "MIT",
   "private": false,
@@ -50,7 +50,7 @@
     "build": "tsc && node scripts/mark_dist_executable.js",
     "typecheck": "tsc --noEmit",
     "prepack": "npm run build",
-    "check": "npm run typecheck && python3 -m py_compile src/nyanya_agent/core.py src/nyanya_agent/bridge_common.py src/nyanya_agent/discord_bridge.py src/nyanya_agent/telegram_bridge.py"
+    "check": "npm run typecheck && python3 -m py_compile src/nyanya_agent/runtime_paths.py src/nyanya_agent/core.py src/nyanya_agent/bridge_common.py src/nyanya_agent/discord_bridge.py src/nyanya_agent/telegram_bridge.py src/nyanya_agent/manager.py src/nyanya_agent/dashboard_api.py src/nyanya_agent/dashboard_store.py"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",
