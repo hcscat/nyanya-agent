@@ -6,14 +6,18 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.setup = setup;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
+const config_1 = require("./config");
 const doctor_1 = require("./doctor");
 const python_1 = require("../runtime/python");
 const project_1 = require("../runtime/project");
 const python_2 = require("../runtime/python");
+const prompt_1 = require("../runtime/prompt");
 function parseSetupOptions(args) {
     return {
         all: args.includes("--all") || args.includes("--install-services"),
-        skipDeps: args.includes("--skip-deps")
+        skipDeps: args.includes("--skip-deps"),
+        configure: args.includes("--configure"),
+        nonInteractive: args.includes("--non-interactive")
     };
 }
 function printPrerequisiteHelp() {
@@ -29,21 +33,16 @@ function printPrerequisiteHelp() {
         console.error("Linux example: use your distribution package manager to install python3.11+ and python3-venv.");
     }
 }
-function ensureRuntimeFiles(projectRoot) {
-    for (const name of ["data", "logs", "run", "downloads", "config"]) {
-        const dir = path_1.default.join(projectRoot, name);
-        (0, project_1.ensureDir)(dir);
-        (0, project_1.chmodDirOwnerOnly)(dir);
-    }
-    const envPath = path_1.default.join(projectRoot, ".env");
-    const samplePath = path_1.default.join(projectRoot, ".env.example");
-    if (!fs_1.default.existsSync(envPath) && fs_1.default.existsSync(samplePath)) {
-        fs_1.default.copyFileSync(samplePath, envPath);
-        (0, project_1.chmodOwnerOnly)(envPath);
+function ensureRuntimeFiles(layout) {
+    (0, project_1.ensureRuntimeDirectories)(layout);
+    const samplePath = path_1.default.join(layout.codeRoot, ".env.example");
+    if (!fs_1.default.existsSync(layout.envPath) && fs_1.default.existsSync(samplePath)) {
+        fs_1.default.copyFileSync(samplePath, layout.envPath);
+        (0, project_1.chmodOwnerOnly)(layout.envPath);
         console.log("env_file=created");
     }
-    else if (fs_1.default.existsSync(envPath)) {
-        (0, project_1.chmodOwnerOnly)(envPath);
+    else if (fs_1.default.existsSync(layout.envPath)) {
+        (0, project_1.chmodOwnerOnly)(layout.envPath);
         console.log("env_file=present");
     }
     else {
@@ -52,16 +51,31 @@ function ensureRuntimeFiles(projectRoot) {
 }
 function setup(projectRoot, args) {
     const options = parseSetupOptions(args);
+    const layout = (0, project_1.resolveRuntimeLayout)(projectRoot);
     const python = (0, python_2.findPython)();
     if (!(0, python_2.satisfiesPython)(python)) {
         printPrerequisiteHelp();
         return 1;
     }
-    ensureRuntimeFiles(projectRoot);
+    ensureRuntimeFiles(layout);
+    console.log(`code_root=${layout.codeRoot}`);
+    console.log(`state_root=${layout.stateRoot}`);
+    console.log(`state_mode=${layout.legacyState ? "legacy-source" : "user"}`);
+    const shouldConfigure = options.configure || (!options.nonInteractive && (0, prompt_1.interactiveAvailable)() && (0, prompt_1.confirm)("Configure LLM and SNS connections now", true));
+    if (shouldConfigure) {
+        const configRc = (0, config_1.configure)(projectRoot);
+        if (configRc !== 0) {
+            return configRc;
+        }
+    }
+    const configStatusRc = (0, config_1.printConfigStatus)(projectRoot);
+    if (configStatusRc !== 0) {
+        return configStatusRc;
+    }
     if (!options.skipDeps) {
-        if (!(0, python_2.venvExists)(projectRoot)) {
+        if (!(0, python_2.venvExists)(layout.stateRoot)) {
             console.log(`venv=create python=${python?.command}`);
-            const venvRc = (0, python_2.createVenv)(projectRoot, python.command);
+            const venvRc = (0, python_2.createVenv)(layout, python.command);
             if (venvRc !== 0) {
                 return venvRc;
             }
@@ -70,7 +84,7 @@ function setup(projectRoot, args) {
             console.log("venv=present");
         }
         console.log("python_dependencies=install");
-        const depsRc = (0, python_2.installPythonDependencies)(projectRoot);
+        const depsRc = (0, python_2.installPythonDependencies)(layout);
         if (depsRc !== 0) {
             return depsRc;
         }
@@ -89,5 +103,5 @@ function setup(projectRoot, args) {
             }
         }
     }
-    return (0, doctor_1.doctor)(projectRoot);
+    return (0, doctor_1.doctor)(projectRoot, []);
 }

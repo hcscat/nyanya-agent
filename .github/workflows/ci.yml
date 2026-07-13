@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install Python dependencies
+        run: python -m pip install -e ".[bots,dashboard,dev]"
+
+      - name: Build and type-check CLI
+        run: npm run build && npm run check
+
+      - name: Run Python and CLI integration tests
+        env:
+          PYTHONPATH: src
+        run: python -m pytest -q
+
+      - name: Verify release contents and secrets
+        run: packaging/release/verify_release.sh

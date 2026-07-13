@@ -1,19 +1,25 @@
 import fs from "fs";
 import path from "path";
+import { configure, printConfigStatus } from "./config";
 import { doctor } from "./doctor";
 import { runPythonModule } from "../runtime/python";
-import { chmodDirOwnerOnly, chmodOwnerOnly, ensureDir } from "../runtime/project";
+import { RuntimeLayout, chmodOwnerOnly, ensureRuntimeDirectories, resolveRuntimeLayout } from "../runtime/project";
 import { createVenv, findPython, installPythonDependencies, satisfiesPython, venvExists } from "../runtime/python";
+import { confirm, interactiveAvailable } from "../runtime/prompt";
 
 type SetupOptions = {
   all: boolean;
   skipDeps: boolean;
+  configure: boolean;
+  nonInteractive: boolean;
 };
 
 function parseSetupOptions(args: string[]): SetupOptions {
   return {
     all: args.includes("--all") || args.includes("--install-services"),
-    skipDeps: args.includes("--skip-deps")
+    skipDeps: args.includes("--skip-deps"),
+    configure: args.includes("--configure"),
+    nonInteractive: args.includes("--non-interactive")
   };
 }
 
@@ -29,21 +35,15 @@ function printPrerequisiteHelp(): void {
   }
 }
 
-function ensureRuntimeFiles(projectRoot: string): void {
-  for (const name of ["data", "logs", "run", "downloads", "config"]) {
-    const dir = path.join(projectRoot, name);
-    ensureDir(dir);
-    chmodDirOwnerOnly(dir);
-  }
-
-  const envPath = path.join(projectRoot, ".env");
-  const samplePath = path.join(projectRoot, ".env.example");
-  if (!fs.existsSync(envPath) && fs.existsSync(samplePath)) {
-    fs.copyFileSync(samplePath, envPath);
-    chmodOwnerOnly(envPath);
+function ensureRuntimeFiles(layout: RuntimeLayout): void {
+  ensureRuntimeDirectories(layout);
+  const samplePath = path.join(layout.codeRoot, ".env.example");
+  if (!fs.existsSync(layout.envPath) && fs.existsSync(samplePath)) {
+    fs.copyFileSync(samplePath, layout.envPath);
+    chmodOwnerOnly(layout.envPath);
     console.log("env_file=created");
-  } else if (fs.existsSync(envPath)) {
-    chmodOwnerOnly(envPath);
+  } else if (fs.existsSync(layout.envPath)) {
+    chmodOwnerOnly(layout.envPath);
     console.log("env_file=present");
   } else {
     console.log("env_file=missing_sample");
@@ -52,18 +52,34 @@ function ensureRuntimeFiles(projectRoot: string): void {
 
 export function setup(projectRoot: string, args: string[]): number {
   const options = parseSetupOptions(args);
+  const layout = resolveRuntimeLayout(projectRoot);
   const python = findPython();
   if (!satisfiesPython(python)) {
     printPrerequisiteHelp();
     return 1;
   }
 
-  ensureRuntimeFiles(projectRoot);
+  ensureRuntimeFiles(layout);
+  console.log(`code_root=${layout.codeRoot}`);
+  console.log(`state_root=${layout.stateRoot}`);
+  console.log(`state_mode=${layout.legacyState ? "legacy-source" : "user"}`);
+
+  const shouldConfigure = options.configure || (!options.nonInteractive && interactiveAvailable() && confirm("Configure LLM and SNS connections now", true));
+  if (shouldConfigure) {
+    const configRc = configure(projectRoot);
+    if (configRc !== 0) {
+      return configRc;
+    }
+  }
+  const configStatusRc = printConfigStatus(projectRoot);
+  if (configStatusRc !== 0) {
+    return configStatusRc;
+  }
 
   if (!options.skipDeps) {
-    if (!venvExists(projectRoot)) {
+    if (!venvExists(layout.stateRoot)) {
       console.log(`venv=create python=${python?.command}`);
-      const venvRc = createVenv(projectRoot, python!.command);
+      const venvRc = createVenv(layout, python!.command);
       if (venvRc !== 0) {
         return venvRc;
       }
@@ -72,7 +88,7 @@ export function setup(projectRoot: string, args: string[]): number {
     }
 
     console.log("python_dependencies=install");
-    const depsRc = installPythonDependencies(projectRoot);
+    const depsRc = installPythonDependencies(layout);
     if (depsRc !== 0) {
       return depsRc;
     }
@@ -91,5 +107,5 @@ export function setup(projectRoot: string, args: string[]): number {
     }
   }
 
-  return doctor(projectRoot);
+  return doctor(projectRoot, []);
 }

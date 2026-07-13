@@ -15,26 +15,29 @@ exports.runPythonModule = runPythonModule;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const process_1 = require("./process");
-function venvPython(projectRoot) {
+const project_1 = require("./project");
+function venvPython(stateRoot) {
     return process.platform === "win32"
-        ? path_1.default.join(projectRoot, ".venv", "Scripts", "python.exe")
-        : path_1.default.join(projectRoot, ".venv", "bin", "python");
+        ? path_1.default.join(stateRoot, ".venv", "Scripts", "python.exe")
+        : path_1.default.join(stateRoot, ".venv", "bin", "python");
 }
-function venvExists(projectRoot) {
-    return fs_1.default.existsSync(venvPython(projectRoot));
+function venvExists(stateRoot) {
+    return fs_1.default.existsSync(venvPython(stateRoot));
 }
-function pythonCommand(projectRoot) {
-    const localPython = venvPython(projectRoot);
+function pythonCommand(layout) {
+    const localPython = venvPython(layout.stateRoot);
     if (fs_1.default.existsSync(localPython)) {
         return localPython;
     }
     return process.env.PYTHON || "python3";
 }
-function pythonEnv(projectRoot) {
-    const srcPath = path_1.default.join(projectRoot, "src");
+function pythonEnv(layout) {
+    const srcPath = path_1.default.join(layout.codeRoot, "src");
     return {
         ...process.env,
-        NYANYA_PROJECT_ROOT: projectRoot,
+        NYANYA_PROJECT_ROOT: layout.codeRoot,
+        NYANYA_HOME: layout.stateRoot,
+        NYANYA_ENV_FILE: layout.envPath,
         PYTHONPATH: process.env.PYTHONPATH ? `${srcPath}${path_1.default.delimiter}${process.env.PYTHONPATH}` : srcPath
     };
 }
@@ -59,20 +62,21 @@ function satisfiesPython(candidate) {
     }
     return candidate.major > 3 || (candidate.major === 3 && candidate.minor >= 11);
 }
-function createVenv(projectRoot, python) {
-    return (0, process_1.runInherit)(python, ["-m", "venv", path_1.default.join(projectRoot, ".venv")], { cwd: projectRoot });
+function createVenv(layout, python) {
+    return (0, process_1.runInherit)(python, ["-m", "venv", layout.venvRoot], { cwd: layout.codeRoot });
 }
-function installPythonDependencies(projectRoot) {
-    const python = venvPython(projectRoot);
-    const pipUpgrade = (0, process_1.runInherit)(python, ["-m", "pip", "install", "--upgrade", "pip"], { cwd: projectRoot });
+function installPythonDependencies(layout) {
+    const python = venvPython(layout.stateRoot);
+    const pipUpgrade = (0, process_1.runInherit)(python, ["-m", "pip", "install", "--upgrade", "pip"], { cwd: layout.codeRoot });
     if (pipUpgrade !== 0) {
         return pipUpgrade;
     }
-    return (0, process_1.runInherit)(python, ["-m", "pip", "install", "-e", ".[bots,dashboard]"], { cwd: projectRoot });
+    return (0, process_1.runInherit)(python, ["-m", "pip", "install", "--upgrade", `${layout.codeRoot}[bots,dashboard]`], { cwd: layout.codeRoot });
 }
 function runPythonModule(projectRoot, moduleName, args) {
-    return (0, process_1.runInherit)(pythonCommand(projectRoot), ["-m", moduleName, ...args], {
-        cwd: projectRoot,
-        env: pythonEnv(projectRoot)
+    const layout = (0, project_1.resolveRuntimeLayout)(projectRoot);
+    return (0, process_1.runInherit)(pythonCommand(layout), ["-m", moduleName, ...args], {
+        cwd: layout.codeRoot,
+        env: pythonEnv(layout)
     });
 }

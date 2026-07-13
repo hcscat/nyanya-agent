@@ -13,8 +13,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from nyanya_agent import core
 from nyanya_agent import dashboard_store as store
 
+
+core.load_env(core.DEFAULT_ENV)
 
 STATIC_DIR = Path(__file__).resolve().parent / "dashboard_static"
 
@@ -40,7 +43,7 @@ class MemoryUpdate(BaseModel):
 
 def create_app(db_path: str | Path | None = None) -> FastAPI:
     store.init_db(db_path)
-    app = FastAPI(title="NyaNya Agent Dashboard", version="0.1.0")
+    app = FastAPI(title="NyaNya Agent Dashboard", version="0.2.0")
     app.state.db_path = db_path
 
     app.add_middleware(

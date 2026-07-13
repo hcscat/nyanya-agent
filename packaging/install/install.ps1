@@ -1,6 +1,7 @@
 param(
     [string]$Source = "",
-    [string]$InstallDir = "$env:LOCALAPPDATA\nyanya-agent",
+    [string]$InstallDir = "$env:LOCALAPPDATA\Programs\NyaNya Agent",
+    [string]$StateDir = "$env:LOCALAPPDATA\NyaNya Agent",
     [string]$BinDir = "$env:USERPROFILE\.local\bin",
     [string]$RepoUrl = "https://github.com/hcscat/nyanya-agent.git",
     [switch]$Force,
@@ -49,22 +50,31 @@ if (Test-Path (Join-Path $InstallDir "docs\private")) {
     Remove-Item -Recurse -Force (Join-Path $InstallDir "docs\private")
 }
 
-$envPath = Join-Path $InstallDir ".env"
+$envPath = Join-Path $StateDir ".env"
+foreach ($name in @("config", "data", "downloads", "logs", "run", "sessions")) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $StateDir $name) | Out-Null
+}
 if (-not (Test-Path $envPath) -and (Test-Path (Join-Path $InstallDir ".env.example"))) {
     Copy-Item (Join-Path $InstallDir ".env.example") $envPath
 }
 
-python -m venv (Join-Path $InstallDir ".venv")
-$pythonExe = Join-Path $InstallDir ".venv\Scripts\python.exe"
+python -m venv (Join-Path $StateDir ".venv")
+$pythonExe = Join-Path $StateDir ".venv\Scripts\python.exe"
 if (-not $SkipDeps) {
     & $pythonExe -m pip install --upgrade pip
-    & $pythonExe -m pip install -e "$InstallDir[bots,dashboard]"
+    & $pythonExe -m pip install --upgrade "$InstallDir[bots,dashboard]"
 }
 
 function Write-Launcher($Name, $Module) {
     $path = Join-Path $BinDir "$Name.ps1"
     @"
 `$env:NYANYA_PROJECT_ROOT = "$InstallDir"
+`$env:NYANYA_HOME = "$StateDir"
+`$env:NYANYA_ENV_FILE = "$envPath"
+if ("$Name" -eq "nyanya" -and (Get-Command node -ErrorAction SilentlyContinue)) {
+    & node "$InstallDir\dist\bin\nyanya.js" @args
+    exit `$LASTEXITCODE
+}
 & "$pythonExe" -m "$Module" @args
 exit `$LASTEXITCODE
 "@ | Set-Content -Encoding UTF8 $path
@@ -84,5 +94,6 @@ if ($tempDir) {
 
 Write-Host "NyaNya Agent installed."
 Write-Host "Install dir: $InstallDir"
+Write-Host "State dir: $StateDir"
 Write-Host "Command dir: $BinDir"
-Write-Host "Next: nyanya --check"
+Write-Host "Next: nyanya config; nyanya doctor; nyanya"

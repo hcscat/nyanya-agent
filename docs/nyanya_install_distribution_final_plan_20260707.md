@@ -2,6 +2,21 @@
 
 작성일: 2026-07-07 KST
 
+## 0. 2026-07-13 구현 업데이트
+
+`0.2.0` 배포 후보에서 다음 항목을 구현했다.
+
+- npm package code와 mutable user state를 `NYANYA_HOME`으로 분리
+- macOS 기본 state 경로를 `~/Library/Application Support/NyaNya Agent`로 지정
+- 기존 source checkout의 `.env`를 감지해 legacy state를 유지하는 호환 처리
+- `nyanya setup` 대화형 LLM/SNS 설정과 non-interactive 설치 모드
+- `nyanya config`, `nyanya auth`, `nyanya paths`, `nyanya state backup`, `nyanya state migrate`
+- config 문법/port/boolean/connector allow-list 내장 검증
+- LaunchAgent가 code root와 state root를 분리해 전달하도록 개선
+- npm update와 uninstall 시 user state 보존 정책 명시
+
+이 문서의 초기 계획 중 Homebrew tap, Slack connector, GitHub Actions 자동 publish는 후속 단계로 유지한다. npm `0.2.0` publish 자체는 별도 승인 후 수행한다.
+
 이 문서는 NyaNya Agent를 npm 중심으로 배포하기 위한 현재 기준의 최종 권장안이다. Homebrew 배포는 npm 설치/배포 안정화 이후 별도 단계로 진행한다.
 
 ## 1. 결론

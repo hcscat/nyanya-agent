@@ -22,14 +22,13 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from nyanya_agent import runtime_paths
 
-SOURCE_ROOT = pathlib.Path(__file__).resolve().parents[2]
-PROJECT_ROOT = pathlib.Path(os.getenv("NYANYA_PROJECT_ROOT", "")).expanduser() if os.getenv("NYANYA_PROJECT_ROOT") else (
-    pathlib.Path.cwd() if (pathlib.Path.cwd() / "config" / "nyanya.json").exists() else SOURCE_ROOT
-)
-PROJECT_ROOT = PROJECT_ROOT.resolve(strict=False)
+SOURCE_ROOT = runtime_paths.SOURCE_ROOT
+PROJECT_ROOT = runtime_paths.CODE_ROOT
+STATE_ROOT = runtime_paths.STATE_ROOT
 DEFAULT_CONFIG = PROJECT_ROOT / "config" / "nyanya.json"
-DEFAULT_ENV = PROJECT_ROOT / ".env"
+DEFAULT_ENV = runtime_paths.ENV_FILE
 
 
 def load_env(path: pathlib.Path) -> None:
@@ -276,7 +275,7 @@ def process_summary(pattern: str) -> str:
 def runtime_status_context(config: dict[str, Any]) -> str:
     resolved_google_cli = resolve_gemini_like_cli(str(config.get("gemini_cli") or "gemini"))
     google_cli_family = "antigravity" if is_antigravity_cli(resolved_google_cli) else "gemini"
-    pid_file = PROJECT_ROOT / "run" / "ollama.pid"
+    pid_file = STATE_ROOT / "run" / "ollama.pid"
     if pid_file.exists():
         pid_text = pid_file.read_text(encoding="utf-8").strip()
         pid_state = f"present value={pid_text or '<empty>'}"
@@ -295,6 +294,7 @@ def runtime_status_context(config: dict[str, Any]) -> str:
         f"- configured_google_cli={config.get('gemini_cli')}",
         f"- resolved_google_cli={resolved_google_cli}",
         f"- process_working_directory={PROJECT_ROOT}",
+        f"- runtime_state_directory={STATE_ROOT}",
         f"- default_cli_workspace={default_cli_workspace()}",
         f"- allowed_workspace_roots={', '.join(str(root) for root in configured_workspace_roots())}",
         f"- ollama_pid_file={pid_state}",
@@ -454,7 +454,7 @@ def save_session(config: dict[str, Any], messages: list[dict[str, str]]) -> path
         return None
     sessions_dir = pathlib.Path(config.get("sessions_dir", "sessions"))
     if not sessions_dir.is_absolute():
-        sessions_dir = PROJECT_ROOT / sessions_dir
+        sessions_dir = STATE_ROOT / sessions_dir
     sessions_dir.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     path = sessions_dir / f"nyanya-{stamp}.json"
@@ -496,7 +496,10 @@ def run_single_prompt(config: dict[str, Any], prompt: str) -> int:
 def run_repl(config: dict[str, Any]) -> int:
     messages = build_messages(config)
     print(f"{agent_display_name(config)} local agent: provider={config['provider']} model={config['model']}")
-    print("Commands: /exit, /reset, /save, /config")
+    dashboard_host = os.getenv("NYANYA_DASHBOARD_HOST", "127.0.0.1")
+    dashboard_port = os.getenv("NYANYA_DASHBOARD_PORT", "8765")
+    print(f"Dashboard: http://{dashboard_host}:{dashboard_port}")
+    print("Commands: /exit, /reset, /save, /config, /settings, /dashboard")
     while True:
         try:
             user_text = input("\nYou> ").strip()
@@ -518,6 +521,12 @@ def run_repl(config: dict[str, Any]) -> int:
         if user_text == "/config":
             visible = {k: v for k, v in config.items() if "key" not in k.lower()}
             print(json.dumps(visible, ensure_ascii=False, indent=2))
+            continue
+        if user_text == "/settings":
+            print("Run `nyanya config` in a terminal to change LLM or SNS settings securely.")
+            continue
+        if user_text == "/dashboard":
+            print(f"http://{dashboard_host}:{dashboard_port}")
             continue
 
         dynamic_memory = build_dynamic_memory_context(user_text)

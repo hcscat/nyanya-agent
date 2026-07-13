@@ -65,9 +65,9 @@ def trusted_workspace_roots() -> list[pathlib.Path]:
 
 def workspace_config_path() -> pathlib.Path:
     raw = os.getenv("NYANYA_USER_WORKSPACES_FILE", "").strip()
-    path = pathlib.Path(raw).expanduser() if raw else nyanya.PROJECT_ROOT / "config" / "user_workspaces.json"
+    path = pathlib.Path(raw).expanduser() if raw else nyanya.STATE_ROOT / "config" / "user_workspaces.json"
     if not path.is_absolute():
-        path = nyanya.PROJECT_ROOT / path
+        path = nyanya.STATE_ROOT / path
     return path.resolve(strict=False)
 
 
@@ -131,7 +131,8 @@ def protected_delete_paths() -> list[pathlib.Path]:
     for item in items:
         path = pathlib.Path(item).expanduser()
         if not path.is_absolute():
-            path = nyanya.PROJECT_ROOT / path
+            state_candidate = nyanya.STATE_ROOT / path
+            path = state_candidate if state_candidate.exists() or path.parts[:1] in {(".env",), ("data",), ("logs",), ("run",), ("sessions",)} else nyanya.PROJECT_ROOT / path
         resolved = path.resolve(strict=False)
         if resolved not in protected:
             protected.append(resolved)

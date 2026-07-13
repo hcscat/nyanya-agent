@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { run, runInherit } from "./process";
+import { RuntimeLayout, resolveRuntimeLayout } from "./project";
 
 export type PythonCandidate = {
   command: string;
@@ -10,29 +11,31 @@ export type PythonCandidate = {
   patch: number;
 };
 
-export function venvPython(projectRoot: string): string {
+export function venvPython(stateRoot: string): string {
   return process.platform === "win32"
-    ? path.join(projectRoot, ".venv", "Scripts", "python.exe")
-    : path.join(projectRoot, ".venv", "bin", "python");
+    ? path.join(stateRoot, ".venv", "Scripts", "python.exe")
+    : path.join(stateRoot, ".venv", "bin", "python");
 }
 
-export function venvExists(projectRoot: string): boolean {
-  return fs.existsSync(venvPython(projectRoot));
+export function venvExists(stateRoot: string): boolean {
+  return fs.existsSync(venvPython(stateRoot));
 }
 
-export function pythonCommand(projectRoot: string): string {
-  const localPython = venvPython(projectRoot);
+export function pythonCommand(layout: RuntimeLayout): string {
+  const localPython = venvPython(layout.stateRoot);
   if (fs.existsSync(localPython)) {
     return localPython;
   }
   return process.env.PYTHON || "python3";
 }
 
-export function pythonEnv(projectRoot: string): NodeJS.ProcessEnv {
-  const srcPath = path.join(projectRoot, "src");
+export function pythonEnv(layout: RuntimeLayout): NodeJS.ProcessEnv {
+  const srcPath = path.join(layout.codeRoot, "src");
   return {
     ...process.env,
-    NYANYA_PROJECT_ROOT: projectRoot,
+    NYANYA_PROJECT_ROOT: layout.codeRoot,
+    NYANYA_HOME: layout.stateRoot,
+    NYANYA_ENV_FILE: layout.envPath,
     PYTHONPATH: process.env.PYTHONPATH ? `${srcPath}${path.delimiter}${process.env.PYTHONPATH}` : srcPath
   };
 }
@@ -60,22 +63,23 @@ export function satisfiesPython(candidate: PythonCandidate | null): boolean {
   return candidate.major > 3 || (candidate.major === 3 && candidate.minor >= 11);
 }
 
-export function createVenv(projectRoot: string, python: string): number {
-  return runInherit(python, ["-m", "venv", path.join(projectRoot, ".venv")], { cwd: projectRoot });
+export function createVenv(layout: RuntimeLayout, python: string): number {
+  return runInherit(python, ["-m", "venv", layout.venvRoot], { cwd: layout.codeRoot });
 }
 
-export function installPythonDependencies(projectRoot: string): number {
-  const python = venvPython(projectRoot);
-  const pipUpgrade = runInherit(python, ["-m", "pip", "install", "--upgrade", "pip"], { cwd: projectRoot });
+export function installPythonDependencies(layout: RuntimeLayout): number {
+  const python = venvPython(layout.stateRoot);
+  const pipUpgrade = runInherit(python, ["-m", "pip", "install", "--upgrade", "pip"], { cwd: layout.codeRoot });
   if (pipUpgrade !== 0) {
     return pipUpgrade;
   }
-  return runInherit(python, ["-m", "pip", "install", "-e", ".[bots,dashboard]"], { cwd: projectRoot });
+  return runInherit(python, ["-m", "pip", "install", "--upgrade", `${layout.codeRoot}[bots,dashboard]`], { cwd: layout.codeRoot });
 }
 
 export function runPythonModule(projectRoot: string, moduleName: string, args: string[]): number {
-  return runInherit(pythonCommand(projectRoot), ["-m", moduleName, ...args], {
-    cwd: projectRoot,
-    env: pythonEnv(projectRoot)
+  const layout = resolveRuntimeLayout(projectRoot);
+  return runInherit(pythonCommand(layout), ["-m", moduleName, ...args], {
+    cwd: layout.codeRoot,
+    env: pythonEnv(layout)
   });
 }

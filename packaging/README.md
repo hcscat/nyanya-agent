@@ -34,15 +34,17 @@ packaging/
 
 ## Current Install Target
 
-The first packaging target is a per-user local install:
+The first packaging target separates immutable code from mutable per-user state:
 
 ```text
-code: ~/.local/share/nyanya-agent
+code: ~/.local/lib/nyanya-agent
 commands: ~/.local/bin/nyanya, ~/.local/bin/nyanya-agent, ~/.local/bin/nyanyactl
-private runtime config: ~/.local/share/nyanya-agent/.env
+macOS state: ~/Library/Application Support/NyaNya Agent
+Linux state: ${XDG_DATA_HOME:-~/.local/share}/nyanya-agent
+Windows state: %LOCALAPPDATA%\NyaNya Agent
 ```
 
-The installer does not overwrite an existing `.env`.
+The installer does not overwrite an existing `.env`. Uninstall removes code and commands but preserves state unless the explicit purge option is used.
 
 ## Current Distribution Plan
 
@@ -57,7 +59,8 @@ The short version:
 - Keep the agent runtime, dashboard API, and messenger bridges in Python.
 - Move the npm installer/CLI layer to TypeScript, compiled to JavaScript for npm `bin` entrypoints.
 - Keep `npm install` lightweight; run full setup through `nyanya setup`.
-- Let `nyanya setup` prepare the Python runtime, dependencies, dashboard, Discord bridge, memory worker, and optional LaunchAgent services.
+- Let `nyanya setup` prepare the Python runtime, dependencies, interactive LLM/SNS configuration, dashboard, Discord bridge, memory worker, and optional LaunchAgent services.
+- Keep `.env`, `.venv`, SQLite data, logs, downloads, and sessions under `NYANYA_HOME`, outside the npm package directory.
 - Do not silently install system prerequisites such as Python, Node.js, or Git. Detect them and provide explicit installation guidance.
 - Use an isolated Python runtime for installed deployments.
 - Defer Homebrew until the npm setup and publish flow is stable.

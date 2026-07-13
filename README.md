@@ -18,6 +18,8 @@ Korean guide: [README.KO.md](README.KO.md)
 
 This repository is an independent lightweight project. It is not the official Hermes Agent and does not vendor another agent project's source tree.
 
+The current source is the `0.2.0` release candidate. The npm registry still exposes `0.1.0` as latest; publishing `0.2.0` is a separate step after validation and GitHub synchronization.
+
 The implementation is intentionally small and inspectable:
 
 ```text
@@ -34,7 +36,60 @@ src/nyanya_agent/discord_bridge.py    # Discord bridge
 src/nyanya_agent/telegram_bridge.py   # Telegram bridge
 ```
 
-## Install
+## npm Install
+
+For normal use, install the CLI with npm, then run `setup` before `doctor`.
+
+```bash
+npm install -g @hcscat-dev/nyanya-agent
+nyanya setup --all
+nyanya doctor
+```
+
+`npm install` installs only the Node/TypeScript CLI. `nyanya setup` creates the Python virtual environment and installs Python dependencies such as `discord.py`, `fastapi`, and `uvicorn`. In an interactive terminal it also offers LLM provider and Discord/Telegram setup. For automation, use `nyanya setup --all --non-interactive`.
+
+On macOS, `--all` configures the dashboard, Discord bridge, and memory worker LaunchAgents. If no Discord token exists, only the Discord service is skipped. `postinstall` is intentionally not used because Python may be absent and install-time runtime side effects are difficult to recover.
+
+Package code and mutable user state are separated:
+
+| OS | Default `NYANYA_HOME` |
+|---|---|
+| macOS | `~/Library/Application Support/NyaNya Agent` |
+| Linux | `${XDG_DATA_HOME:-~/.local/share}/nyanya-agent` |
+| Windows | `%LOCALAPPDATA%\NyaNya Agent` |
+
+The `.env`, `.venv`, SQLite database, logs, and sessions stay under `NYANYA_HOME`, so npm updates do not replace them. Existing source checkouts with a local `.env` keep legacy source-local state for compatibility.
+
+Configuration and state commands:
+
+```bash
+nyanya config
+nyanya config show
+nyanya config validate
+nyanya auth
+nyanya paths
+nyanya state backup
+```
+
+Discord and Telegram tokens are optional; their bridges remain disabled until configured. Slack is not included yet.
+
+Service control:
+
+```bash
+nyanya service start
+nyanya service status
+nyanya service stop
+nyanya service uninstall
+nyanya update
+```
+
+`nyanya service stop` stops the NyaNya-managed Discord bridge, dashboard, and memory worker services together. For isolated install tests, set `NYANYA_SERVICE_LABEL_PREFIX` so the test commands control only test services.
+
+Update with `npm update -g @hcscat-dev/nyanya-agent`, then run `nyanya setup --non-interactive`. To uninstall, run `nyanya service uninstall` before `npm uninstall -g @hcscat-dev/nyanya-agent`. Removing the npm package does not purge `NYANYA_HOME`.
+
+If a `0.1.x` install stored a real `.env` or database inside the npm package directory, back it up before updating to `0.2.0`. Releases from `0.2.0` onward provide `nyanya state backup` and `nyanya state migrate`. Existing source-checkout deployments continue using their legacy state directory automatically.
+
+## Source Install
 
 Clone and install the package:
 
@@ -83,6 +138,8 @@ NYANYA_MEMORY_RETRIEVAL_ENABLED=true
 NYANYA_MEMORY_WORKER_INTERVAL_SECONDS=1800
 NYANYA_MEMORY_WORKER_LLM_REFINEMENT=false
 ```
+
+Set `NYANYA_HOME` in the shell or service environment because it is needed before `.env` can be located. Relative mutable paths resolve from `NYANYA_HOME`; package assets such as the system prompt resolve from the code root.
 
 Keep workspace roots narrow. NyaNya Agent is a router and policy layer, not a sandbox.
 
@@ -319,7 +376,7 @@ The project is Python-based, but it includes an npm wrapper for easier sharing:
 
 ```bash
 npm install -g @hcscat-dev/nyanya-agent
-nyanya setup
+nyanya setup --all
 nyanya doctor
 ```
 

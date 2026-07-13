@@ -49,6 +49,7 @@ while IFS= read -r pattern; do
 done < packaging/release/package-denylist.txt
 
 python3 -m py_compile \
+  src/nyanya_agent/runtime_paths.py \
   src/nyanya_agent/core.py \
   src/nyanya_agent/bridge_common.py \
   src/nyanya_agent/discord_bridge.py \
@@ -76,11 +77,20 @@ else
 fi
 
 if rg --glob '!packaging/release/verify_release.sh' -n "DISCORD_BOT_TOKEN=.+|NYANYA_DISCORD_BOT_TOKEN=.+|OPENAI_API_KEY=.+|AIza[0-9A-Za-z_-]{20,}|ghp_[0-9A-Za-z_]{20,}|sk-[A-Za-z0-9_-]{20,}" \
-  README.md README.KO.md docs/*.md docs/*.html packaging package.json pyproject.toml src bin scripts prompts config .env.example >/tmp/nyanya-secret-scan.txt; then
+  README.md README.KO.md docs/*.md docs/*.html .github packaging package.json pyproject.toml cli src bin scripts prompts config .env.example >/tmp/nyanya-secret-scan.txt; then
   cat /tmp/nyanya-secret-scan.txt
   fail "potential secret found"
 else
   ok "secret scan found no token-like values in release paths"
+fi
+
+package_version="$(node -p "require('./package.json').version")"
+lock_version="$(node -p "require('./package-lock.json').version")"
+python_version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+if [ "$package_version" = "$lock_version" ] && [ "$package_version" = "$python_version" ]; then
+  ok "package, lock, and Python versions match: $package_version"
+else
+  fail "version mismatch: package=$package_version lock=$lock_version python=$python_version"
 fi
 
 if [ "$failures" -gt 0 ]; then

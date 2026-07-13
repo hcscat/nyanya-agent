@@ -18,7 +18,7 @@ from uuid import uuid4
 from nyanya_agent import core as nyanya
 
 
-DEFAULT_DB_PATH = nyanya.PROJECT_ROOT / "data" / "nyanya_dashboard.db"
+DEFAULT_DB_PATH = nyanya.STATE_ROOT / "data" / "nyanya_dashboard.db"
 PHASE_ORDER = ("planning", "design", "implementation", "test")
 PHASE_LABELS = {
     "planning": "기획",
@@ -49,7 +49,10 @@ def decode_json(value: str | None, fallback: Any = None) -> Any:
 
 def resolve_db_path(db_path: str | Path | None = None) -> Path:
     raw = db_path or os.getenv("NYANYA_DASHBOARD_DB_PATH") or DEFAULT_DB_PATH
-    return Path(raw).expanduser().resolve(strict=False)
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = nyanya.STATE_ROOT / path
+    return path.resolve(strict=False)
 
 
 @contextmanager
