@@ -43,7 +43,7 @@ class MemoryUpdate(BaseModel):
 
 def create_app(db_path: str | Path | None = None) -> FastAPI:
     store.init_db(db_path)
-    app = FastAPI(title="NyaNya Agent Dashboard", version="0.2.0")
+    app = FastAPI(title="NyaNya Agent Dashboard", version="0.2.1")
     app.state.db_path = db_path
 
     app.add_middleware(

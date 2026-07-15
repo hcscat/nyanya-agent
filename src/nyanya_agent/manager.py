@@ -697,7 +697,7 @@ def discord_api(method: str, payload: dict[str, Any] | None = None) -> dict[str,
     request = urllib.request.Request("https://discord.com/api/v10/users/@me", data=data, method=method)
     request.add_header("Authorization", f"Bot {token}")
     request.add_header("Content-Type", "application/json")
-    request.add_header("User-Agent", "nyanya-agent/0.2.0")
+    request.add_header("User-Agent", "nyanya-agent/0.2.1")
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
 

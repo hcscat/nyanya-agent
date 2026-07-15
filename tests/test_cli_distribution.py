@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -9,6 +10,14 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "dist" / "bin" / "nyanya.js"
+
+
+def test_npm_manifest_includes_dashboard_assets():
+    manifest = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+
+    assert "src/nyanya_agent/dashboard_static/**/*" in manifest["files"]
+    for name in ("index.html", "styles.css", "app.js"):
+        assert (ROOT / "src" / "nyanya_agent" / "dashboard_static" / name).is_file()
 
 
 def run_cli(state_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
