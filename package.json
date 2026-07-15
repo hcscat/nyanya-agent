@@ -1,6 +1,6 @@
 {
   "name": "@hcscat-dev/nyanya-agent",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "TypeScript CLI and Python runtime package for NyaNya Agent.",
   "license": "MIT",
   "private": false,
@@ -22,6 +22,7 @@
     "dist/**/*.js",
     "cli/src/**/*.ts",
     "src/nyanya_agent/*.py",
+    "src/nyanya_agent/dashboard_static/**/*",
     "config/nyanya.json",
     "config/user_workspaces.example.json",
     "docs/*.md",

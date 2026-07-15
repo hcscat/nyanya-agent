@@ -66,11 +66,31 @@ bash -n packaging/release/generate_checksums.sh
 ok "shell scripts parse"
 
 if command -v npm >/dev/null 2>&1; then
-  npm pack --dry-run >/tmp/nyanya-npm-pack.txt
-  if grep -E '(^|/)(\.env|data/|logs/|run/|downloads/|docs/private/)' /tmp/nyanya-npm-pack.txt >/dev/null; then
-    fail "npm pack dry-run includes private/generated paths"
+  npm pack --dry-run --json >/tmp/nyanya-npm-pack.json
+  if node <<'NODE'
+const fs = require("fs");
+const result = JSON.parse(fs.readFileSync("/tmp/nyanya-npm-pack.json", "utf8"))[0];
+const paths = new Set((result.files || []).map((file) => file.path));
+const required = [
+  "src/nyanya_agent/dashboard_static/index.html",
+  "src/nyanya_agent/dashboard_static/styles.css",
+  "src/nyanya_agent/dashboard_static/app.js",
+];
+const missing = required.filter((path) => !paths.has(path));
+const privatePrefixes = ["data/", "logs/", "run/", "downloads/", "docs/private/"];
+const privatePath = [...paths].find(
+  (path) => path === ".env" || privatePrefixes.some((prefix) => path.startsWith(prefix))
+);
+if (missing.length || privatePath) {
+  if (missing.length) console.error(`missing package assets: ${missing.join(", ")}`);
+  if (privatePath) console.error(`private/generated package path: ${privatePath}`);
+  process.exit(1);
+}
+NODE
+  then
+    ok "npm pack includes dashboard assets and excludes private/generated paths"
   else
-    ok "npm pack dry-run excludes private/generated paths"
+    fail "npm package contents are incomplete or unsafe"
   fi
 else
   echo "[WARN] npm not found; skipped npm pack dry-run"

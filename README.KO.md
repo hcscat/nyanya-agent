@@ -18,7 +18,7 @@ English guide: [README.md](README.md)
 
 이 저장소는 독립적인 경량 프로젝트다. 공식 Hermes Agent가 아니며, 다른 agent 프로젝트의 소스 트리를 포함하거나 복사하지 않는다.
 
-현재 패키지 릴리스는 `0.2.0`이다. npm에 공개된 버전은 `npm view @hcscat-dev/nyanya-agent version`으로 확인할 수 있다.
+현재 패키지 릴리스는 `0.2.1`이다. npm에 공개된 버전은 `npm view @hcscat-dev/nyanya-agent version`으로 확인할 수 있다.
 
 주요 구현 파일:
 
