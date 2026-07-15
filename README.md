@@ -18,7 +18,7 @@ Korean guide: [README.KO.md](README.KO.md)
 
 This repository is an independent lightweight project. It is not the official Hermes Agent and does not vendor another agent project's source tree.
 
-The current source is the `0.2.0` release candidate. The npm registry still exposes `0.1.0` as latest; publishing `0.2.0` is a separate step after validation and GitHub synchronization.
+The current package release is `0.2.0`. Check the published npm version with `npm view @hcscat-dev/nyanya-agent version`.
 
 The implementation is intentionally small and inspectable:
 
