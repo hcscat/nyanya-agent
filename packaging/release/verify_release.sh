@@ -56,6 +56,10 @@ python3 -m py_compile \
   src/nyanya_agent/telegram_bridge.py \
   src/nyanya_agent/dashboard_api.py \
   src/nyanya_agent/dashboard_store.py \
+  src/nyanya_agent/execution_store.py \
+  src/nyanya_agent/adapter_runner.py \
+  src/nyanya_agent/execution_adapters.py \
+  src/nyanya_agent/execution_runtime.py \
   src/nyanya_agent/manager.py \
   src/nyanya_agent/memory_worker.py
 ok "python modules compile"
@@ -63,6 +67,8 @@ ok "python modules compile"
 bash -n packaging/install/install.sh
 bash -n packaging/install/uninstall.sh
 bash -n packaging/release/generate_checksums.sh
+bash -n scripts/backup_state.sh
+bash -n scripts/restore_state.sh
 ok "shell scripts parse"
 
 if command -v npm >/dev/null 2>&1; then
@@ -72,6 +78,9 @@ const fs = require("fs");
 const result = JSON.parse(fs.readFileSync("/tmp/nyanya-npm-pack.json", "utf8"))[0];
 const paths = new Set((result.files || []).map((file) => file.path));
 const required = [
+  "src/nyanya_agent/execution_store.py",
+  "src/nyanya_agent/execution_adapters.py",
+  "src/nyanya_agent/execution_runtime.py",
   "src/nyanya_agent/dashboard_static/index.html",
   "src/nyanya_agent/dashboard_static/styles.css",
   "src/nyanya_agent/dashboard_static/app.js",
@@ -81,9 +90,12 @@ const privatePrefixes = ["data/", "logs/", "run/", "downloads/", "docs/private/"
 const privatePath = [...paths].find(
   (path) => path === ".env" || privatePrefixes.some((prefix) => path.startsWith(prefix))
 );
-if (missing.length || privatePath) {
+const localReportPrefixes = ["docs/nyanya_orca_remote_agent_office_plan_", "docs/phase0_baseline_"];
+const localReport = [...paths].find((path) => localReportPrefixes.some((prefix) => path.startsWith(prefix)));
+if (missing.length || privatePath || localReport) {
   if (missing.length) console.error(`missing package assets: ${missing.join(", ")}`);
   if (privatePath) console.error(`private/generated package path: ${privatePath}`);
+  if (localReport) console.error(`local planning/evidence document in package: ${localReport}`);
   process.exit(1);
 }
 NODE
@@ -96,12 +108,54 @@ else
   echo "[WARN] npm not found; skipped npm pack dry-run"
 fi
 
-if rg --glob '!packaging/release/verify_release.sh' -n "DISCORD_BOT_TOKEN=.+|NYANYA_DISCORD_BOT_TOKEN=.+|OPENAI_API_KEY=.+|AIza[0-9A-Za-z_-]{20,}|ghp_[0-9A-Za-z_]{20,}|sk-[A-Za-z0-9_-]{20,}" \
-  README.md README.KO.md docs/*.md docs/*.html .github packaging package.json pyproject.toml cli src bin scripts prompts config .env.example >/tmp/nyanya-secret-scan.txt; then
-  cat /tmp/nyanya-secret-scan.txt
-  fail "potential secret found"
+tracked_paths=()
+while IFS= read -r -d '' path; do
+  if [ -f "$path" ] && [ "$path" != "packaging/release/verify_release.sh" ]; then
+    tracked_paths+=("$path")
+  fi
+done < <(git ls-files -z)
+
+set +e
+rg -I -i -l \
+  -e '/Users/[A-Za-z0-9._-]+/' \
+  -e '\b[0-9]{17,20}\b' \
+  -e '[A-Za-z0-9._%+-]+@(gmail|naver|icloud|outlook|hotmail)\.[A-Za-z]{2,}' \
+  -e 'tail[0-9]{4,}\.ts\.net' \
+  "${tracked_paths[@]}" \
+  >/tmp/nyanya-personal-data-scan.txt
+personal_scan_rc=$?
+set -e
+if [ "$personal_scan_rc" -eq 0 ]; then
+  sed -n '1,100p' /tmp/nyanya-personal-data-scan.txt
+  fail "personal path, email, tailnet hostname, or long account/message identifier found in tracked files"
+elif [ "$personal_scan_rc" -eq 1 ]; then
+  ok "all tracked files contain no personal path, email, tailnet hostname, or long account/message identifier"
 else
-  ok "secret scan found no token-like values in release paths"
+  fail "personal data scan could not inspect all tracked files"
+fi
+
+set +e
+rg -I -l \
+  -e 'BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY' \
+  -e 'AKIA[0-9A-Z]{16}' \
+  -e 'github_pat_[A-Za-z0-9_]{20,}' \
+  -e 'gh[pousr]_[A-Za-z0-9_]{20,}' \
+  -e 'AIza[0-9A-Za-z_-]{20,}' \
+  -e 'sk-[A-Za-z0-9_-]{20,}' \
+  -e 'xox[baprs]-[A-Za-z0-9-]{20,}' \
+  -e '[MN][A-Za-z0-9_-]{23,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{20,}' \
+  -e 'DISCORD_BOT_TOKEN=.+|NYANYA_DISCORD_BOT_TOKEN=.+|OPENAI_API_KEY=.+' \
+  "${tracked_paths[@]}" \
+  >/tmp/nyanya-secret-scan.txt
+secret_scan_rc=$?
+set -e
+if [ "$secret_scan_rc" -eq 0 ]; then
+  sed -n '1,100p' /tmp/nyanya-secret-scan.txt
+  fail "potential secret found in tracked files"
+elif [ "$secret_scan_rc" -eq 1 ]; then
+  ok "all tracked files contain no token-like or private-key values"
+else
+  fail "secret scan could not inspect all tracked files"
 fi
 
 package_version="$(node -p "require('./package.json').version")"

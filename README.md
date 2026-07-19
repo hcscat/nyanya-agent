@@ -18,7 +18,7 @@ Korean guide: [README.KO.md](README.KO.md)
 
 This repository is an independent lightweight project. It is not the official Hermes Agent and does not vendor another agent project's source tree.
 
-The current package release is `0.2.1`. Check the published npm version with `npm view @hcscat-dev/nyanya-agent version`.
+The current source version is `0.3.0`. Check the published npm version with `npm view @hcscat-dev/nyanya-agent version`.
 
 The implementation is intentionally small and inspectable:
 
@@ -30,6 +30,9 @@ src/nyanya_agent/bridge_policy.py     # workspace, command, and safety policy he
 src/nyanya_agent/bridge_runtime.py    # Codex delegation and runtime helpers
 src/nyanya_agent/bridge_store.py      # conversation store and per-user task queue
 src/nyanya_agent/dashboard_store.py   # SQLite dashboard/event store
+src/nyanya_agent/execution_store.py   # versioned task/execution/approval ledger
+src/nyanya_agent/execution_adapters.py # subprocess, tmux, Orca, Codex, and Antigravity adapters
+src/nyanya_agent/execution_runtime.py # adapter lifecycle, recovery, and writer-lease coordinator
 src/nyanya_agent/dashboard_api.py     # FastAPI dashboard server
 src/nyanya_agent/memory_worker.py     # background long-term memory candidate worker
 src/nyanya_agent/discord_bridge.py    # Discord bridge
@@ -130,10 +133,14 @@ NYANYA_DISCORD_FILE_SHARE_CHANNEL_IDS=
 NYANYA_DISCORD_FILE_SHARE_CHANNEL_NAMES=
 NYANYA_CODEX_ENABLED=false
 NYANYA_CODEX_WRITE_ENABLED=false
+NYANYA_CODEX_PROFILE=nyanya-readonly
+NYANYA_CODEX_WRITE_PROFILE=nyanya-approved-write
+NYANYA_ANTIGRAVITY_SANDBOX=true
 NYANYA_DASHBOARD_RECORDING_ENABLED=true
 NYANYA_DASHBOARD_HOST=127.0.0.1
 NYANYA_DASHBOARD_PORT=8765
 NYANYA_DASHBOARD_DB_PATH=data/nyanya_dashboard.db
+NYANYA_DASHBOARD_CONTROL_TOKEN_FILE=data/dashboard_control.token
 NYANYA_MEMORY_RETRIEVAL_ENABLED=true
 NYANYA_MEMORY_WORKER_INTERVAL_SECONDS=1800
 NYANYA_MEMORY_WORKER_LLM_REFINEMENT=false
@@ -250,14 +257,50 @@ Default local URL:
 http://127.0.0.1:8765
 ```
 
-The dashboard is split into four screens:
+The dashboard is split into five screens:
 
 | Screen | Purpose | Main contents |
 |---|---|---|
 | Main | Current operational state | Total requests, today's requests, running queue, failures, phase confirmations. |
+| Agent Office | Execution control-plane observation | Hosts, agents, tasks, executions, approvals, 2D state zones, and SSE updates. |
 | Projects | Project and phase operation | Project creation, goal entry, phase cards, phase checks. |
 | Memory | Long-term memory review | Pending/approved memory candidates, memory graph, technology graph. |
 | Stats | Historical analysis | Usage trend, request ledger, audit log. |
+
+### Execution ledger and control API
+
+Version `0.3.0` preserves the legacy `agent_requests` contract and adds versioned migrations for:
+
+- `hosts`, `agent_profiles`, `agent_tasks`, and `executions`;
+- `runtime_sessions` and append-only `execution_events`;
+- `approvals`, `artifacts`, and fenced `writer_leases`.
+
+Read APIs are available through the localhost dashboard. Mutating approval, cancellation, retry, and recovery APIs fail closed unless `NYANYA_DASHBOARD_CONTROL_TOKEN` or an owner-only token file is configured. Tokens are never placed in URLs, HTML, logs, or Git.
+
+```text
+GET  /v1/hosts
+GET  /v1/agents
+GET  /v1/tasks
+GET  /v1/executions
+GET  /v1/approvals
+GET  /v1/events/stream
+POST /v1/approvals/{approval_id}/decision
+POST /v1/executions/{execution_id}/cancel
+POST /v1/recovery/reconcile
+```
+
+Codex inspection uses the `nyanya-readonly` profile. Approved writes use `nyanya-approved-write`. Antigravity-compatible invocations use `--sandbox` by default. A write-capable execution requires both an approved approval row and a writer lease.
+
+Execution adapters cover managed subprocesses, tmux, Orca terminals, Codex, and Antigravity. The Orca adapter maps each execution to a worktree and terminal handle, updates the workspace progress card, and reconnects through the persisted handle. If Orca is offline before start and `NYANYA_ORCA_TMUX_FALLBACK=true`, the same request runs through tmux instead.
+
+Create and restore an online SQLite backup with:
+
+```bash
+./scripts/backup_state.sh
+NYANYA_RESTORE_CONFIRM=YES ./scripts/restore_state.sh data/backups/<stamp>/nyanya_dashboard.db
+```
+
+Stop all NyaNya services before a restore. See [Execution control plane](docs/execution_control_plane.md) for the schema, state model, recovery process, and security boundaries.
 
 The dashboard uses SQLite by default:
 

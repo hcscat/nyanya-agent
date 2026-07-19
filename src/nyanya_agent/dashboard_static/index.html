@@ -18,6 +18,7 @@
         </div>
         <nav class="nav">
           <button class="nav-item active" type="button" data-view="main">메인</button>
+          <button class="nav-item" type="button" data-view="office">에이전트실</button>
           <button class="nav-item" type="button" data-view="projects">프로젝트</button>
           <button class="nav-item" type="button" data-view="memory">메모리</button>
           <button class="nav-item" type="button" data-view="stats">통계</button>
@@ -31,6 +32,8 @@
             <h1>NyaNya Agent 운영 대시보드</h1>
           </div>
           <div class="topbar-actions">
+            <button id="unlockControlBtn" class="button secondary" type="button">제어 잠금 해제</button>
+            <span id="streamStatus" class="connection-state offline">연결 중</span>
             <button id="refreshBtn" class="button secondary" type="button">새로고침</button>
           </div>
         </header>
@@ -59,6 +62,60 @@
               <div id="failureList" class="stack"></div>
             </aside>
           </div>
+        </section>
+
+        <section id="officeView" class="view" data-view-panel="office" hidden>
+          <section id="officeMetrics" class="metrics" aria-label="에이전트 운영 지표"></section>
+
+          <section class="panel office-panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Live Agent Office</p>
+                <h2>실행 현황</h2>
+              </div>
+            </div>
+            <div id="agentOffice" class="agent-office" aria-label="에이전트 상태 구역"></div>
+          </section>
+
+          <div class="operations-grid">
+            <section class="panel">
+              <div class="panel-heading compact">
+                <div>
+                  <p class="eyebrow">Executions</p>
+                  <h2>최근 실행</h2>
+                </div>
+              </div>
+              <div id="executionTable" class="table-wrap"></div>
+            </section>
+
+            <aside class="panel">
+              <div class="panel-heading compact">
+                <div>
+                  <p class="eyebrow">Approvals</p>
+                  <h2>승인 대기</h2>
+                </div>
+              </div>
+              <div id="approvalList" class="stack"></div>
+            </aside>
+          </div>
+
+          <section class="panel">
+            <div class="panel-heading compact">
+              <div>
+                <p class="eyebrow">Accessible Status</p>
+                <h2>Host·Agent 상태 목록</h2>
+              </div>
+            </div>
+            <div id="agentStatusTable" class="table-wrap" aria-live="polite"></div>
+          </section>
+
+          <aside id="executionDrawer" class="detail-drawer" hidden aria-labelledby="executionDrawerTitle">
+            <div class="drawer-heading">
+              <h2 id="executionDrawerTitle">실행 상세</h2>
+              <button id="closeExecutionDrawer" class="icon-button" type="button" aria-label="실행 상세 닫기" title="닫기">×</button>
+            </div>
+            <div id="executionDetail" class="drawer-content"></div>
+          </aside>
         </section>
 
         <section id="projectsView" class="view" data-view-panel="projects" hidden>

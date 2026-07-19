@@ -1,6 +1,6 @@
 {
   "name": "@hcscat-dev/nyanya-agent",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "TypeScript CLI and Python runtime package for NyaNya Agent.",
   "license": "MIT",
   "private": false,
@@ -25,8 +25,16 @@
     "src/nyanya_agent/dashboard_static/**/*",
     "config/nyanya.json",
     "config/user_workspaces.example.json",
-    "docs/*.md",
-    "docs/*.html",
+    "docs/cli_session_agent_development_cycle.html",
+    "docs/copyright_review.md",
+    "docs/discord_bot_rename_guide.md",
+    "docs/execution_control_plane.md",
+    "docs/external_dashboard_access.md",
+    "docs/nyanya_install_distribution_final_plan_20260707.md",
+    "docs/operations_guide.md",
+    "docs/source_publication_policy.md",
+    "docs/typescript_agent_ecosystem.html",
+    "docs/user_acceptance_tests_ko.md",
     "scripts/*.sh",
     "prompts/system.md",
     "prompts/agent_memory.md",
@@ -51,7 +59,7 @@
     "build": "tsc && node scripts/mark_dist_executable.js",
     "typecheck": "tsc --noEmit",
     "prepack": "npm run build",
-    "check": "npm run typecheck && python3 -m py_compile src/nyanya_agent/runtime_paths.py src/nyanya_agent/core.py src/nyanya_agent/bridge_common.py src/nyanya_agent/discord_bridge.py src/nyanya_agent/telegram_bridge.py src/nyanya_agent/manager.py src/nyanya_agent/dashboard_api.py src/nyanya_agent/dashboard_store.py"
+    "check": "npm run typecheck && python3 -m py_compile src/nyanya_agent/runtime_paths.py src/nyanya_agent/core.py src/nyanya_agent/bridge_common.py src/nyanya_agent/discord_bridge.py src/nyanya_agent/telegram_bridge.py src/nyanya_agent/manager.py src/nyanya_agent/dashboard_api.py src/nyanya_agent/dashboard_store.py src/nyanya_agent/execution_store.py src/nyanya_agent/adapter_runner.py src/nyanya_agent/execution_adapters.py src/nyanya_agent/execution_runtime.py"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",
