@@ -8,6 +8,14 @@ const state = {
   memories: [],
   memoryGraph: { nodes: [], edges: [], stats: {} },
   techStackGraph: { nodes: [], edges: [], stats: {} },
+  hosts: [],
+  agents: [],
+  tasks: [],
+  executions: [],
+  approvals: [],
+  controlToken: "",
+  eventCursor: 0,
+  eventSource: null,
   cy: null,
   techCy: null,
 };
@@ -35,6 +43,14 @@ const labels = {
   needs_confirmation: "확인 필요",
   ok: "정상",
   pending: "검토 대기",
+  starting: "시작 중",
+  awaiting_approval: "승인 대기",
+  cancelling: "취소 중",
+  succeeded: "완료",
+  timed_out: "시간 초과",
+  stale: "응답 지연",
+  lost: "연결 유실",
+  offline: "오프라인",
   approved: "승인",
   rejected: "거부",
   preference: "사용자 선호",
@@ -91,8 +107,10 @@ function fmtDuration(value) {
 }
 
 async function api(path, options = {}) {
+  const method = String(options.method || "GET").toUpperCase();
+  const controlHeaders = method !== "GET" && state.controlToken ? { Authorization: `Bearer ${state.controlToken}` } : {};
   const response = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    headers: { "Content-Type": "application/json", ...controlHeaders, ...(options.headers || {}) },
     ...options,
   });
   if (!response.ok) {
@@ -104,7 +122,21 @@ async function api(path, options = {}) {
 
 async function loadAll() {
   const period = $("usagePeriod")?.value || "daily";
-  const [summary, requests, usage, projects, audit, memories, memoryGraph, techStackGraph] = await Promise.all([
+  const [
+    summary,
+    requests,
+    usage,
+    projects,
+    audit,
+    memories,
+    memoryGraph,
+    techStackGraph,
+    hosts,
+    agents,
+    tasks,
+    executions,
+    approvals,
+  ] = await Promise.all([
     api("/v1/summary"),
     api("/v1/requests?limit=50"),
     api(`/v1/usage?period=${encodeURIComponent(period)}&limit=30`),
@@ -113,6 +145,11 @@ async function loadAll() {
     api("/v1/memories?limit=120"),
     api("/v1/memory-graph?limit=120"),
     api("/v1/tech-stack-graph?limit=120"),
+    api("/v1/hosts"),
+    api("/v1/agents"),
+    api("/v1/tasks?limit=100"),
+    api("/v1/executions?limit=100"),
+    api("/v1/approvals?limit=100"),
   ]);
   state.summary = summary;
   state.requests = requests;
@@ -122,7 +159,28 @@ async function loadAll() {
   state.memories = memories;
   state.memoryGraph = memoryGraph;
   state.techStackGraph = techStackGraph;
+  state.hosts = hosts;
+  state.agents = agents;
+  state.tasks = tasks;
+  state.executions = executions;
+  state.approvals = approvals;
   render();
+}
+
+async function loadOperations() {
+  const [hosts, agents, tasks, executions, approvals] = await Promise.all([
+    api("/v1/hosts"),
+    api("/v1/agents"),
+    api("/v1/tasks?limit=100"),
+    api("/v1/executions?limit=100"),
+    api("/v1/approvals?limit=100"),
+  ]);
+  state.hosts = hosts;
+  state.agents = agents;
+  state.tasks = tasks;
+  state.executions = executions;
+  state.approvals = approvals;
+  renderOffice();
 }
 
 function render() {
@@ -133,6 +191,7 @@ function render() {
   renderRequests();
   renderUsage();
   renderProjects();
+  renderOffice();
   renderMemories();
   renderAudit();
 }
@@ -151,7 +210,7 @@ function renderActiveView() {
 }
 
 function setView(view, { updateHash = true } = {}) {
-  if (!["main", "projects", "memory", "stats"].includes(view)) {
+  if (!["main", "office", "projects", "memory", "stats"].includes(view)) {
     view = "main";
   }
   state.activeView = view;
@@ -237,6 +296,171 @@ function renderFailures() {
             `,
           )
           .join("");
+}
+
+function shortId(value) {
+  const text = String(value || "-");
+  return text.length > 18 ? `${text.slice(0, 9)}…${text.slice(-6)}` : text;
+}
+
+function officeZone(status) {
+  if (["pending", "queued", "starting", "received"].includes(status)) return "queue";
+  if (["running", "cancelling"].includes(status)) return "work";
+  if (["awaiting_approval", "blocked"].includes(status)) return "review";
+  if (["succeeded", "completed"].includes(status)) return "done";
+  return "offline";
+}
+
+function avatarText(item) {
+  const source = String(item.adapter_type || item.name || "NA");
+  const parts = source.split(/[-_\s]+/).filter(Boolean);
+  return parts
+    .slice(0, 2)
+    .map((part) => part.slice(0, 1).toUpperCase())
+    .join("") || "NA";
+}
+
+function renderOffice() {
+  if (!$("officeMetrics")) return;
+  const activeTaskStatuses = new Set(["queued", "running", "awaiting_approval", "blocked"]);
+  const activeExecutionStatuses = new Set(["pending", "starting", "running", "awaiting_approval", "cancelling", "stale"]);
+  const onlineHosts = state.hosts.filter((host) => !["offline", "stale"].includes(host.observed_status)).length;
+  const cards = [
+    ["온라인 Host", onlineHosts, "info"],
+    ["활성 Agent", state.agents.filter((agent) => agent.enabled).length, ""],
+    ["대기·진행 Task", state.tasks.filter((task) => activeTaskStatuses.has(task.status)).length, "warn"],
+    ["활성 Execution", state.executions.filter((execution) => activeExecutionStatuses.has(execution.status)).length, "warn"],
+    ["승인 대기", state.approvals.filter((approval) => approval.status === "pending").length, "danger"],
+  ];
+  $("officeMetrics").innerHTML = cards
+    .map(
+      ([title, value, tone]) => `
+        <article class="metric-card ${tone}">
+          <div><span>${escapeHtml(title)}</span><strong>${escapeHtml(value)}</strong></div>
+          <div class="metric-tone" aria-hidden="true"></div>
+        </article>
+      `,
+    )
+    .join("");
+
+  const zones = [
+    ["queue", "대기", "Queue"],
+    ["work", "작업", "Working"],
+    ["review", "검토", "Review"],
+    ["done", "완료", "Done"],
+    ["offline", "예외", "Exception"],
+  ];
+  const grouped = Object.fromEntries(zones.map(([key]) => [key, []]));
+  state.executions.slice(0, 60).forEach((execution) => grouped[officeZone(execution.status)].push(execution));
+  $("agentOffice").innerHTML = zones
+    .map(([key, title, english]) => {
+      const items = grouped[key].slice(0, 8);
+      return `
+        <section class="office-zone" data-zone="${key}" aria-label="${escapeHtml(title)} 구역">
+          <div class="zone-heading"><h3>${escapeHtml(title)}</h3><span>${escapeHtml(english)} · ${grouped[key].length}</span></div>
+          <div class="zone-agents">
+            ${
+              items.length
+                ? items
+                    .map(
+                      (execution) => `
+                        <div class="office-agent">
+                          <button class="office-avatar" type="button" data-action="execution-detail" data-execution="${escapeHtml(execution.id)}" aria-label="${escapeHtml(execution.adapter_type)} 실행 상세" title="${escapeHtml(label(execution.status))}">${escapeHtml(avatarText(execution))}</button>
+                          <strong>${escapeHtml(execution.adapter_type)}</strong>
+                          <span>${escapeHtml(shortId(execution.id))}</span>
+                        </div>
+                      `,
+                    )
+                    .join("")
+                : `<div class="empty">-</div>`
+            }
+          </div>
+        </section>
+      `;
+    })
+    .join("");
+
+  $("executionTable").innerHTML = `
+    <table>
+      <thead><tr><th>상태</th><th>Adapter</th><th>Task</th><th>Host</th><th>신뢰도</th><th>갱신</th></tr></thead>
+      <tbody>
+        ${state.executions
+          .slice(0, 30)
+          .map(
+            (execution) => `
+              <tr>
+                <td>${badge(execution.status)}</td>
+                <td><button class="link-button" type="button" data-action="execution-detail" data-execution="${escapeHtml(execution.id)}">${escapeHtml(execution.adapter_type)}</button><br><code>${escapeHtml(shortId(execution.id))}</code></td>
+                <td><code>${escapeHtml(shortId(execution.task_id))}</code></td>
+                <td>${escapeHtml(execution.host_id ? shortId(execution.host_id) : "-")}</td>
+                <td>${Math.round((execution.status_confidence || 0) * 100)}%</td>
+                <td>${fmtDate(execution.updated_at)}</td>
+              </tr>
+            `,
+          )
+          .join("")}
+      </tbody>
+    </table>
+  `;
+
+  const pendingApprovals = state.approvals.filter((approval) => approval.status === "pending");
+  $("approvalList").innerHTML = pendingApprovals.length
+    ? pendingApprovals
+        .map(
+          (approval) => `
+            <article class="list-item">
+              ${badge(approval.status)}
+              <strong>${escapeHtml(approval.action)}</strong>
+              <p>${escapeHtml(approval.reason || "사유 미기록")}</p>
+              <span class="meta">${escapeHtml(shortId(approval.task_id || approval.execution_id))} · ${fmtDate(approval.requested_at)}</span>
+            </article>
+          `,
+        )
+        .join("")
+    : `<div class="empty">승인 대기 없음</div>`;
+
+  const hostRows = state.hosts.map(
+    (host) => `
+      <tr>
+        <td>Host</td><td><strong>${escapeHtml(host.name)}</strong><br><code>${escapeHtml(shortId(host.id))}</code></td>
+        <td>${badge(host.observed_status || host.status)}</td><td>${escapeHtml(host.role)}</td><td>${fmtDate(host.last_heartbeat_at)}</td>
+      </tr>
+    `,
+  );
+  const agentRows = state.agents.map(
+    (agent) => `
+      <tr>
+        <td>Agent</td><td><strong>${escapeHtml(agent.name)}</strong><br><code>${escapeHtml(shortId(agent.id))}</code></td>
+        <td>${badge(agent.enabled ? "green" : "offline")}</td><td>${escapeHtml(agent.adapter_type)}</td><td>${fmtDate(agent.updated_at)}</td>
+      </tr>
+    `,
+  );
+  $("agentStatusTable").innerHTML = `
+    <table>
+      <thead><tr><th>종류</th><th>이름·ID</th><th>상태</th><th>역할·Adapter</th><th>마지막 확인</th></tr></thead>
+      <tbody>${[...hostRows, ...agentRows].join("")}</tbody>
+    </table>
+  `;
+}
+
+async function openExecutionDetail(executionId) {
+  const execution = await api(`/v1/executions/${encodeURIComponent(executionId)}`);
+  $("executionDrawer").hidden = false;
+  $("executionDetail").innerHTML = `
+    <div class="detail-block"><strong>상태</strong><span>${badge(execution.status)}</span></div>
+    <div class="detail-block"><strong>Execution ID</strong><code>${escapeHtml(execution.id)}</code></div>
+    <div class="detail-block"><strong>Task ID</strong><code>${escapeHtml(execution.task_id)}</code></div>
+    <div class="detail-block"><strong>Adapter</strong><span>${escapeHtml(execution.adapter_type)}</span></div>
+    <div class="detail-block"><strong>작업 경로</strong><code>${escapeHtml(execution.workdir || "-")}</code></div>
+    <div class="detail-block"><strong>시작·종료</strong><span>${fmtDate(execution.started_at)}<br>${fmtDate(execution.ended_at)}</span></div>
+    <div class="detail-block"><strong>판정 신뢰도</strong><span>${Math.round((execution.status_confidence || 0) * 100)}%</span></div>
+    <div class="detail-block"><strong>오류</strong><p>${escapeHtml(execution.error || "-")}</p></div>
+    <div class="detail-block"><strong>최근 이벤트</strong>${(execution.events || [])
+      .slice(-12)
+      .reverse()
+      .map((event) => `<p><code>${escapeHtml(event.event_type)}</code> ${escapeHtml(event.message || label(event.status))}<br><span class="meta">${fmtDate(event.created_at)}</span></p>`)
+      .join("")}</div>
+  `;
 }
 
 function renderRequests() {
@@ -526,6 +750,9 @@ async function handleClick(event) {
       });
       await loadAll();
     }
+    if (button.dataset.action === "execution-detail") {
+      await openExecutionDetail(button.dataset.execution);
+    }
   } catch (error) {
     alert(error.message);
   } finally {
@@ -535,11 +762,26 @@ async function handleClick(event) {
 
 document.addEventListener("click", handleClick);
 qs('[data-view="main"]').addEventListener("click", () => setView("main"));
+qs('[data-view="office"]').addEventListener("click", () => setView("office"));
 qs('[data-view="projects"]').addEventListener("click", () => setView("projects"));
 qs('[data-view="memory"]').addEventListener("click", () => setView("memory"));
 qs('[data-view="stats"]').addEventListener("click", () => setView("stats"));
 $("projectForm").addEventListener("submit", createProject);
 $("refreshBtn").addEventListener("click", () => loadAll());
+$("unlockControlBtn").addEventListener("click", async () => {
+  const token = window.prompt("Dashboard control token");
+  if (!token) return;
+  const previous = state.controlToken;
+  state.controlToken = token.trim();
+  try {
+    await api("/v1/recovery/reconcile", { method: "POST" });
+    $("unlockControlBtn").textContent = "제어 활성";
+    $("unlockControlBtn").disabled = true;
+  } catch (error) {
+    state.controlToken = previous;
+    alert(error.message);
+  }
+});
 $("usagePeriod").addEventListener("change", () => loadAll());
 $("extractMemoryBtn").addEventListener("click", async () => {
   $("extractMemoryBtn").disabled = true;
@@ -553,8 +795,42 @@ $("extractMemoryBtn").addEventListener("click", async () => {
   }
 });
 
+$("closeExecutionDrawer").addEventListener("click", () => {
+  $("executionDrawer").hidden = true;
+});
+
+let operationReloadTimer = null;
+
+function setStreamStatus(connected) {
+  const status = $("streamStatus");
+  status.classList.toggle("offline", !connected);
+  status.textContent = connected ? "실시간 연결" : "재연결 중";
+}
+
+function scheduleOperationReload() {
+  window.clearTimeout(operationReloadTimer);
+  operationReloadTimer = window.setTimeout(() => {
+    loadOperations().catch(() => setStreamStatus(false));
+  }, 180);
+}
+
+function connectEventStream() {
+  state.eventSource?.close();
+  const source = new EventSource(`/v1/events/stream?cursor=${state.eventCursor}`);
+  state.eventSource = source;
+  source.onopen = () => setStreamStatus(true);
+  source.onerror = () => setStreamStatus(false);
+  source.addEventListener("ledger", (event) => {
+    const cursor = Number(event.lastEventId || 0);
+    if (Number.isFinite(cursor)) state.eventCursor = Math.max(state.eventCursor, cursor);
+    scheduleOperationReload();
+  });
+}
+
 setView(location.hash.replace("#", ""), { updateHash: false });
 
 loadAll().catch((error) => {
   document.body.innerHTML = `<main class="workspace"><section class="panel"><h1>Load failed</h1><pre>${escapeHtml(error.message)}</pre></section></main>`;
 });
+
+connectEventStream();

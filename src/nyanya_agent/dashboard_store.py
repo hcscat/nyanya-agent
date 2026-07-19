@@ -8,6 +8,7 @@ from contextlib import contextmanager
 import datetime as dt
 from datetime import UTC, datetime
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -19,6 +20,7 @@ from nyanya_agent import core as nyanya
 
 
 DEFAULT_DB_PATH = nyanya.STATE_ROOT / "data" / "nyanya_dashboard.db"
+LOGGER = logging.getLogger(__name__)
 PHASE_ORDER = ("planning", "design", "implementation", "test")
 PHASE_LABELS = {
     "planning": "기획",
@@ -348,7 +350,21 @@ def create_agent_request(
         )
         append_request_event_conn(conn, request_id, "received", "Request received", metadata or {})
         log_audit(conn, actor=source, action="request.received", entity_type="agent_request", entity_id=request_id)
+    _mirror_request_to_execution_ledger(request_id, db_path=db_path)
     return request_id
+
+
+def _mirror_request_to_execution_ledger(
+    request_id: str,
+    *,
+    db_path: str | Path | None = None,
+) -> None:
+    try:
+        from nyanya_agent import execution_store
+
+        execution_store.mirror_legacy_request(request_id, db_path=db_path)
+    except Exception:
+        LOGGER.exception("Could not synchronize request %s to the execution ledger", request_id)
 
 
 def append_request_event_conn(
@@ -443,6 +459,7 @@ def mark_request_status(
                 entity_id=request_id,
                 detail={"duration_ms": updates.get("duration_ms")},
             )
+    _mirror_request_to_execution_ledger(request_id, db_path=db_path)
 
 
 def list_requests(

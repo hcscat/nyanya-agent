@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -211,6 +212,21 @@ def bootstrap(path: pathlib.Path) -> subprocess.CompletedProcess[str]:
     return run(["launchctl", "bootstrap", launch_domain(), str(path)], check=False)
 
 
+def bootstrap_with_retry(
+    path: pathlib.Path,
+    *,
+    attempts: int = 8,
+    initial_delay_seconds: float = 0.25,
+) -> subprocess.CompletedProcess[str]:
+    result = bootstrap(path)
+    for attempt in range(1, max(1, attempts)):
+        if result.returncode != 5:
+            break
+        time.sleep(initial_delay_seconds * attempt)
+        result = bootstrap(path)
+    return result
+
+
 def kickstart(label: str = LABEL) -> subprocess.CompletedProcess[str]:
     return run(["launchctl", "kickstart", "-k", f"{launch_domain()}/{label}"], check=False)
 
@@ -230,7 +246,7 @@ def launch_status(label: str) -> tuple[int, list[str]]:
 def install() -> int:
     path = write_discord_plist()
     bootout(DISCORD_LABEL)
-    result = bootstrap(path)
+    result = bootstrap_with_retry(path)
     if result.returncode != 0:
         sys.stderr.write(result.stderr or result.stdout)
         return result.returncode
@@ -522,7 +538,7 @@ def codex_start() -> int:
 def codex_install() -> int:
     path = write_codex_plist()
     bootout(CODEX_LABEL)
-    result = bootstrap(path)
+    result = bootstrap_with_retry(path)
     if result.returncode != 0:
         sys.stderr.write(result.stderr or result.stdout)
         return result.returncode
@@ -554,7 +570,7 @@ def dashboard_url() -> str:
 def dashboard_install() -> int:
     path = write_dashboard_plist()
     bootout(DASHBOARD_LABEL)
-    result = bootstrap(path)
+    result = bootstrap_with_retry(path)
     if result.returncode != 0:
         sys.stderr.write(result.stderr or result.stdout)
         return result.returncode
@@ -626,7 +642,7 @@ def dashboard_health() -> int:
 def memory_worker_install() -> int:
     path = write_memory_worker_plist()
     bootout(MEMORY_WORKER_LABEL)
-    result = bootstrap(path)
+    result = bootstrap_with_retry(path)
     if result.returncode != 0:
         sys.stderr.write(result.stderr or result.stdout)
         return result.returncode
