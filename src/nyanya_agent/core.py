@@ -19,6 +19,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -143,12 +144,16 @@ def build_dynamic_memory_context(prompt: str, *, owner_key: str | None = None, l
 
 
 def request_json(url: str, payload: dict[str, Any] | None, timeout: int, headers: dict[str, str] | None = None) -> Any:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("Backend URL must use http or https")
     body = None if payload is None else json.dumps(payload).encode("utf-8")
     req_headers = {"Content-Type": "application/json"}
     if headers:
         req_headers.update(headers)
     req = urllib.request.Request(url, data=body, headers=req_headers)
-    with urllib.request.urlopen(req, timeout=timeout) as response:
+    # The URL scheme is restricted to HTTP(S) immediately above.
+    with urllib.request.urlopen(req, timeout=timeout) as response:  # nosec B310
         raw = response.read().decode("utf-8")
     return json.loads(raw) if raw else {}
 
@@ -385,6 +390,8 @@ def gemini_chat_once(config: dict[str, Any], messages: list[dict[str, str]], can
             "--print-timeout",
             f"{int(config['timeout_seconds'])}s",
         ]
+        if os.getenv("NYANYA_ANTIGRAVITY_SANDBOX", "true").strip().lower() in {"1", "true", "yes", "on"}:
+            command.append("--sandbox")
     else:
         command = [
             cli,

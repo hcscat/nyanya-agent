@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nyanya-agent"
-version = "0.2.1"
+version = "0.3.0"
 description = "A lightweight Python-first messenger bridge and local agent wrapper."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,9 +13,10 @@ authors = [{ name = "HCS" }]
 dependencies = []
 
 [project.optional-dependencies]
-bots = ["discord.py>=2.4,<3"]
+bots = ["discord.py>=2.4,<3", "aiohttp>=3.14.1,<4"]
 dashboard = ["fastapi>=0.115,<1", "uvicorn[standard]>=0.30,<1", "pydantic>=2.8,<3"]
-dev = ["pytest>=8,<9", "ruff>=0.8,<1"]
+dev = ["pytest>=9.0.3,<10", "ruff>=0.8,<1", "httpx2>=2.7,<3"]
+security = ["bandit>=1.9,<2", "pip-audit>=2.10,<3"]
 
 [project.scripts]
 nyanya = "nyanya_agent.core:main"

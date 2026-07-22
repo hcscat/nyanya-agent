@@ -18,7 +18,7 @@ English guide: [README.md](README.md)
 
 이 저장소는 독립적인 경량 프로젝트다. 공식 Hermes Agent가 아니며, 다른 agent 프로젝트의 소스 트리를 포함하거나 복사하지 않는다.
 
-현재 패키지 릴리스는 `0.2.1`이다. npm에 공개된 버전은 `npm view @hcscat-dev/nyanya-agent version`으로 확인할 수 있다.
+현재 소스 버전은 `0.3.0`이다. npm에 공개된 버전은 `npm view @hcscat-dev/nyanya-agent version`으로 확인할 수 있다.
 
 주요 구현 파일:
 
@@ -30,6 +30,9 @@ src/nyanya_agent/bridge_policy.py     # workspace, command, safety policy helper
 src/nyanya_agent/bridge_runtime.py    # Codex 위임과 runtime helper
 src/nyanya_agent/bridge_store.py      # 대화 저장소와 사용자별 task queue
 src/nyanya_agent/dashboard_store.py   # SQLite dashboard/event store
+src/nyanya_agent/execution_store.py   # versioned task/execution/approval ledger
+src/nyanya_agent/execution_adapters.py # subprocess, tmux, Orca, Codex, Antigravity adapter
+src/nyanya_agent/execution_runtime.py # adapter lifecycle, recovery, writer lease coordinator
 src/nyanya_agent/dashboard_api.py     # FastAPI dashboard server
 src/nyanya_agent/memory_worker.py     # 장기기억 후보를 정리하는 background worker
 src/nyanya_agent/discord_bridge.py    # Discord bridge
@@ -130,10 +133,14 @@ NYANYA_DISCORD_FILE_SHARE_CHANNEL_IDS=
 NYANYA_DISCORD_FILE_SHARE_CHANNEL_NAMES=
 NYANYA_CODEX_ENABLED=false
 NYANYA_CODEX_WRITE_ENABLED=false
+NYANYA_CODEX_PROFILE=nyanya-readonly
+NYANYA_CODEX_WRITE_PROFILE=nyanya-approved-write
+NYANYA_ANTIGRAVITY_SANDBOX=true
 NYANYA_DASHBOARD_RECORDING_ENABLED=true
 NYANYA_DASHBOARD_HOST=127.0.0.1
 NYANYA_DASHBOARD_PORT=8765
 NYANYA_DASHBOARD_DB_PATH=data/nyanya_dashboard.db
+NYANYA_DASHBOARD_CONTROL_TOKEN_FILE=data/dashboard_control.token
 NYANYA_MEMORY_RETRIEVAL_ENABLED=true
 NYANYA_MEMORY_WORKER_INTERVAL_SECONDS=1800
 NYANYA_MEMORY_WORKER_LLM_REFINEMENT=false
@@ -250,11 +257,12 @@ Dashboard 직접 실행:
 http://127.0.0.1:8765
 ```
 
-대시보드는 네 화면으로 나뉜다.
+대시보드는 다섯 화면으로 나뉜다.
 
 | 화면 | 목적 | 주요 내용 |
 |---|---|---|
 | 메인 | 현재 운영 상태 확인 | 전체 요청, 오늘 요청, 실행 중 요청, 실패, 확인 필요 단계 |
+| 에이전트실 | 실행 제어면 관찰 | Host, Agent, Task, Execution, Approval, 2D 상태 구역, SSE 실시간 갱신 |
 | 프로젝트 | 프로젝트와 단계 운영 | 프로젝트 생성, 목표 입력, 단계 카드, 단계 체크 |
 | 메모리 | 장기기억 검토 | pending/approved 기억 후보, memory graph, technology graph |
 | 통계 | 과거 이력 분석 | 사용량 추이, 요청 원장, 감사 로그 |
@@ -266,6 +274,43 @@ data/nyanya_dashboard.db
 ```
 
 dashboard DB, WAL/SHM 파일, 실제 요청 로그, private export는 커밋하지 않는다.
+
+### 실행 원장과 제어 API
+
+`0.3.0`부터 기존 `agent_requests`를 유지하면서 versioned migration으로 다음 원장을 추가한다.
+
+- `hosts`, `agent_profiles`, `agent_tasks`, `executions`
+- `runtime_sessions`, append-only `execution_events`
+- `approvals`, `artifacts`, `writer_leases`
+
+읽기 API는 localhost dashboard에서 조회할 수 있다. 승인, 취소, 재시도, 복구처럼 상태를 바꾸는 API는 `NYANYA_DASHBOARD_CONTROL_TOKEN` 또는 owner-only token file이 없으면 닫힌다. token은 URL, HTML, 로그, Git에 기록하지 않는다.
+
+주요 API:
+
+```text
+GET  /v1/hosts
+GET  /v1/agents
+GET  /v1/tasks
+GET  /v1/executions
+GET  /v1/approvals
+GET  /v1/events/stream
+POST /v1/approvals/{approval_id}/decision
+POST /v1/executions/{execution_id}/cancel
+POST /v1/recovery/reconcile
+```
+
+Codex inspection은 `nyanya-readonly`, 승인된 쓰기는 `nyanya-approved-write` profile을 사용한다. Antigravity-compatible CLI는 기본적으로 `--sandbox`를 사용한다. write-capable execution은 승인 row와 writer lease가 모두 있어야 시작할 수 있다.
+
+실행 adapter는 managed subprocess, tmux, Orca terminal, Codex, Antigravity를 지원한다. Orca adapter는 execution을 worktree와 terminal handle에 매핑하고 workspace 진행 상태를 갱신하며, 저장된 handle로 재접속한다. 실행 시작 전에 Orca가 오프라인이고 `NYANYA_ORCA_TMUX_FALLBACK=true`이면 같은 요청을 tmux로 전환한다.
+
+SQLite 온라인 백업과 복구:
+
+```bash
+./scripts/backup_state.sh
+NYANYA_RESTORE_CONFIRM=YES ./scripts/restore_state.sh data/backups/<stamp>/nyanya_dashboard.db
+```
+
+복구는 NyaNya 서비스를 모두 중지한 뒤 수행한다. 상세 구조와 상태 전이는 [실행 제어면 운영 문서](docs/execution_control_plane.md)를 참고한다.
 
 ## 프로젝트와 단계 추적
 

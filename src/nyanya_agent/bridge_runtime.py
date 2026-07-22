@@ -318,6 +318,10 @@ def run_codex_task(
     sandbox = os.getenv("NYANYA_CODEX_WRITE_SANDBOX" if write else "NYANYA_CODEX_SANDBOX", "")
     if not sandbox:
         sandbox = "workspace-write" if write else "read-only"
+    profile = os.getenv(
+        "NYANYA_CODEX_WRITE_PROFILE" if write else "NYANYA_CODEX_PROFILE",
+        "nyanya-approved-write" if write else "nyanya-readonly",
+    ).strip()
 
     resource_context = ""
     if resource_prompt_requested(prompt):
@@ -389,6 +393,8 @@ def run_codex_task(
         "-o",
         str(output_path),
     ]
+    if profile:
+        command.extend(["--profile", profile])
     for root in workspace_roots():
         if root != workdir:
             command.extend(["--add-dir", str(root)])
