@@ -115,47 +115,64 @@ while IFS= read -r -d '' path; do
   fi
 done < <(git ls-files -z)
 
-set +e
-rg -I -i -l \
-  -e '/Users/[A-Za-z0-9._-]+/' \
-  -e '\b[0-9]{17,20}\b' \
-  -e '[A-Za-z0-9._%+-]+@(gmail|naver|icloud|outlook|hotmail)\.[A-Za-z]{2,}' \
-  -e 'tail[0-9]{4,}\.ts\.net' \
-  "${tracked_paths[@]}" \
-  >/tmp/nyanya-personal-data-scan.txt
-personal_scan_rc=$?
-set -e
-if [ "$personal_scan_rc" -eq 0 ]; then
+python3 - "${tracked_paths[@]}" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+output_paths = {
+    "personal": Path("/tmp/nyanya-personal-data-scan.txt"),
+    "secret": Path("/tmp/nyanya-secret-scan.txt"),
+}
+patterns = {
+    "personal": re.compile(
+        r"/Users/[A-Za-z0-9._-]+/"
+        r"|\b[0-9]{17,20}\b"
+        r"|[A-Za-z0-9._%+-]+@(gmail|naver|icloud|outlook|hotmail)\.[A-Za-z]{2,}"
+        r"|tail[0-9]{4,}\.ts\.net",
+        re.IGNORECASE,
+    ),
+    "secret": re.compile(
+        r"BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY"
+        r"|AKIA[0-9A-Z]{16}"
+        r"|github_pat_[A-Za-z0-9_]{20,}"
+        r"|gh[pousr]_[A-Za-z0-9_]{20,}"
+        r"|AIza[0-9A-Za-z_-]{20,}"
+        r"|sk-[A-Za-z0-9_-]{20,}"
+        r"|xox[baprs]-[A-Za-z0-9-]{20,}"
+        r"|[MN][A-Za-z0-9_-]{23,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{20,}"
+        r"|DISCORD_BOT_TOKEN=.+|NYANYA_DISCORD_BOT_TOKEN=.+|OPENAI_API_KEY=.+"
+    ),
+}
+matches = {name: [] for name in patterns}
+
+for raw_path in sys.argv[1:]:
+    path = Path(raw_path)
+    data = path.read_bytes()
+    if b"\0" in data:
+        continue
+    text = data.decode("utf-8", errors="ignore")
+    for name, pattern in patterns.items():
+        if pattern.search(text):
+            matches[name].append(raw_path)
+
+for name, output_path in output_paths.items():
+    content = "\n".join(matches[name])
+    output_path.write_text(f"{content}\n" if content else "", encoding="utf-8")
+PY
+
+if [ -s /tmp/nyanya-personal-data-scan.txt ]; then
   sed -n '1,100p' /tmp/nyanya-personal-data-scan.txt
   fail "personal path, email, tailnet hostname, or long account/message identifier found in tracked files"
-elif [ "$personal_scan_rc" -eq 1 ]; then
-  ok "all tracked files contain no personal path, email, tailnet hostname, or long account/message identifier"
 else
-  fail "personal data scan could not inspect all tracked files"
+  ok "all tracked files contain no personal path, email, tailnet hostname, or long account/message identifier"
 fi
 
-set +e
-rg -I -l \
-  -e 'BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY' \
-  -e 'AKIA[0-9A-Z]{16}' \
-  -e 'github_pat_[A-Za-z0-9_]{20,}' \
-  -e 'gh[pousr]_[A-Za-z0-9_]{20,}' \
-  -e 'AIza[0-9A-Za-z_-]{20,}' \
-  -e 'sk-[A-Za-z0-9_-]{20,}' \
-  -e 'xox[baprs]-[A-Za-z0-9-]{20,}' \
-  -e '[MN][A-Za-z0-9_-]{23,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{20,}' \
-  -e 'DISCORD_BOT_TOKEN=.+|NYANYA_DISCORD_BOT_TOKEN=.+|OPENAI_API_KEY=.+' \
-  "${tracked_paths[@]}" \
-  >/tmp/nyanya-secret-scan.txt
-secret_scan_rc=$?
-set -e
-if [ "$secret_scan_rc" -eq 0 ]; then
+if [ -s /tmp/nyanya-secret-scan.txt ]; then
   sed -n '1,100p' /tmp/nyanya-secret-scan.txt
   fail "potential secret found in tracked files"
-elif [ "$secret_scan_rc" -eq 1 ]; then
-  ok "all tracked files contain no token-like or private-key values"
 else
-  fail "secret scan could not inspect all tracked files"
+  ok "all tracked files contain no token-like or private-key values"
 fi
 
 package_version="$(node -p "require('./package.json').version")"
