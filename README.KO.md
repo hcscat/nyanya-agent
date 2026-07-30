@@ -427,7 +427,8 @@ nyanya doctor
 
 npm package는 TypeScript로 개발한 CLI를 JavaScript로 빌드해서 배포한다. Python을 대체하지 않고, `nyanya setup`에서 Python runtime과 dependency를 준비한다.
 
-설치/배포 개선의 최신 권장안은 [NyaNya Agent 설치/배포 최종 권장안](docs/nyanya_install_distribution_final_plan_20260707.md)에 정리되어 있다. 핵심 방향은 npm CLI 계층은 TypeScript로 전환하고, Python dependency, dashboard, Discord bridge, memory worker, LaunchAgent 설정은 `nyanya setup`에서 한 번에 처리하는 것이다.
+현재 설치/배포 구조는 [설치와 배포](docs/installation_and_distribution.md)에
+정리되어 있다. Python runtime과 TypeScript CLI는 서로 분리된 계층으로 유지한다.
 
 ## 보안 모델
 
@@ -510,13 +511,15 @@ PYTHONPATH=src .venv/bin/python -m py_compile \
 
 ## 문서
 
+- [문서 인덱스](docs/README.md)
+- [아키텍처와 로드맵](docs/architecture_and_roadmap.md)
+- [실행 제어면](docs/execution_control_plane.md)
+- [설치와 배포](docs/installation_and_distribution.md)
+- [운영 가이드](docs/operations_guide.md)
+- [Dashboard 외부 접근](docs/external_dashboard_access.md)
+- [사용자 수용 테스트](docs/user_acceptance_tests_ko.md)
 - [Copyright review](docs/copyright_review.md)
 - [Public and private source policy](docs/source_publication_policy.md)
-- [Discord bot rename guide](docs/discord_bot_rename_guide.md)
-- [Operations guide](docs/operations_guide.md)
-- [External dashboard access guide](docs/external_dashboard_access.md)
-- [Why many agents use TypeScript](docs/typescript_agent_ecosystem.html)
-- [CLI session agent development cycle](docs/cli_session_agent_development_cycle.html)
 
 ## License
 

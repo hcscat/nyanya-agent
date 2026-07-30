@@ -1,195 +1,155 @@
-# External Dashboard Access Guide
+# External Dashboard Access
 
-Last checked: 2026-06-14
+## Security boundary
 
-## Current Local State
-
-Observed on this Mac mini:
-
-```text
-Dashboard URL: http://127.0.0.1:8765
-Dashboard bind: 127.0.0.1 only
-Listening process: Python on 127.0.0.1:8765
-macOS firewall: enabled
-LAN interface: en1
-LAN IP: 172.30.1.32
-Default gateway: 172.30.1.254
-Tailscale CLI: not installed
-cloudflared CLI: not installed
-```
-
-This is the safest default. The dashboard is reachable only from the Mac itself.
-
-## Recommendation
-
-Use this order:
-
-1. Local only: keep `NYANYA_DASHBOARD_HOST=127.0.0.1`.
-2. Private remote access: install Tailscale and publish the local service only to your tailnet.
-3. Public-but-controlled access: use Cloudflare Tunnel with Cloudflare Access policy.
-4. Raw router port forwarding: use only when there is a concrete reason and after adding authentication/TLS/reverse proxy protection.
-
-Do not expose the FastAPI app directly to the public internet as plain HTTP.
-
-## Option A: Local Only
-
-Keep:
+The dashboard should remain bound to loopback:
 
 ```text
 NYANYA_DASHBOARD_HOST=127.0.0.1
 NYANYA_DASHBOARD_PORT=8765
 ```
 
-Use:
+This prevents direct access from the LAN or public internet. Remote access should
+arrive through a private network or an authenticated reverse proxy.
+
+The dashboard control token protects mutating API routes. Read-only operational
+data must still be protected by the network access layer because it can reveal
+tasks, execution state, artifacts, or project information.
+
+## Recommended choices
+
+| Need | Recommended method | Client requirement |
+|---|---|---|
+| Same Mac | Local URL | None |
+| Personal desktop or mobile devices | Tailscale Serve | Tailscale login on each device |
+| Browser access without a VPN client | Cloudflare Tunnel plus Access | Authorized identity login |
+| Trusted local network only | SSH port forwarding | SSH client and key |
+| Public anonymous access | Not supported | Not applicable |
+
+Raw router port forwarding to the dashboard is not an approved deployment mode.
+
+## Local access
 
 ```bash
-./scripts/nyanya_ctl.sh dashboard-start
+./scripts/nyanya_ctl.sh dashboard-health
 open http://127.0.0.1:8765
 ```
 
-No macOS firewall or KT router change is required.
+## Tailscale Serve
 
-## Option B: Same LAN Only
+Tailscale Serve publishes the loopback dashboard to devices and users allowed by
+the same tailnet. It is distinct from Funnel, which exposes a service to the
+public internet.
 
-Set the dashboard host to `0.0.0.0` or the Mac's LAN IP, then restart:
-
-```text
-NYANYA_DASHBOARD_HOST=0.0.0.0
-NYANYA_DASHBOARD_PORT=8765
-```
+On the dashboard host:
 
 ```bash
-./scripts/nyanya_ctl.sh dashboard-restart
-```
-
-Access from another device on the same Wi-Fi/LAN:
-
-```text
-http://172.30.1.32:8765
-```
-
-macOS firewall may prompt to allow incoming connections for Python. If it does not prompt, use System Settings -> Network -> Firewall -> Options and allow the relevant Python executable or service.
-
-Use this only on a trusted private LAN.
-
-## Option C: Tailscale Serve
-
-This is the preferred remote access path.
-
-Reason:
-
-- The dashboard can remain bound to `127.0.0.1`.
-- No KT router port forwarding is needed.
-- Access is limited to devices/users in your tailnet.
-- Tailscale Serve can proxy `localhost:8765` to an HTTPS tailnet URL.
-
-After installing and logging in to Tailscale on the Mac mini and client devices:
-
-```bash
-tailscale serve localhost:8765
+tailscale status
+tailscale serve --bg http://127.0.0.1:8765
 tailscale serve status
 ```
 
-Keep dashboard settings:
+Keep Funnel disabled:
 
-```text
-NYANYA_DASHBOARD_HOST=127.0.0.1
-NYANYA_DASHBOARD_PORT=8765
+```bash
+tailscale funnel status
 ```
 
-Direct action status:
+On each client device:
 
-- I did not install Tailscale because it is not currently present on this Mac.
-- I can install/configure it later if you explicitly choose this route and complete the Tailscale login/approval flow.
+1. Install Tailscale from the official distribution channel.
+2. Sign in to the intended tailnet.
+3. Confirm the device is approved when device approval is enabled.
+4. Open the HTTPS URL shown by `tailscale serve status`.
 
-## Option D: Cloudflare Tunnel
+Apply tailnet grants or access-control rules so only the operator's intended
+devices and identities can reach HTTPS port 443 on the dashboard host. Do not
+store the real tailnet DNS name, device IP, auth key, or policy identity in Git.
 
-Use this if you want a stable public hostname with Cloudflare Access in front.
+Tailscale Serve adds identity headers and strips spoofed incoming copies. If an
+application later consumes those headers, it must continue listening only on
+loopback so LAN clients cannot bypass Serve and forge identity information.
 
-Reason:
+## SSH port forwarding
 
-- No inbound router port is needed.
-- `cloudflared` creates outbound connections to Cloudflare.
-- Cloudflare Access can enforce login, device posture, and user policy before the request reaches the Mac mini.
+For temporary access from a device that already has SSH key access:
 
-Typical target:
+```bash
+ssh -N -L 8765:127.0.0.1:8765 <dashboard-host>
+```
+
+Then open:
 
 ```text
 http://127.0.0.1:8765
 ```
 
-Direct action status:
+This does not require changing the dashboard bind address. Restrict SSH to
+key-based access and do not publish hostnames, usernames, or key locations in
+tracked documentation.
 
-- `cloudflared` is not currently installed.
-- This requires a Cloudflare account, a tunnel, and access policy decisions.
+## Cloudflare Tunnel and Access
 
-## Option E: KT Router Port Forwarding
+Use this only when clients should connect through a normal browser without a
+Tailscale client.
 
-This is the least preferred path for this dashboard.
+Required controls:
 
-Current local network suggests a KT-style gateway:
+1. Create an outbound Cloudflare Tunnel to `http://127.0.0.1:8765`.
+2. Map a dedicated hostname to that tunnel.
+3. Create a Cloudflare Access self-hosted application for the hostname.
+4. Add an allow policy for the intended identity and test denial from another
+   identity before relying on it.
+5. Keep the local dashboard on loopback and do not open an inbound router port.
 
-```text
-Mac LAN IP: 172.30.1.32
-Gateway: 172.30.1.254
+A tunnel hostname without Cloudflare Access is not sufficient. The hostname can
+be internet-reachable even though the origin has no public IP.
+
+## Same-LAN access
+
+Binding the dashboard to `0.0.0.0` exposes read-only operational data to every
+device that can reach the port. This is not the default recommendation.
+
+If a short LAN-only test is unavoidable:
+
+1. use a trusted isolated LAN;
+2. bind to a specific LAN address when possible;
+3. restrict the macOS firewall;
+4. stop the test and restore `127.0.0.1` immediately afterward.
+
+Prefer SSH port forwarding for temporary LAN access.
+
+## Verification
+
+On the host:
+
+```bash
+lsof -nP -iTCP:8765 -sTCP:LISTEN
+curl -fsS http://127.0.0.1:8765/health
+tailscale status
+tailscale serve status
 ```
 
-Common KT HomeHub/GiGA WiFi guidance points to:
+Expected:
 
-```text
-Router page: http://172.30.1.254 or homehub.kt.com:8899
-Menu path: 장치설정 -> 트래픽관리 -> 포트포워딩
-Typical default account: ktuser / homehub, but this varies by model and may have been changed
-```
+- the dashboard listens only on `127.0.0.1:8765`;
+- `/health` returns `status=ok`;
+- the intended private or authenticated proxy is active;
+- Tailscale Funnel and raw router forwarding are disabled;
+- an unauthorized client cannot open the dashboard.
 
-On this Mac, quick HTTP checks to `172.30.1.254` and `172.30.1.254:8899` did not respond. The router admin page may require browser access, a different management port, or a different network path.
+## Operator actions
 
-If you still choose port forwarding:
+NyaNya or Codex can inspect local health, update local service configuration, and
+verify the proxy. The operator must personally approve account login, device
+approval, VPN extensions, identity policies, and any security-sensitive network
+permission.
 
-1. Reserve or fix the Mac mini LAN IP, currently `172.30.1.32`.
-2. Set dashboard host to `0.0.0.0`.
-3. Put a reverse proxy with TLS and authentication in front of FastAPI.
-4. Forward an external high port to the reverse proxy, not directly to raw `8765`.
-5. Restrict source IPs if the router supports it.
-6. Check logs after opening the port.
+## Official references
 
-Do not forward public internet traffic directly to `127.0.0.1:8765`/FastAPI. It will not work while bound to localhost, and binding it publicly without auth is not acceptable.
-
-## What I Can Set Directly
-
-I can directly set:
-
-- NyaNya dashboard host/port in `.env`.
-- NyaNya dashboard LaunchAgent.
-- NyaNya dashboard process restart.
-- Local health checks.
-- Reverse proxy config if you choose one and provide the domain/access policy.
-- Tailscale/cloudflared install commands after you choose that route.
-
-I cannot safely complete without your action:
-
-- KT router login and port forwarding, unless you authorize browser interaction and provide/enter router credentials yourself.
-- Tailscale/Cloudflare account login and policy approval.
-- Public DNS/domain setup unless credentials and target domain are available.
-
-## Security Hardening Checklist
-
-- Keep `NYANYA_DASHBOARD_HOST=127.0.0.1` unless remote access is intentionally configured.
-- Prefer Tailscale Serve for personal access.
-- Prefer Cloudflare Tunnel + Access for named public host access.
-- Add application-level auth before any public exposure.
-- Keep `.env`, `data/`, `logs/`, `downloads/`, `sessions/`, and `run/` out of git.
-- Do not place Discord tokens, Google/OAuth state, cookies, or real user/channel IDs in public docs.
-- Review `logs/` and `data/nyanya_dashboard.db` before sharing artifacts.
-
-## References
-
-- Apple macOS firewall settings: https://support.apple.com/guide/mac-help/change-firewall-settings-on-mac-mh11783/mac
-- Apple firewall service/app access: https://support.apple.com/guide/mac-help/block-connections-to-your-mac-with-a-firewall-mh34041/mac
-- Tailscale quickstart: https://tailscale.com/docs/how-to/quickstart
-- Tailscale macOS install: https://tailscale.com/docs/install/mac
 - Tailscale Serve: https://tailscale.com/docs/features/tailscale-serve
-- Cloudflare Tunnel overview: https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/
-- Cloudflare Tunnel macOS service: https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/as-a-service/macos/
-- KT manual library: https://help.kt.com/serviceinfo/ManualDownloadInfo.do
-- General port forwarding guide: https://www.noip.com/support/knowledgebase/general-port-forwarding-guide
+- Tailscale Serve CLI: https://tailscale.com/docs/reference/tailscale-cli/serve
+- Tailscale Funnel: https://tailscale.com/kb/1223/funnel
+- Cloudflare private applications: https://developers.cloudflare.com/cloudflare-one/setup/secure-private-apps/
+- Cloudflare Tunnel: https://developers.cloudflare.com/tunnel/
+- Cloudflare Access applications: https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/

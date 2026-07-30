@@ -11,8 +11,10 @@ __pycache__/
 data/
 downloads/
 docs/private/
+docs/*.html
 docs/nyanya_orca_remote_agent_office_plan_*.html
 docs/nyanya_orca_remote_agent_office_plan_*.md
+docs/nyanya_remote_access_security_build_plan_20260723.md
 docs/phase0_baseline_*.md
 logs/
 prompts/local_system.md

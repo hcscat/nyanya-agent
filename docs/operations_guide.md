@@ -195,6 +195,12 @@ Read or change the Discord bot username:
 ./scripts/nyanya_ctl.sh bot-name NyaNya
 ```
 
+The Discord application username, server nickname, and NyaNya command prefix are
+separate settings. The command above changes the application username when the
+bot token has permission. Change the server nickname in Discord server settings,
+and configure `NYANYA_DISCORD_PREFIX` for the command prefix. Restart the bridge
+after changing runtime configuration.
+
 ## Invocation Behavior
 
 Discord handling is configured for:

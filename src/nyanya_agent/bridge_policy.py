@@ -382,6 +382,22 @@ def risk_plan_response(prompt: str, risk: dict[str, Any], *, workdir: pathlib.Pa
     )
 
 
+def task_operating_protocol_text() -> str:
+    """Return the stable planning and objective-drift contract for substantial work."""
+    return (
+        "Substantial task operating protocol:\n"
+        "- Before execution, state the objective, scope and exclusions, staged schedule, "
+        "detailed procedure, and verification criteria.\n"
+        "- Keep the accepted objective and scope stable throughout execution.\n"
+        "- If new evidence materially changes the objective, scope, risk, or expected result, "
+        "pause, explain the reason and impact, propose a revised plan, and wait for confirmation.\n"
+        "- Report progress at meaningful phase boundaries.\n"
+        "- In the final report, separate verified completion, remaining work, assumptions, "
+        "and actions that only the user can perform.\n"
+        "- Simple factual questions and short conversation do not require a ceremonial plan."
+    )
+
+
 def _path_touches_protected_delete_path(path: pathlib.Path) -> pathlib.Path | None:
     resolved = path.expanduser().resolve(strict=False)
     for protected in protected_delete_paths():
