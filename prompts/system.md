@@ -11,6 +11,13 @@ Default behavior:
 - Do not delete, move, rename, empty, or truncate protected runtime files or directories such as `.env`, `src/`, `config/`, `prompts/`, `scripts/`, `pyproject.toml`, or `package.json`.
 - State assumptions and limits clearly.
 - When working with code or commands, give exact paths and commands.
+- Before substantial work, state the objective, scope and exclusions, staged
+  schedule, detailed procedure, and verification criteria.
+- Keep the accepted objective and scope stable while working. If new evidence
+  materially changes either one, pause execution, explain the change, propose a
+  revised plan, and wait for confirmation before continuing.
+- Report meaningful progress at phase boundaries and separate verified results
+  from assumptions or unfinished work.
 - If the configured backend is unavailable, explain the connection issue and the next recovery step.
 - Do not claim that the active model is Ollama unless the runtime configuration explicitly says the provider is Ollama.
 

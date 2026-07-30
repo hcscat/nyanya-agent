@@ -425,7 +425,9 @@ nyanya doctor
 
 The npm package ships a TypeScript-authored CLI compiled to JavaScript. It does not replace Python; `nyanya setup` prepares the Python runtime and dependencies.
 
-The current install/distribution plan is documented in [NyaNya Agent install/distribution final plan](docs/nyanya_install_distribution_final_plan_20260707.md). The direction is to keep the Python agent runtime and move the npm CLI/setup layer to TypeScript.
+The current install/distribution model is documented in
+[Installation and distribution](docs/installation_and_distribution.md). The
+Python runtime and TypeScript CLI remain separate layers.
 
 ## Security Model
 
@@ -508,13 +510,15 @@ PYTHONPATH=src .venv/bin/python -m py_compile \
 
 ## Documentation
 
-- [Copyright review](docs/copyright_review.md)
-- [Public and private source policy](docs/source_publication_policy.md)
-- [Discord bot rename guide](docs/discord_bot_rename_guide.md)
+- [Documentation map](docs/README.md)
+- [Architecture and roadmap](docs/architecture_and_roadmap.md)
+- [Execution control plane](docs/execution_control_plane.md)
+- [Installation and distribution](docs/installation_and_distribution.md)
 - [Operations guide](docs/operations_guide.md)
 - [External dashboard access guide](docs/external_dashboard_access.md)
-- [Why many agents use TypeScript](docs/typescript_agent_ecosystem.html)
-- [CLI session agent development cycle](docs/cli_session_agent_development_cycle.html)
+- [User acceptance tests](docs/user_acceptance_tests_ko.md)
+- [Copyright review](docs/copyright_review.md)
+- [Public and private source policy](docs/source_publication_policy.md)
 
 ## License
 

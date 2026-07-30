@@ -45,6 +45,17 @@ def test_explicit_approval_allows_risky_request(monkeypatch, tmp_path):
     assert risk["approval_granted"] is True
 
 
+def test_task_operating_protocol_preserves_objective_and_requires_replanning():
+    protocol = policy.task_operating_protocol_text()
+
+    assert "objective, scope and exclusions" in protocol
+    assert "staged schedule" in protocol
+    assert "detailed procedure" in protocol
+    assert "verification criteria" in protocol
+    assert "pause" in protocol
+    assert "revised plan" in protocol
+
+
 def test_external_hidden_prompt_injection_stops(monkeypatch, tmp_path):
     monkeypatch.setenv("NYANYA_WORKSPACE_ROOTS", str(tmp_path))
     monkeypatch.setenv("NYANYA_TRUSTED_WORKSPACE_ROOTS", str(tmp_path))

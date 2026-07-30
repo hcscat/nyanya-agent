@@ -51,7 +51,7 @@ The installer does not overwrite an existing `.env`. Uninstall removes code and 
 The current distribution plan is documented in:
 
 ```text
-docs/nyanya_install_distribution_final_plan_20260707.md
+docs/installation_and_distribution.md
 ```
 
 The short version:

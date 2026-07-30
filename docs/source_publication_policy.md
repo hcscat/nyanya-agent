@@ -30,7 +30,7 @@ The line is simple:
 | Dashboard static UI | `src/nyanya_agent/dashboard_static/*` | Contains generic local dashboard HTML/CSS/JS. It must not include real request records, private channel IDs, or private user names. |
 | Config templates | `.env.example`, `.env.sample`, `config/nyanya.json`, `config/user_workspaces.example.json` | Show names, defaults, and structure without real credentials or private IDs. |
 | Packaging | `pyproject.toml`, `package.json`, `bin/*.js`, `scripts/*.sh` | Allows installation, local execution, npm wrapper use, and LaunchAgent setup. Generated local plist files are private, but reusable scripts are public. |
-| Documentation | `README.md`, `docs/*.md`, `docs/*.html` | Explains architecture, security model, setup, and decision records. Must avoid secrets and private logs. |
+| Documentation | `README.md`, `docs/*.md` | Explains architecture, security model, setup, and decision records. Generated HTML reports remain untracked. |
 | Project ignore rules | `.gitignore` | A generic project-level `.gitignore` is public when it excludes common private runtime paths. Machine-only ignore rules still belong in `.git/info/exclude`. |
 
 ## Conditionally Public

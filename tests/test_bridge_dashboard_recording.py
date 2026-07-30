@@ -47,7 +47,9 @@ def test_bridge_submit_records_async_completion(tmp_path, monkeypatch):
     )
 
     assert "요청을 접수했습니다" in ack
-    assert "처리 계획" in ack
+    assert "목표:" in ack
+    assert "단계 일정:" in ack
+    assert "목표 변경 규칙:" in ack
     assert "작업목록" in ack
     assert done.wait(2)
     assert responses[-1] == "done"
@@ -86,7 +88,8 @@ def test_bridge_task_status_lists_running_and_queued(monkeypatch):
         mode="auto",
         responder=responses.append,
     )
-    assert "처리 계획" in first_ack
+    assert "목표:" in first_ack
+    assert "단계 일정:" in first_ack
     assert started.wait(2)
 
     second_ack = store.submit(
