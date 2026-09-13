@@ -350,7 +350,6 @@ def create_agent_request(
         )
         append_request_event_conn(conn, request_id, "received", "Request received", metadata or {})
         log_audit(conn, actor=source, action="request.received", entity_type="agent_request", entity_id=request_id)
-    _mirror_request_to_execution_ledger(request_id, db_path=db_path)
     return request_id
 
 
@@ -459,7 +458,6 @@ def mark_request_status(
                 entity_id=request_id,
                 detail={"duration_ms": updates.get("duration_ms")},
             )
-    _mirror_request_to_execution_ledger(request_id, db_path=db_path)
 
 
 def list_requests(

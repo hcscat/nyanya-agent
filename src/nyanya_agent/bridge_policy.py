@@ -11,6 +11,7 @@ from typing import Any
 
 from nyanya_agent import core as nyanya
 from nyanya_agent.bridge_constants import *
+from nyanya_agent.policy_documents import policy_document_text
 
 def _resolve_configured_path(value: str, *, default_base: pathlib.Path) -> pathlib.Path:
     path = pathlib.Path(value).expanduser()
@@ -29,7 +30,7 @@ def workspace_roots() -> list[pathlib.Path]:
         ]
     else:
         raw = os.getenv("NYANYA_WORKSPACE_ROOT", "").strip()
-        roots = [_resolve_configured_path(raw, default_base=pathlib.Path.home())] if raw else [pathlib.Path.home()]
+        roots = [_resolve_configured_path(raw, default_base=pathlib.Path.home())] if raw else []
 
     unique: list[pathlib.Path] = []
     for root in roots:
@@ -37,14 +38,18 @@ def workspace_roots() -> list[pathlib.Path]:
             continue
         if root not in unique:
             unique.append(root)
-    return unique or [pathlib.Path.home().resolve(strict=False)]
+    return unique
 
 
 def workspace_root() -> pathlib.Path:
-    return workspace_roots()[0]
+    roots = workspace_roots()
+    if not roots:
+        raise ValueError("Configure an explicit workspace root before executing work")
+    return roots[0]
 
 
 def trusted_workspace_roots() -> list[pathlib.Path]:
+    """Trust is opt-in and never substitutes for registered workspace access."""
     raw_roots = os.getenv("NYANYA_TRUSTED_WORKSPACE_ROOTS", "").strip()
     if raw_roots:
         roots = [
@@ -53,7 +58,7 @@ def trusted_workspace_roots() -> list[pathlib.Path]:
             if item.strip()
         ]
     else:
-        roots = [nyanya.PROJECT_ROOT, pathlib.Path.home() / "HCS", pathlib.Path.home() / "NEB"]
+        roots = []
 
     unique: list[pathlib.Path] = []
     for root in roots:
@@ -250,8 +255,8 @@ INVISIBLE_CHARS_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff
 
 
 def approval_granted(prompt: str) -> bool:
-    lowered = prompt.lower()
-    return any(keyword in lowered for keyword in APPROVAL_KEYWORDS)
+    """Natural-language text is never a task-bound authorization credential."""
+    return False
 
 
 def system_or_network_change_requested(prompt: str) -> bool:
@@ -377,24 +382,19 @@ def risk_plan_response(prompt: str, risk: dict[str, Any], *, workdir: pathlib.Pa
         "3. 보호 경로, 비밀값, 시스템/네트워크 영향 여부를 재확인합니다.\n"
         "4. 변경 전후 검증 방법을 정합니다.\n"
         "5. 사용자가 명시적으로 승인한 뒤에만 실제 작업을 진행합니다.\n\n"
-        "진행하려면 `승인: 위 계획대로 진행`처럼 명시적으로 허락해 주세요.\n\n"
+        "먼저 대상 파일별 변경안과 검증 방법을 검토해야 합니다. 승인 문구만으로 직접 쓰기를 실행하지 않습니다.\n\n"
         f"원 요청:\n{prompt}"
     )
 
 
 def task_operating_protocol_text() -> str:
-    """Return the stable planning and objective-drift contract for substantial work."""
+    """Return the canonical Markdown planning and safety policy."""
+    policies = policy_document_text()
+    if policies:
+        return f"Canonical Markdown policy:\n{policies}"
     return (
-        "Substantial task operating protocol:\n"
-        "- Before execution, state the objective, scope and exclusions, staged schedule, "
-        "detailed procedure, and verification criteria.\n"
-        "- Keep the accepted objective and scope stable throughout execution.\n"
-        "- If new evidence materially changes the objective, scope, risk, or expected result, "
-        "pause, explain the reason and impact, propose a revised plan, and wait for confirmation.\n"
-        "- Report progress at meaningful phase boundaries.\n"
-        "- In the final report, separate verified completion, remaining work, assumptions, "
-        "and actions that only the user can perform.\n"
-        "- Simple factual questions and short conversation do not require a ceremonial plan."
+        "Canonical Markdown policy unavailable; before substantial execution, state the objective, scope and "
+        "exclusions, staged schedule, detailed procedure, and verification criteria."
     )
 
 
@@ -512,12 +512,12 @@ def discord_help_text(*, prefix: str, channel_id: str, user_id: str, is_admin: b
         "- `@nyanya help`\n"
         "- DM에서는 접두어 없이 `help` 또는 `commands`\n\n"
         "기본 사용:\n"
-        f"- `{prefix} 질문`: Antigravity CLI가 기본 답변\n"
+        f"- `{prefix} 질문`: Flash가 판단하고 Flash/Luna/Astra로 처리\n"
         "- `@nyanya 질문`: 멘션으로 동일하게 호출\n"
-        f"- `{prefix} gemini 질문`: Google CLI로 직접 답변\n"
+        f"- `{prefix} gemini 질문`: Flash 판단 후 Flash로 처리\n"
         f"- `{prefix} codex 검수/조사 내용`: Codex CLI 읽기 전용 위임\n"
-        f"- `{prefix} codex-work 파일 생성/수정 요청`: Codex CLI 쓰기 작업 위임\n"
-        "- 난이도 높은 파일/코딩/데이터 작업과 Chrome 조작 작업은 자동으로 Codex에 위임\n"
+        f"- `{prefix} codex-work 파일 생성/수정 요청`: 새 파일 생성 또는 기존 파일 변경안 검토·승인\n"
+        "- 중요도·영향도·복잡도로 모델을 선택합니다. 임의 shell·브라우저 조작은 지원하지 않습니다.\n"
         f"- `{prefix} resources`: CPU/메모리 상위 프로세스 조회\n"
         f"- `{prefix} status`: 브리지 실행 상태\n"
         f"- `{prefix} tasks`: 내 펜딩/진행/대기 작업 목록\n"
@@ -529,7 +529,12 @@ def discord_help_text(*, prefix: str, channel_id: str, user_id: str, is_admin: b
         "작업 제어:\n"
         f"- `{prefix} 취소`: 내 진행/대기 작업 모두 취소\n"
         f"- `{prefix} cancel`: 위와 동일\n"
-        "- 사용자별로 1개 실행, 2개 대기까지 허용됩니다.\n"
+        "- 기본 2개 작업을 병렬 처리하며 승인·복구 대기는 별도로 보존합니다.\n"
+        f"- `{prefix} recovery`: 미완료 작업 / `{prefix} why 작업ID`: 요청과 원인\n"
+        f"- `{prefix} plan 변경안ID`: 파일별 diff / `{prefix} plan-file 변경안ID 상대경로`: 전체 파일안\n"
+        f"- `{prefix} approve 변경안ID hash`: 승인·적용 / `{prefix} revoke 변경안ID`: 거절·철회\n"
+        f"- `{prefix} resume 작업ID`: 명시적 재시도 / `{prefix} cancel 작업ID`: 개별 취소\n"
+        f"- `{prefix} reconcile 변경안ID`: 중단된 파일 상태 확인 / `{prefix} resolve 변경안ID 관측hash`: 확인 처리\n"
         f"{admin_note}"
     )
 
@@ -554,11 +559,11 @@ def telegram_help_text(*, chat_id: str, user_id: str, is_admin: bool) -> str:
         "- `/commands`\n"
         "- `/명령어`\n\n"
         "기본 사용:\n"
-        "- `일반 질문`: Antigravity CLI가 기본 답변\n"
-        "- `/gemini 질문`: Google CLI로 직접 답변\n"
+        "- `일반 질문`: Flash가 판단하고 Flash/Luna/Astra로 처리\n"
+        "- `/gemini 질문`: Flash 판단 후 Flash로 처리\n"
         "- `/codex 검수/조사 내용`: Codex CLI 읽기 전용 위임\n"
-        "- `/codex_work 파일 생성/수정 요청`: Codex CLI 쓰기 작업 위임\n"
-        "- 난이도 높은 파일/코딩/데이터 작업과 Chrome 조작 작업은 자동으로 Codex에 위임\n"
+        "- `/codex_work 파일 생성/수정 요청`: 새 파일 생성 또는 기존 파일 변경안 검토·승인\n"
+        "- 중요도·영향도·복잡도로 모델을 선택합니다. 임의 shell·브라우저 조작은 지원하지 않습니다.\n"
         "- `/resources`: CPU/메모리 상위 프로세스 조회\n"
         "- `/status`: 브리지 실행 상태\n"
         "- `/tasks`: 내 펜딩/진행/대기 작업 목록\n"
@@ -570,6 +575,11 @@ def telegram_help_text(*, chat_id: str, user_id: str, is_admin: bool) -> str:
         "작업 제어:\n"
         "- `취소`: 내 진행/대기 작업 모두 취소\n"
         "- `/cancel`: 위와 동일\n"
-        "- 사용자별로 1개 실행, 2개 대기까지 허용됩니다.\n"
+        "- 기본 2개 작업을 병렬 처리하며 승인·복구 대기는 별도로 보존합니다.\n"
+        f"- `{prefix} recovery`: 미완료 작업 / `{prefix} why 작업ID`: 요청과 원인\n"
+        f"- `{prefix} plan 변경안ID`: 파일별 diff / `{prefix} plan-file 변경안ID 상대경로`: 전체 파일안\n"
+        f"- `{prefix} approve 변경안ID hash`: 승인·적용 / `{prefix} revoke 변경안ID`: 거절·철회\n"
+        f"- `{prefix} resume 작업ID`: 명시적 재시도 / `{prefix} cancel 작업ID`: 개별 취소\n"
+        f"- `{prefix} reconcile 변경안ID`: 중단된 파일 상태 확인 / `{prefix} resolve 변경안ID 관측hash`: 확인 처리\n"
         f"{admin_note}"
     )

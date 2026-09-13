@@ -3,16 +3,19 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 from pathlib import Path
 import re
 import sqlite3
+import threading
 from typing import Any
 from uuid import uuid4
 
-from nyanya_agent import dashboard_store as legacy
+from nyanya_agent import database as legacy
+from nyanya_agent.operation_schema import SQL as MIGRATION_4
 
 
 TASK_TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
@@ -215,7 +218,106 @@ CREATE TABLE IF NOT EXISTS writer_leases (
 );
 """
 
-MIGRATIONS = ((1, "execution-ledger", MIGRATION_1),)
+MIGRATION_2 = r"""
+CREATE TABLE IF NOT EXISTS execution_projects (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  owner TEXT NOT NULL DEFAULT 'operator',
+  workspace_root TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active',
+  description TEXT NOT NULL DEFAULT '',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_execution_projects_workspace
+  ON execution_projects(workspace_root) WHERE workspace_root <> '';
+CREATE INDEX IF NOT EXISTS idx_execution_projects_status_updated
+  ON execution_projects(status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS codex_sessions (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES execution_projects(id) ON DELETE RESTRICT,
+  session_key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  external_session_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active',
+  workspace_root TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_activity_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_codex_sessions_project_key
+  ON codex_sessions(project_id, session_key);
+CREATE INDEX IF NOT EXISTS idx_codex_sessions_project_activity
+  ON codex_sessions(project_id, last_activity_at DESC);
+
+ALTER TABLE agent_tasks ADD COLUMN project_id TEXT REFERENCES execution_projects(id) ON DELETE SET NULL;
+ALTER TABLE agent_tasks ADD COLUMN codex_session_id TEXT REFERENCES codex_sessions(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_project_created ON agent_tasks(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_codex_session_created ON agent_tasks(codex_session_id, created_at DESC);
+"""
+
+MIGRATION_3 = r"""
+CREATE TABLE task_claims (
+  task_id TEXT PRIMARY KEY REFERENCES agent_tasks(id),
+  worker_id TEXT NOT NULL,
+  owner_key TEXT NOT NULL,
+  execution_id TEXT NOT NULL REFERENCES executions(id),
+  expires_at TEXT NOT NULL,
+  released INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_task_claims_owner ON task_claims(owner_key, released, expires_at);
+CREATE TABLE task_results (
+  execution_id TEXT PRIMARY KEY REFERENCES executions(id),
+  task_id TEXT NOT NULL REFERENCES agent_tasks(id),
+  outcome TEXT NOT NULL,
+  response TEXT NOT NULL,
+  delivery_status TEXT NOT NULL DEFAULT 'pending',
+  delivery_error TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+"""
+
+MIGRATIONS = (
+    (1, "execution-ledger", MIGRATION_1),
+    (2, "projects-and-codex-sessions", MIGRATION_2),
+    (3, "task-claims-and-results", MIGRATION_3),
+    (4, "serializable-operations-and-reviewed-apply", MIGRATION_4),
+)
+
+_MIGRATION_THREAD_LOCK = threading.RLock()
+
+
+@contextmanager
+def _migration_file_lock(db_path: str | Path | None):
+    """Serialize schema bootstrap across bridge/dashboard processes on Unix."""
+    lock_path = legacy.resolve_db_path(db_path).with_name(legacy.resolve_db_path(db_path).name + ".migrations.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("a+", encoding="utf-8")
+    try:
+        try:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        except ImportError:
+            # The thread lock still protects concurrent callers on platforms
+            # without fcntl; SQLite remains the final cross-process guard.
+            pass
+        yield
+    finally:
+        try:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        except ImportError:
+            pass
+        handle.close()
 
 
 def now_iso() -> str:
@@ -271,32 +373,33 @@ def _sql_literal(value: str) -> str:
 
 
 def apply_migrations(db_path: str | Path | None = None) -> int:
-    legacy.init_db(db_path)
-    with legacy.connect(db_path) as conn:
-        for version, name, sql in MIGRATIONS:
-            table_exists = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'"
-            ).fetchone()
-            applied = None
-            if table_exists:
-                applied = conn.execute(
-                    "SELECT checksum FROM schema_migrations WHERE version = ?", (version,)
+    with _MIGRATION_THREAD_LOCK, _migration_file_lock(db_path):
+        legacy.init_db(db_path)
+        with legacy.connect(db_path) as conn:
+            for version, name, sql in MIGRATIONS:
+                table_exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'"
                 ).fetchone()
-            checksum = _migration_checksum(sql)
-            if applied is not None:
-                if applied["checksum"] != checksum:
-                    raise RuntimeError(f"Migration checksum mismatch at version {version}")
-                continue
-            script = (
-                "BEGIN IMMEDIATE;\n"
-                + sql
-                + "\nINSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES ("
-                + f"{version}, {_sql_literal(name)}, {_sql_literal(checksum)}, {_sql_literal(now_iso())});\n"
-                + f"PRAGMA user_version = {version};\nCOMMIT;"
-            )
-            conn.executescript(script)
-        row = conn.execute("PRAGMA user_version").fetchone()
-        return int(row[0])
+                applied = None
+                if table_exists:
+                    applied = conn.execute(
+                        "SELECT checksum FROM schema_migrations WHERE version = ?", (version,)
+                    ).fetchone()
+                checksum = _migration_checksum(sql)
+                if applied is not None:
+                    if applied["checksum"] != checksum:
+                        raise RuntimeError(f"Migration checksum mismatch at version {version}")
+                    continue
+                script = (
+                    "BEGIN IMMEDIATE;\n"
+                    + sql
+                    + "\nINSERT INTO schema_migrations(version, name, checksum, applied_at) VALUES ("
+                    + f"{version}, {_sql_literal(name)}, {_sql_literal(checksum)}, {_sql_literal(now_iso())});\n"
+                    + f"PRAGMA user_version = {version};\nCOMMIT;"
+                )
+                conn.executescript(script)
+            row = conn.execute("PRAGMA user_version").fetchone()
+            return int(row[0])
 
 
 def schema_state(db_path: str | Path | None = None) -> dict[str, Any]:
@@ -304,6 +407,33 @@ def schema_state(db_path: str | Path | None = None) -> dict[str, Any]:
     with legacy.connect(db_path) as conn:
         migrations = [dict(row) for row in conn.execute("SELECT * FROM schema_migrations ORDER BY version")]
     return {"version": version, "latest": MIGRATIONS[-1][0], "migrations": migrations}
+
+
+def ledger_summary(*, db_path: str | Path | None = None) -> dict[str, Any]:
+    """Return a compact monitoring read model from the authoritative ledger."""
+    version = apply_migrations(db_path)
+    with legacy.connect(db_path) as conn:
+        task_counts = {
+            row["status"]: int(row["count"])
+            for row in conn.execute("SELECT status, COUNT(*) AS count FROM agent_tasks GROUP BY status")
+        }
+        execution_counts = {
+            row["status"]: int(row["count"])
+            for row in conn.execute("SELECT status, COUNT(*) AS count FROM executions GROUP BY status")
+        }
+        project_count = int(
+            conn.execute("SELECT COUNT(*) AS count FROM execution_projects WHERE status != 'archived'").fetchone()["count"]
+        )
+        session_count = int(
+            conn.execute("SELECT COUNT(*) AS count FROM codex_sessions WHERE status != 'closed'").fetchone()["count"]
+        )
+    return {
+        "schema_version": version,
+        "projects": project_count,
+        "codex_sessions": session_count,
+        "task_counts": task_counts,
+        "execution_counts": execution_counts,
+    }
 
 
 def _rows(conn: sqlite3.Connection, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
@@ -516,6 +646,344 @@ def list_agent_profiles(*, db_path: str | Path | None = None) -> list[dict[str, 
     return [_parse_record(item, ("capabilities_json", "policy_json")) for item in data]
 
 
+def create_project(
+    *,
+    name: str,
+    owner: str = "operator",
+    workspace_root: str = "",
+    status: str = "active",
+    description: str = "",
+    metadata: dict[str, Any] | None = None,
+    project_id: str | None = None,
+    db_path: str | Path | None = None,
+) -> dict[str, Any]:
+    name = name.strip()
+    if not name:
+        raise ValueError("Project name cannot be empty")
+    if status not in {"active", "paused", "archived"}:
+        raise ValueError(f"Unknown project status: {status}")
+    apply_migrations(db_path)
+    timestamp = now_iso()
+    project_id = project_id or new_id("project")
+    with legacy.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO execution_projects
+              (id, name, owner, workspace_root, status, description, metadata_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                project_id,
+                name,
+                owner,
+                workspace_root,
+                status,
+                description,
+                encode_json(redact(metadata or {})),
+                timestamp,
+                timestamp,
+            ),
+        )
+        legacy.log_audit(
+            conn,
+            actor=owner,
+            action="project.created",
+            entity_type="execution_project",
+            entity_id=project_id,
+            detail=redact({"name": name, "workspace_root": workspace_root}),
+        )
+    project = get_project(project_id, db_path=db_path)
+    if project is None:
+        raise RuntimeError(f"Project was not created: {project_id}")
+    return project
+
+
+def get_project(project_id: str, *, db_path: str | Path | None = None) -> dict[str, Any] | None:
+    apply_migrations(db_path)
+    with legacy.connect(db_path) as conn:
+        row = conn.execute("SELECT * FROM execution_projects WHERE id = ?", (project_id,)).fetchone()
+        if row is None:
+            return None
+        project = _parse_record(dict(row))
+        project["task_count"] = int(
+            conn.execute("SELECT COUNT(*) FROM agent_tasks WHERE project_id = ?", (project_id,)).fetchone()[0]
+        )
+        project["codex_session_count"] = int(
+            conn.execute("SELECT COUNT(*) FROM codex_sessions WHERE project_id = ?", (project_id,)).fetchone()[0]
+        )
+        return project
+
+
+def find_project_by_workspace(
+    workspace_root: str,
+    *,
+    db_path: str | Path | None = None,
+) -> dict[str, Any] | None:
+    apply_migrations(db_path)
+    with legacy.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM execution_projects WHERE workspace_root = ?",
+            (workspace_root.strip(),),
+        ).fetchone()
+        if row is None:
+            return None
+        project = _parse_record(dict(row))
+        project["task_count"] = int(
+            conn.execute("SELECT COUNT(*) FROM agent_tasks WHERE project_id = ?", (project["id"],)).fetchone()[0]
+        )
+        project["codex_session_count"] = int(
+            conn.execute("SELECT COUNT(*) FROM codex_sessions WHERE project_id = ?", (project["id"],)).fetchone()[0]
+        )
+        return project
+
+
+def list_projects(
+    *,
+    status: str | None = None,
+    limit: int = 100,
+    db_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    apply_migrations(db_path)
+    with legacy.connect(db_path) as conn:
+        if status:
+            data = _rows(
+                conn,
+                "SELECT * FROM execution_projects WHERE status = ? ORDER BY updated_at DESC LIMIT ?",
+                (status, limit),
+            )
+        else:
+            data = _rows(conn, "SELECT * FROM execution_projects ORDER BY updated_at DESC LIMIT ?", (limit,))
+        result = []
+        for item in data:
+            project = _parse_record(item)
+            project["task_count"] = int(
+                conn.execute("SELECT COUNT(*) FROM agent_tasks WHERE project_id = ?", (project["id"],)).fetchone()[0]
+            )
+            project["codex_session_count"] = int(
+                conn.execute("SELECT COUNT(*) FROM codex_sessions WHERE project_id = ?", (project["id"],)).fetchone()[0]
+            )
+            result.append(project)
+        return result
+
+
+def create_codex_session(
+    *,
+    project_id: str,
+    session_key: str,
+    name: str,
+    external_session_id: str = "",
+    status: str = "active",
+    workspace_root: str = "",
+    model: str = "",
+    metadata: dict[str, Any] | None = None,
+    session_id: str | None = None,
+    db_path: str | Path | None = None,
+) -> dict[str, Any]:
+    session_key = session_key.strip()
+    name = name.strip()
+    if not session_key or not name:
+        raise ValueError("Codex session key and name cannot be empty")
+    if status not in {"active", "paused", "closed"}:
+        raise ValueError(f"Unknown Codex session status: {status}")
+    apply_migrations(db_path)
+    timestamp = now_iso()
+    session_id = session_id or new_id("codex")
+    with legacy.connect(db_path) as conn:
+        if conn.execute("SELECT 1 FROM execution_projects WHERE id = ?", (project_id,)).fetchone() is None:
+            raise KeyError(project_id)
+        existing = conn.execute(
+            "SELECT id FROM codex_sessions WHERE project_id = ? AND session_key = ?",
+            (project_id, session_key),
+        ).fetchone()
+        if existing:
+            session_id = existing["id"]
+            conn.execute(
+                """
+                UPDATE codex_sessions
+                SET name = ?, external_session_id = ?, status = ?, workspace_root = ?, model = ?,
+                    metadata_json = ?, updated_at = ?, last_activity_at = ?
+                WHERE id = ?
+                """,
+                (
+                    name,
+                    external_session_id,
+                    status,
+                    workspace_root,
+                    model,
+                    encode_json(redact(metadata or {})),
+                    timestamp,
+                    timestamp,
+                    session_id,
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO codex_sessions
+                  (id, project_id, session_key, name, external_session_id, status, workspace_root, model,
+                   metadata_json, created_at, updated_at, last_activity_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    project_id,
+                    session_key,
+                    name,
+                    external_session_id,
+                    status,
+                    workspace_root,
+                    model,
+                    encode_json(redact(metadata or {})),
+                    timestamp,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+        legacy.log_audit(
+            conn,
+            actor="nyanya-agent",
+            action="codex_session.upserted",
+            entity_type="codex_session",
+            entity_id=session_id,
+            detail=redact({"project_id": project_id, "session_key": session_key}),
+        )
+    session = get_codex_session(session_id, db_path=db_path)
+    if session is None:
+        raise RuntimeError(f"Codex session was not created: {session_id}")
+    return session
+
+
+def get_codex_session(session_id: str, *, db_path: str | Path | None = None) -> dict[str, Any] | None:
+    apply_migrations(db_path)
+    with legacy.connect(db_path) as conn:
+        row = conn.execute("SELECT * FROM codex_sessions WHERE id = ?", (session_id,)).fetchone()
+        return _parse_record(dict(row)) if row is not None else None
+
+
+def list_codex_sessions(
+    *,
+    project_id: str | None = None,
+    status: str | None = None,
+    limit: int = 100,
+    db_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    apply_migrations(db_path)
+    conditions: list[str] = []
+    params: list[Any] = []
+    if project_id:
+        conditions.append("project_id = ?")
+        params.append(project_id)
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    params.append(limit)
+    with legacy.connect(db_path) as conn:
+        data = _rows(
+            conn,
+            f"SELECT * FROM codex_sessions{where} ORDER BY last_activity_at DESC LIMIT ?",
+            tuple(params),
+        )
+    return [_parse_record(item) for item in data]
+
+
+def attach_codex_session(
+    task_id: str,
+    *,
+    project_id: str,
+    session_id: str,
+    actor: str = "nyanya-agent",
+    db_path: str | Path | None = None,
+) -> dict[str, Any]:
+    apply_migrations(db_path)
+    with legacy.connect(db_path) as conn:
+        task = conn.execute("SELECT * FROM agent_tasks WHERE id = ?", (task_id,)).fetchone()
+        session = conn.execute(
+            "SELECT id, project_id FROM codex_sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        if task is None:
+            raise KeyError(task_id)
+        if session is None or session["project_id"] != project_id:
+            raise ValueError("Codex session does not belong to the supplied project")
+        if task["project_id"] not in (None, project_id):
+            raise ValueError("Task project does not match the Codex session project")
+        timestamp = now_iso()
+        conn.execute(
+            "UPDATE agent_tasks SET project_id = ?, codex_session_id = ?, updated_at = ? WHERE id = ?",
+            (project_id, session_id, timestamp, task_id),
+        )
+        conn.execute(
+            "UPDATE codex_sessions SET updated_at = ?, last_activity_at = ? WHERE id = ?",
+            (timestamp, timestamp, session_id),
+        )
+        append_event_conn(
+            conn,
+            task_id=task_id,
+            event_type="task.codex_session_attached",
+            message="Codex session attached to task",
+            metadata={"project_id": project_id, "codex_session_id": session_id, "actor": actor},
+        )
+        row = dict(conn.execute("SELECT * FROM agent_tasks WHERE id = ?", (task_id,)).fetchone())
+    return _parse_record(row)
+
+
+def find_task_by_source_request(
+    source_request_id: str,
+    *,
+    db_path: str | Path | None = None,
+) -> dict[str, Any] | None:
+    apply_migrations(db_path)
+    with legacy.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT id FROM agent_tasks WHERE source_request_id = ?",
+            (source_request_id,),
+        ).fetchone()
+    return get_task(row["id"], db_path=db_path) if row is not None else None
+
+
+def update_task_context(
+    task_id: str,
+    *,
+    project_id: str | None = None,
+    codex_session_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    db_path: str | Path | None = None,
+) -> dict[str, Any]:
+    apply_migrations(db_path)
+    with legacy.connect(db_path) as conn:
+        task = conn.execute("SELECT * FROM agent_tasks WHERE id = ?", (task_id,)).fetchone()
+        if task is None:
+            raise KeyError(task_id)
+        if project_id and conn.execute("SELECT 1 FROM execution_projects WHERE id = ?", (project_id,)).fetchone() is None:
+            raise KeyError(project_id)
+        if codex_session_id:
+            session = conn.execute(
+                "SELECT project_id FROM codex_sessions WHERE id = ?", (codex_session_id,)
+            ).fetchone()
+            if session is None:
+                raise KeyError(codex_session_id)
+            if project_id and session["project_id"] != project_id:
+                raise ValueError("Codex session does not belong to the supplied project")
+            project_id = project_id or session["project_id"]
+        existing_metadata = decode_json(task["metadata_json"], {})
+        if not isinstance(existing_metadata, dict):
+            existing_metadata = {}
+        existing_metadata.update(redact(metadata or {}))
+        timestamp = now_iso()
+        updates = {
+            "project_id": project_id if project_id is not None else task["project_id"],
+            "codex_session_id": codex_session_id if codex_session_id is not None else task["codex_session_id"],
+            "metadata_json": encode_json(existing_metadata),
+            "updated_at": timestamp,
+        }
+        conn.execute(
+            "UPDATE agent_tasks SET project_id = ?, codex_session_id = ?, metadata_json = ?, updated_at = ? WHERE id = ?",
+            (*updates.values(), task_id),
+        )
+        row = dict(conn.execute("SELECT * FROM agent_tasks WHERE id = ?", (task_id,)).fetchone())
+    return _parse_record(row)
+
+
 def create_task(
     *,
     title: str,
@@ -525,6 +993,8 @@ def create_task(
     requested_by: str = "operator",
     assigned_agent_id: str | None = None,
     source_request_id: str | None = None,
+    project_id: str | None = None,
+    codex_session_id: str | None = None,
     metadata: dict[str, Any] | None = None,
     task_id: str | None = None,
     db_path: str | Path | None = None,
@@ -536,12 +1006,23 @@ def create_task(
     task_id = task_id or new_id("task")
     completed_at = timestamp if status in TASK_TERMINAL_STATUSES else None
     with legacy.connect(db_path) as conn:
+        if project_id and conn.execute("SELECT 1 FROM execution_projects WHERE id = ?", (project_id,)).fetchone() is None:
+            raise KeyError(project_id)
+        if codex_session_id:
+            session = conn.execute(
+                "SELECT project_id FROM codex_sessions WHERE id = ?", (codex_session_id,)
+            ).fetchone()
+            if session is None:
+                raise KeyError(codex_session_id)
+            if project_id and session["project_id"] != project_id:
+                raise ValueError("Codex session does not belong to the supplied project")
+            project_id = project_id or session["project_id"]
         conn.execute(
             """
             INSERT INTO agent_tasks
               (id, source_request_id, title, prompt, status, priority, requested_by, assigned_agent_id,
-               metadata_json, created_at, updated_at, completed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               project_id, codex_session_id, metadata_json, created_at, updated_at, completed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 task_id,
@@ -552,6 +1033,8 @@ def create_task(
                 priority,
                 requested_by,
                 assigned_agent_id,
+                project_id,
+                codex_session_id,
                 encode_json(redact(metadata or {})),
                 timestamp,
                 timestamp,
@@ -628,19 +1111,28 @@ def transition_task(
 def list_tasks(
     *,
     status: str | None = None,
+    project_id: str | None = None,
+    codex_session_id: str | None = None,
     limit: int = 100,
     db_path: str | Path | None = None,
 ) -> list[dict[str, Any]]:
     apply_migrations(db_path)
+    conditions: list[str] = []
+    params: list[Any] = []
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
+    if project_id:
+        conditions.append("project_id = ?")
+        params.append(project_id)
+    if codex_session_id:
+        conditions.append("codex_session_id = ?")
+        params.append(codex_session_id)
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    params.append(limit)
     with legacy.connect(db_path) as conn:
-        if status:
-            data = _rows(
-                conn,
-                "SELECT * FROM agent_tasks WHERE status = ? ORDER BY priority, created_at DESC LIMIT ?",
-                (status, limit),
-            )
-        else:
-            data = _rows(conn, "SELECT * FROM agent_tasks ORDER BY created_at DESC LIMIT ?", (limit,))
+        order = "priority, created_at DESC" if status or project_id or codex_session_id else "created_at DESC"
+        data = _rows(conn, f"SELECT * FROM agent_tasks{where} ORDER BY {order} LIMIT ?", tuple(params))
     return [_parse_record(item) for item in data]
 
 
@@ -747,9 +1239,15 @@ def transition_execution(
 ) -> dict[str, Any]:
     apply_migrations(db_path)
     with legacy.connect(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
         current = conn.execute("SELECT * FROM executions WHERE id = ?", (execution_id,)).fetchone()
         if current is None:
             raise KeyError(execution_id)
+        owner = conn.execute("SELECT current_execution_id FROM agent_tasks WHERE id = ?", (current["task_id"],)).fetchone()
+        if owner["current_execution_id"] != execution_id:
+            raise ValueError("Stale execution cannot change the current task")
+        if current["status"] in EXECUTION_TERMINAL_STATUSES and status != current["status"]:
+            raise ValueError("Invalid execution transition from a terminal attempt")
         current_status = current["status"]
         if status != current_status and not force and status not in EXECUTION_TRANSITIONS.get(current_status, set()):
             raise ValueError(f"Invalid execution transition: {current_status} -> {status}")
@@ -1058,16 +1556,23 @@ def decide_approval(
     apply_migrations(db_path)
     timestamp = datetime.now(UTC).replace(microsecond=0)
     with legacy.connect(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
         current = conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
         if current is None:
             raise KeyError(approval_id)
+        authorized_actor = decode_json(current["metadata_json"], {}).get("authorized_actor")
+        if authorized_actor and decided_by != authorized_actor:
+            raise ValueError("Approval actor mismatch")
         if current["status"] != "pending":
             if current["status"] == decision:
                 return _parse_record(dict(current))
             raise ValueError(f"Approval already decided: {current['status']}")
         expires_at = _parse_iso(current["expires_at"])
-        if expires_at and expires_at < timestamp:
+        if expires_at and expires_at <= timestamp:
             conn.execute("UPDATE approvals SET status = 'expired', decided_at = ? WHERE id = ?", (timestamp.isoformat(), approval_id))
+            append_event_conn(conn, task_id=current["task_id"], execution_id=current["execution_id"],
+                              event_type="approval.expired", status="expired", message="Approval expired")
+            conn.commit()
             raise ValueError("Approval expired")
         conn.execute(
             "UPDATE approvals SET status = ?, decided_by = ?, reason = ?, decided_at = ? WHERE id = ?",
@@ -1235,7 +1740,7 @@ def renew_writer_lease(
         changed = conn.execute(
             """
             UPDATE writer_leases SET heartbeat_at = ?, expires_at = ?
-            WHERE resource_key = ? AND owner_id = ? AND fence_token = ?
+            WHERE resource_key = ? AND owner_id = ? AND fence_token = ? AND expires_at > ?
             """,
             (
                 now.isoformat(),
@@ -1243,6 +1748,7 @@ def renew_writer_lease(
                 resource_key,
                 owner_id,
                 fence_token,
+                now.isoformat(),
             ),
         ).rowcount
         if not changed:
@@ -1261,7 +1767,8 @@ def release_writer_lease(
     apply_migrations(db_path)
     with legacy.connect(db_path) as conn:
         changed = conn.execute(
-            "DELETE FROM writer_leases WHERE resource_key = ? AND owner_id = ? AND fence_token = ?",
+            "UPDATE writer_leases SET expires_at = '1970-01-01T00:00:00+00:00' "
+            "WHERE resource_key = ? AND owner_id = ? AND fence_token = ?",
             (resource_key, owner_id, fence_token),
         ).rowcount
     return bool(changed)
@@ -1289,6 +1796,9 @@ def mirror_legacy_request(request_id: str, *, db_path: str | Path | None = None)
             "cancelled": "cancelled",
             "ignored": "cancelled",
         }.get(request["status"], "blocked")
+        adopted = conn.execute("SELECT id, metadata_json FROM agent_tasks WHERE source_request_id = ?", (request_id,)).fetchone()
+        if adopted:
+            return adopted["id"]
         task_exists = conn.execute("SELECT status FROM agent_tasks WHERE id = ?", (task_id,)).fetchone()
         title = legacy.safe_summary(request["command"] or request["prompt"] or "Messenger request", 120)
         if task_exists is None:
@@ -1305,7 +1815,7 @@ def mirror_legacy_request(request_id: str, *, db_path: str | Path | None = None)
                     title,
                     request["prompt"],
                     task_status,
-                    f"{request['source']}:{request['user_id']}",
+                    f"{request['source']}-user:{request['user_id']}" if request["user_id"] else "operator",
                     encode_json({"legacy": True, "channel_id": request["channel_id"]}),
                     request["created_at"],
                     request["updated_at"],
@@ -1418,7 +1928,7 @@ def reconcile_legacy_requests(*, limit: int = 500, db_path: str | Path | None = 
     with legacy.connect(db_path) as conn:
         request_ids = [
             row["id"]
-            for row in conn.execute("SELECT id FROM agent_requests ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+            for row in conn.execute("SELECT r.id FROM agent_requests r WHERE NOT EXISTS (SELECT 1 FROM agent_tasks t WHERE t.source_request_id=r.id) ORDER BY r.created_at LIMIT ?", (limit,)).fetchall()
         ]
     imported = 0
     for request_id in request_ids:

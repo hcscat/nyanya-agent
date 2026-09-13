@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from nyanya_agent import execution_store as store
+from nyanya_agent.approval_contract import command_scope, check_approval
 from nyanya_agent.execution_adapters import (
     AdapterHandle,
     AdapterObservation,
@@ -16,7 +17,6 @@ from nyanya_agent.execution_adapters import (
     CodexAdapter,
     ExecutionAdapter,
     ManagedSubprocessAdapter,
-    OrcaAdapter,
     TmuxAdapter,
 )
 
@@ -47,7 +47,6 @@ class ExecutionCoordinator:
         self.adapters: dict[str, ExecutionAdapter] = adapters or {
             "subprocess": ManagedSubprocessAdapter(),
             "tmux": TmuxAdapter(),
-            "orca": OrcaAdapter(),
             "codex": CodexAdapter(),
             "antigravity": AntigravityAdapter(),
         }
@@ -114,9 +113,9 @@ class ExecutionCoordinator:
         if write_resource_key:
             if not approval_id:
                 raise PermissionError("A persisted approval is required for write-capable execution")
-            approval = store.get_approval(approval_id, db_path=self.db_path)
-            if approval is None or approval["status"] != "approved" or approval["task_id"] != task_id:
-                raise PermissionError("The supplied approval is not approved for this task")
+            scope_hash = command_scope(command=command, cwd=cwd, adapter_type=adapter_type,
+                                       write_resource_key=write_resource_key, env=env, timeout_seconds=timeout_seconds)
+            check_approval(self.db_path, approval_id, task_id, scope_hash)
 
         execution = store.create_execution(
             task_id=task_id,
@@ -166,6 +165,8 @@ class ExecutionCoordinator:
             timeout_seconds=timeout_seconds,
         )
         try:
+            if write_resource_key:
+                check_approval(self.db_path, approval_id, task_id, scope_hash, execution_id=execution["id"])
             handle = adapter.start(request)
         except Exception as exc:
             failed = store.transition_execution(
@@ -224,7 +225,9 @@ class ExecutionCoordinator:
         if started_at and execution["status"] in ACTIVE_EXECUTION_STATUSES:
             age_seconds = (datetime.now(UTC) - started_at).total_seconds()
             if age_seconds > timeout_seconds:
-                adapter.cancel(handle, grace_seconds=2.0)
+                cancellation = adapter.cancel(handle, grace_seconds=2.0)
+                if cancellation.status != "cancelled":
+                    return self._apply_observation(execution, session, handle, cancellation)
                 timed_out = store.transition_execution(
                     execution_id,
                     "timed_out",
@@ -380,6 +383,6 @@ class ExecutionCoordinator:
     def recover_active(self) -> list[dict[str, Any]]:
         recovered = []
         for execution in store.list_executions(limit=500, db_path=self.db_path):
-            if execution["status"] in ACTIVE_EXECUTION_STATUSES:
+            if execution["status"] in ACTIVE_EXECUTION_STATUSES and not execution.get("metadata", {}).get("worker_id"):
                 recovered.append(self.observe(execution["id"]))
         return recovered

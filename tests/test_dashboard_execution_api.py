@@ -44,7 +44,7 @@ def test_execution_read_api_and_authenticated_control_actions(tmp_path, monkeypa
     assert retried.json()["status"] == "queued"
 
     health = client.get("/health").json()
-    assert health["schema_version"] == 1
+    assert health["schema_version"] == 4
     assert health["control_auth_configured"] is True
 
 

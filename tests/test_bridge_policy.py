@@ -35,14 +35,14 @@ def test_trusted_file_mutation_still_gets_plan_gate(monkeypatch, tmp_path):
     assert risk["severity"] == "medium"
 
 
-def test_explicit_approval_allows_risky_request(monkeypatch, tmp_path):
+def test_approval_words_are_not_execution_authorization(monkeypatch, tmp_path):
     monkeypatch.setenv("NYANYA_WORKSPACE_ROOTS", str(tmp_path))
     monkeypatch.setenv("NYANYA_TRUSTED_WORKSPACE_ROOTS", str(tmp_path))
 
     risk = policy.classify_request_risk("승인: 위 계획대로 scripts/run.sh 파일을 수정해", workdir=tmp_path)
 
     assert risk["requires_approval"] is True
-    assert risk["approval_granted"] is True
+    assert risk["approval_granted"] is False
 
 
 def test_task_operating_protocol_preserves_objective_and_requires_replanning():

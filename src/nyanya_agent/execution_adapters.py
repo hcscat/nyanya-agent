@@ -269,6 +269,11 @@ class ManagedSubprocessAdapter:
 
     def cancel(self, handle: AdapterHandle, grace_seconds: float = 5.0) -> AdapterObservation:
         process = self._processes.get(handle.pid or -1)
+        if process is None:
+            return AdapterObservation(
+                status="lost", confidence=0.3, running=_pid_alive(handle.pid),
+                evidence=("Process identity is not owned; reconcile before signalling a persisted PID",),
+            )
 
         def alive() -> bool:
             if process is not None:
@@ -288,14 +293,19 @@ class ManagedSubprocessAdapter:
                     os.killpg(handle.pid, signal.SIGKILL)
                 except (ProcessLookupError, PermissionError):
                     pass
+                try:
+                    process.wait(timeout=2.0)
+                except subprocess.TimeoutExpired:
+                    pass
+        still_running = alive()
         return AdapterObservation(
-            status="cancelled",
-            confidence=0.95,
-            running=False,
-            exit_code=-15,
+            status="lost" if still_running else "cancelled",
+            confidence=0.4 if still_running else 0.95,
+            running=still_running,
+            exit_code=process.poll(),
             output_tail=_tail(handle.stdout_file),
             error_tail=_tail(handle.stderr_file),
-            evidence=("process group termination requested",),
+            evidence=("process group termination requested; managed parent exit checked",),
         )
 
 
@@ -448,10 +458,11 @@ class TmuxAdapter:
                 timeout=max(5.0, grace_seconds),
                 check=False,
             )
+        still_running = self.has_session(handle.tmux_session)
         return AdapterObservation(
-            status="cancelled",
+            status="lost" if still_running else "cancelled",
             confidence=0.98,
-            running=False,
+            running=still_running,
             exit_code=-15,
             output_tail=_tail(handle.stdout_file),
             error_tail=_tail(handle.stderr_file),

@@ -50,7 +50,10 @@
     "packaging/release/*.txt",
     ".env.example",
     "pyproject.toml",
-    "docs/architecture_diagnostic_20260826.md"
+    "docs/architecture_diagnostic_20260826.md",
+    "prompts/policy.md",
+    "prompts/policy_technical.md",
+    "prompts/policy_governance.md"
   ],
   "engines": {
     "node": ">=18"

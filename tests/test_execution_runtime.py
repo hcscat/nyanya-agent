@@ -7,6 +7,7 @@ import pytest
 
 from nyanya_agent import execution_adapters as adapters
 from nyanya_agent import execution_runtime
+from nyanya_agent.approval_contract import command_scope
 from nyanya_agent import execution_store as store
 
 
@@ -59,6 +60,9 @@ def test_write_execution_requires_matching_persisted_approval(tmp_path, monkeypa
         task_id=task["id"],
         action="workspace.write",
         requested_by="agent",
+        metadata={"authorized_actor": "operator", "scope_hash": command_scope(
+            command=[sys.executable, "-c", "print('write-ok')"], cwd=tmp_path,
+            adapter_type="subprocess", write_resource_key="repo:test")},
         db_path=db_path,
     )
     store.decide_approval(
