@@ -14,8 +14,11 @@ from typing import Any, Callable
 
 from nyanya_agent import core as nyanya
 from nyanya_agent import dashboard_store
+from nyanya_agent import execution_store as execution_ledger
 from nyanya_agent.bridge_policy import *
 from nyanya_agent.bridge_runtime import *
+from nyanya_agent.task_service import DurableTaskService
+from nyanya_agent.task_outcomes import TaskOutcome, OutcomeSignal, as_outcome, outcome_from_error
 
 @dataclass
 class NyaNyaTask:
@@ -25,13 +28,16 @@ class NyaNyaTask:
     mode: str
     responder: Callable[[str], None]
     request_id: str | None = None
+    task_id: str | None = None
+    project_id: str | None = None
+    codex_session_id: str | None = None
     cancel_event: threading.Event = field(default_factory=threading.Event)
     created_at: float = field(default_factory=time.monotonic)
     started_at: float | None = None
 
 
 class NyaNyaConversationStore:
-    """Thread-safe in-memory conversations keyed by messenger/channel id."""
+    """Conversation context with a durable SQLite task queue."""
 
     def __init__(self, config: dict[str, Any], max_messages: int | None = None) -> None:
         self.config = config
@@ -39,20 +45,48 @@ class NyaNyaConversationStore:
         self.task_queue_max = int(os.getenv("NYANYA_TASK_QUEUE_MAX", DEFAULT_TASK_QUEUE_MAX))
         self._messages_by_key: dict[str, list[dict[str, str]]] = {}
         self._lock = threading.Lock()
-        self._task_lock = threading.Lock()
         self._workspace_lock = threading.Lock()
-        self._tasks_by_owner: dict[str, dict[str, Any]] = {}
+        self.durable_tasks = DurableTaskService(status_callback=self._durable_status)
+        from nyanya_agent.operation_service import OperationService
+        self.operations = OperationService(self.durable_tasks.db_path)
 
-    def _state_for_owner(self, owner_key: str) -> dict[str, Any]:
-        return self._tasks_by_owner.setdefault(owner_key, {"current": None, "queue": []})
+    def _durable_status(self, record: dict[str, Any], status: str, message: str) -> None:
+        """Keep the legacy dashboard projection readable during migration."""
+        request_id = record.get("source_request_id")
+        if not request_id:
+            return
+        mode = ""
+        metadata = record.get("metadata")
+        if isinstance(metadata, dict):
+            mode = str(metadata.get("mode") or "")
+        try:
+            dashboard_store.mark_request_status(
+                str(request_id),
+                status,
+                event_type=f"task_{status}",
+                message=message,
+                result_summary=message if status not in {"queued", "running"} else None,
+                mode=mode or None,
+                metadata={"task_id": record.get("id"), "project_id": record.get("project_id")},
+            )
+        except Exception as exc:  # noqa: BLE001 - compatibility telemetry must not break execution.
+            print(f"NyaNya dashboard update failed: {type(exc).__name__}: {exc}", flush=True)
 
     def reset(self, key: str) -> None:
         with self._lock:
             self._messages_by_key[key] = nyanya.build_messages(self.config)
 
     def answer(self, key: str, prompt: str) -> str:
-        task = NyaNyaTask(key, key, prompt, "auto", lambda _text: None)
-        return self._answer_sync(task, auto_route=True)
+        control = self.operations.control(prompt, key)
+        if control is not None:
+            return control
+        workspace = self.execution_workspace(key)
+        task = self.operations.submit(prompt, workspace, key)
+        return self.operations.wait(task['id'], key).text
+
+    def close(self):
+        self.operations.close()
+        self.durable_tasks.close()
 
     def _dashboard_mark(self, task: NyaNyaTask, status: str, **kwargs: Any) -> None:
         if not task.request_id:
@@ -72,18 +106,18 @@ class NyaNyaConversationStore:
 
     def _answer_sync(self, task: NyaNyaTask, *, auto_route: bool) -> str:
         if task.cancel_event.is_set():
-            return "요청이 취소되었습니다."
-        workspace = self.workspace_for_owner(task.owner_key) or default_codex_workdir()
+            raise OutcomeSignal("cancelled", "요청이 취소되었습니다.")
+        workspace = self.execution_workspace(task.owner_key)
         protected_violation = protected_delete_violation(task.prompt, workdir=workspace)
         if protected_violation:
-            return (
+            raise OutcomeSignal("blocked", (
                 "요청을 거부했습니다. NyaNya 정상 동작에 필요한 보호 파일/디렉토리는 삭제, 이동, 이름 변경, "
                 f"비우기 작업을 할 수 없습니다.\n이유: {protected_violation}\n"
                 f"보호 목록: {protected_delete_paths_text()}"
-            )
+            ))
         risk = classify_request_risk(task.prompt, workdir=workspace)
         if risk["stop"] or (risk["requires_approval"] and not risk["approval_granted"]):
-            return risk_plan_response(task.prompt, risk, workdir=workspace)
+            raise OutcomeSignal("blocked" if risk["stop"] else "awaiting_approval", risk_plan_response(task.prompt, risk, workdir=workspace))
         scope = self.workspace_scope_text(task.owner_key, workspace)
         dynamic_memory = nyanya.build_dynamic_memory_context(task.prompt, owner_key=task.owner_key)
         with self._lock:
@@ -98,6 +132,7 @@ class NyaNyaConversationStore:
         try:
             codex_mode = codex_auto_mode(task.prompt) if auto_route else None
             if codex_mode:
+                self._attach_codex_session(task, workspace)
                 label = codex_auto_label(task.prompt)
                 self._dashboard_mark(
                     task,
@@ -109,7 +144,7 @@ class NyaNyaConversationStore:
                     model=os.getenv("NYANYA_CODEX_MODEL", "").strip() or "<codex default>",
                     metadata={"auto_route_label": label},
                 )
-                answer = f"[자동 Codex 위임: {label}]\n" + run_codex_task(
+                answer = run_codex_task(
                     task.prompt,
                     write=codex_mode == "codex_write",
                     cancel_event=task.cancel_event,
@@ -131,12 +166,12 @@ class NyaNyaConversationStore:
                     current.pop()
             raise
 
-        if task.cancel_event.is_set() or answer.strip() == "요청이 취소되었습니다.":
+        if task.cancel_event.is_set():
             with self._lock:
                 current = self._messages_by_key.get(task.conversation_key, [])
                 if current and current[-1:] == [{"role": "user", "content": task.prompt}]:
                     current.pop()
-            return "요청이 취소되었습니다."
+            raise OutcomeSignal("blocked", "응답 수신 전에 취소가 요청되었습니다. 실제 실행 결과를 확인하세요.")
 
         with self._lock:
             messages = self._messages_by_key.setdefault(task.conversation_key, nyanya.build_messages(self.config))
@@ -171,54 +206,28 @@ class NyaNyaConversationStore:
         return json.dumps(status, ensure_ascii=False, indent=2)
 
     def task_status_text(self, owner_key: str | None = None) -> str:
-        with self._task_lock:
-            owners = [(owner_key, self._state_for_owner(owner_key))] if owner_key else sorted(self._tasks_by_owner.items())
-            running_lines: list[str] = []
-            queued_lines: list[str] = []
-            for _state_owner, state in owners:
-                current = state["current"]
-                if current is not None:
-                    running_lines.append(self._format_task_line(current, "진행 중"))
-                for index, task in enumerate(state["queue"], start=1):
-                    queued_lines.append(self._format_task_line(task, "대기", position=index))
-
-        scope = "내 작업" if owner_key else "전체 작업"
-        if not running_lines and not queued_lines:
-            return (
-                f"{scope} 목록\n"
-                "- 펜딩: 0개\n"
-                "- 진행 중: 0개\n"
-                "- 대기열: 0개\n"
-                "현재 진행 중이거나 대기 중인 작업이 없습니다."
-            )
-
-        lines = [
-            f"{scope} 목록",
-            "- 펜딩: 0개",
-            f"- 진행 중: {len(running_lines)}개",
-            f"- 대기열: {len(queued_lines)}개",
-        ]
-        if running_lines:
-            lines.append("\n진행 중")
-            lines.extend(running_lines)
-        if queued_lines:
-            lines.append("\n대기열")
-            lines.extend(queued_lines)
-        lines.append("\n취소: `취소` 또는 `cancel`")
-        return "\n".join(lines)
-
-    def _format_task_line(self, task: NyaNyaTask, status: str, *, position: int | None = None) -> str:
-        base_time = task.started_at if task.started_at is not None else task.created_at
-        elapsed = max(0, int(time.monotonic() - base_time))
-        request = f", request_id={task.request_id}" if task.request_id else ""
-        prefix = f"{position}. " if position is not None else "- "
-        return (
-            f"{prefix}{status}: owner={task.owner_key}, mode={task.mode}, elapsed={elapsed}s{request}\n"
-            f"   prompt={preview_text(task.prompt)}"
-        )
+        return self.durable_tasks.status_text(owner_key)
 
     def codex(self, prompt: str, *, write: bool = False) -> str:
-        return run_codex_task(prompt, write=write)
+        task = NyaNyaTask("operator", "operator:codex", prompt, "codex_write" if write else "codex", lambda _text: None)
+        workspace = default_codex_workdir()
+
+        def runner(record: dict[str, Any], cancel_event: threading.Event) -> str:
+            task.task_id = str(record["id"])
+            task.project_id = record.get("project_id")
+            return self._run_task_with_event(task, cancel_event)
+
+        return self.durable_tasks.run_sync(
+            title=preview_text(prompt, limit=160),
+            prompt=prompt,
+            requested_by="operator",
+            owner_key="operator:codex",
+            conversation_key="operator:codex",
+            mode=task.mode,
+            workspace_root=str(workspace),
+            metadata={"execution_adapter": "codex_cli", "interface": "sync-helper"},
+            runner=runner,
+        )
 
     def resources(self) -> str:
         return system_resource_report()
@@ -263,6 +272,32 @@ class NyaNyaConversationStore:
             return None
         return path
 
+    def execution_workspace(self, owner_key: str) -> pathlib.Path:
+        workspace = self.workspace_for_owner(owner_key)
+        if workspace is None:
+            raise OutcomeSignal("blocked", "등록된 사용자 작업공간이 없습니다. 관리자가 홈워크스페이스를 등록한 뒤 다시 요청하세요.")
+        if not workspace.is_dir():
+            raise OutcomeSignal("blocked", "등록된 작업공간이 없거나 디렉터리가 아닙니다.")
+        return workspace
+
+    def _attach_codex_session(self, task: NyaNyaTask, workspace: pathlib.Path) -> None:
+        if not task.task_id or not task.project_id:
+            return
+        session = self.durable_tasks.ensure_codex_session(
+            project_id=task.project_id,
+            session_key=task.conversation_key,
+            workspace_root=str(workspace),
+            model=os.getenv("NYANYA_CODEX_MODEL", "").strip(),
+            name="Codex messenger session",
+        )
+        task.codex_session_id = str(session["id"])
+        execution_ledger.attach_codex_session(
+            task.task_id,
+            project_id=task.project_id,
+            session_id=task.codex_session_id,
+            db_path=self.durable_tasks.db_path,
+        )
+
     def workspace_scope_text(self, owner_key: str, workspace: pathlib.Path | None = None) -> str:
         workspace = workspace if workspace is not None else self.workspace_for_owner(owner_key)
         current_workspace = workspace or default_codex_workdir()
@@ -270,7 +305,7 @@ class NyaNyaConversationStore:
             "Messenger user workspace policy:\n"
             f"- owner_key={owner_key}\n"
             f"- current_workspace={current_workspace}\n"
-            f"- allowed_workspace_roots={', '.join(str(root) for root in workspace_roots())}\n"
+            f"- allowed_workspace_roots={current_workspace}\n"
             f"- trusted_workspace_roots={', '.join(str(root) for root in trusted_workspace_roots())}\n"
             f"- protected_delete_paths={protected_delete_paths_text()}\n"
             "- For file, code, shell, review, data, or workspace-related requests, stay inside allowed_workspace_roots.\n"
@@ -342,87 +377,135 @@ class NyaNyaConversationStore:
         mode: str,
         responder: Callable[[str], None],
         request_id: str | None = None,
+        operation: Callable[[NyaNyaTask, threading.Event], str] | None = None,
     ) -> str:
         task = NyaNyaTask(owner_key, conversation_key, prompt, mode, responder, request_id=request_id)
-        start_now = False
-        with self._task_lock:
-            state = self._state_for_owner(owner_key)
-            if state["current"] is None:
-                state["current"] = task
-                start_now = True
-                queued = 0
-            else:
-                queue = state["queue"]
-                if len(queue) >= self.task_queue_max:
-                    self._dashboard_mark(
-                        task,
-                        "failed",
-                        event_type="queue_rejected",
-                        message="Task queue is full",
-                        error="Task queue is full",
-                    )
-                    return (
-                        "이미 처리 중인 작업과 대기 중인 작업이 있습니다. "
-                        "취소 후 다시 요청하세요. 취소하려면 `취소`라고 보내세요."
-                    )
-                queue.append(task)
-                queued = len(queue)
-        if start_now:
-            self._start_task(task)
-            return self._task_ack_text(task, queued=0, started=True)
-        self._dashboard_mark(task, "queued", event_type="queued", message=f"Queued at position {queued}")
-        return self._task_ack_text(task, queued=queued, started=False)
+        if operation is None:
+            try:
+                workspace = self.execution_workspace(owner_key)
+                profile = 'luna' if mode in {'codex', 'codex_write'} else 'flash' if mode == 'gemini' else 'auto'
+                record = self.operations.submit(prompt, workspace, owner_key, profile=profile,
+                                                source_request_id=request_id, responder=responder)
+                if record["status"] == "blocked":
+                    return f"요청을 보존하고 실행을 보류했습니다: {record['id']}\nwhy {record['id']}로 원인을 확인하세요."
+                return (f"요청을 접수했습니다. task_id: {record['id']}\n목표: {preview_text(prompt, limit=160)}\n"
+                        "단계 일정: Flash 판단 → 선택 모델 분석/변경안 → 필요 시 파일별 승인 → 결과 보고\n"
+                        "목표 변경 규칙: 요청 범위를 확장하지 않습니다. 작업목록에서 상태를 확인하세요.")
+            except OutcomeSignal as exc:
+                self._dashboard_mark(
+                    task,
+                    exc.outcome.status,
+                    event_type="prerequisite_failed",
+                    message=exc.outcome.text,
+                    result_summary=exc.outcome.text,
+                )
+                return exc.outcome.text
+            except (ValueError, OSError, RuntimeError) as exc:
+                message = f"작업 접수 보류: {type(exc).__name__}. 워크스페이스와 worker 준비 상태를 확인하세요."
+                self._dashboard_mark(
+                    task,
+                    "blocked",
+                    event_type="prerequisite_failed",
+                    message=message,
+                    result_summary=message,
+                )
+                return message
+        existing = self.durable_tasks.tasks_for_owner(owner_key)
+        active = [item for item in existing if item.get("status") in {"running", "awaiting_approval", "blocked"}]
+        queued_tasks = [item for item in existing if item.get("status") == "queued"]
+        if len(queued_tasks) >= self.task_queue_max:
+            self._dashboard_mark(
+                task,
+                "failed",
+                event_type="queue_rejected",
+                message="Task queue is full",
+                error="Task queue is full",
+            )
+            return (
+                "이미 처리 중인 작업과 대기 중인 작업이 있습니다. "
+                "취소 후 다시 요청하세요. 취소하려면 `취소`라고 보내세요."
+            )
+        try:
+            workspace = self.execution_workspace(owner_key)
+        except OutcomeSignal as exc:
+            self._dashboard_mark(task, "blocked", message=exc.outcome.text)
+            return exc.outcome.text
+        task_record = self.durable_tasks.submit(
+            title=preview_text(prompt, limit=160),
+            prompt=prompt,
+            requested_by=owner_key,
+            owner_key=owner_key,
+            conversation_key=conversation_key,
+            mode=mode,
+            workspace_root=str(workspace),
+            source_request_id=request_id,
+            runner=lambda record, cancel_event: self._run_task_with_event(task, cancel_event, record, operation),
+            responder=responder,
+            metadata={"execution_adapter": "codex_cli" if mode.startswith("codex") else "provider"},
+        )
+        task.task_id = str(task_record["id"])
+        task.project_id = task_record.get("project_id")
+        started = not active and not queued_tasks
+        queued = len(queued_tasks) + 1 if not started else 0
+        return self._task_ack_text(task, queued=queued, started=started)
 
     def cancel_owner(self, owner_key: str) -> str:
-        with self._task_lock:
-            state = self._state_for_owner(owner_key)
-            current = state["current"]
-            queued = len(state["queue"])
-            if current is not None:
-                current.cancel_event.set()
-                self._dashboard_mark(current, "cancelled", event_type="cancel_requested", message="Cancel requested by owner")
-            for task in state["queue"]:
-                self._dashboard_mark(task, "cancelled", event_type="queue_cancelled", message="Queued task cancelled")
-            state["queue"].clear()
-        if current is None and queued == 0:
+        result = self.durable_tasks.cancel_owner(owner_key, actor=owner_key, reason="Cancel requested by owner")
+        current = result["current"]
+        queued = result["queued"]
+        if current == 0 and queued == 0:
             return "취소할 진행 중/대기 작업이 없습니다."
-        if current is not None:
-            return f"진행 중인 작업을 취소하고, 대기 작업 {queued}개를 제거했습니다."
+        if current:
+            return f"진행 중인 작업에 취소를 요청하고, 대기 작업 {queued}개를 제거했습니다."
         return f"대기 작업 {queued}개를 제거했습니다."
 
     def cancel_all(self) -> str:
-        cancelled_current = 0
-        cancelled_queued = 0
-        with self._task_lock:
-            for state in self._tasks_by_owner.values():
-                current = state["current"]
-                if current is not None:
-                    current.cancel_event.set()
-                    cancelled_current += 1
-                    self._dashboard_mark(current, "cancelled", event_type="cancel_requested", message="Cancel requested by owner")
-                for task in state["queue"]:
-                    self._dashboard_mark(task, "cancelled", event_type="queue_cancelled", message="Queued task cancelled")
-                cancelled_queued += len(state["queue"])
-                state["queue"].clear()
-        if cancelled_current == 0 and cancelled_queued == 0:
+        result = self.durable_tasks.cancel_all(actor="operator", reason="Cancel requested for all tasks")
+        if result["current"] == 0 and result["queued"] == 0:
             return "취소할 전체 작업이 없습니다."
-        return f"전체 작업 취소 요청 완료: 진행 중 {cancelled_current}개, 대기 {cancelled_queued}개."
+        return f"전체 작업 취소 요청 완료: 진행 중 {result['current']}개, 대기 {result['queued']}개."
 
     def is_owner(self, user_id: str) -> bool:
         owner_ids = parse_id_set(os.getenv("NYANYA_OWNER_USER_IDS"))
         return user_id in owner_ids
 
-    def _start_task(self, task: NyaNyaTask) -> None:
-        delay = task_start_delay_seconds()
-        if delay > 0:
-            timer = threading.Timer(delay, self._run_task, args=(task,))
-            timer.daemon = True
-            timer.start()
-            return
-        thread = threading.Thread(target=self._run_task, args=(task,), daemon=True)
-        thread.start()
+    def _run_task_with_event(
+        self,
+        task: NyaNyaTask,
+        cancel_event: threading.Event,
+        record: dict[str, Any] | None = None,
+        operation: Callable[[NyaNyaTask, threading.Event], str] | None = None,
+    ) -> str:
+        task.cancel_event = cancel_event
+        if record is not None:
+            task.task_id = str(record["id"])
+            task.project_id = record.get("project_id")
+        if operation is not None:
+            return self._run_operation(task, operation)
+        return self._run_task(task)
 
-    def _run_task(self, task: NyaNyaTask) -> None:
+    def _run_operation(
+        self,
+        task: NyaNyaTask,
+        operation: Callable[[NyaNyaTask, threading.Event], str],
+    ) -> str:
+        task.started_at = time.monotonic()
+        self._dashboard_mark(
+            task,
+            "running",
+            event_type="task_started",
+            message="Worker thread started",
+            mode=task.mode,
+        )
+        failed = False
+        try:
+            answer = operation(task, task.cancel_event)
+        except Exception as exc:  # noqa: BLE001 - durable operation reports failure to the caller.
+            answer = outcome_from_error(exc)
+            failed = True
+        return self._finish_task_result(task, answer, failed=failed)
+
+    def _run_task(self, task: NyaNyaTask) -> str:
         task.started_at = time.monotonic()
         self._dashboard_mark(
             task,
@@ -447,7 +530,7 @@ class NyaNyaConversationStore:
         failed = False
         try:
             if task.cancel_event.is_set():
-                answer = "요청이 취소되었습니다."
+                answer = TaskOutcome("cancelled", "요청이 취소되었습니다.")
             elif task.mode == "auto":
                 self._notify_progress(task, "요청을 분석하고 자동 라우팅 여부를 판단합니다.", event_type="task_progress_route")
                 answer = self._answer_sync(task, auto_route=True)
@@ -455,6 +538,7 @@ class NyaNyaConversationStore:
                 self._notify_progress(task, "설정된 Google/Gemini 계열 backend에 요청을 전달합니다.", event_type="task_progress_backend")
                 answer = self._answer_sync(task, auto_route=False)
             elif task.mode == "codex":
+                self._attach_codex_session(task, self.execution_workspace(task.owner_key))
                 self._notify_progress(task, "Codex CLI 읽기 전용 작업으로 위임합니다.", event_type="task_progress_codex")
                 answer = run_codex_task(
                     task.prompt,
@@ -462,6 +546,7 @@ class NyaNyaConversationStore:
                     workdir=self.workspace_for_owner(task.owner_key),
                 )
             elif task.mode == "codex_write":
+                self._attach_codex_session(task, self.execution_workspace(task.owner_key))
                 self._notify_progress(task, "Codex CLI 쓰기 작업으로 위임합니다. 안전 정책과 승인 조건을 함께 적용합니다.", event_type="task_progress_codex_write")
                 answer = run_codex_task(
                     task.prompt,
@@ -470,35 +555,17 @@ class NyaNyaConversationStore:
                     workdir=self.workspace_for_owner(task.owner_key),
                 )
             else:
-                answer = f"지원하지 않는 작업 모드입니다: {task.mode}"
+                answer = TaskOutcome("failed", "지원하지 않는 작업 모드입니다.")
         except Exception as exc:  # noqa: BLE001
-            answer = task_failure_text(exc)
+            answer = outcome_from_error(exc)
             failed = True
-        try:
-            if heartbeat_stop is not None:
-                heartbeat_stop.set()
-            task.responder(answer)
-            if task.cancel_event.is_set() or answer.strip() == "요청이 취소되었습니다.":
-                self._dashboard_mark(task, "cancelled", event_type="task_cancelled", message=answer, result_summary=answer)
-            elif failed or answer.startswith("NyaNya Agent 요청 실패:") or answer.startswith("Codex CLI 실행 실패:"):
-                self._dashboard_mark(task, "failed", event_type="task_failed", message=answer, result_summary=answer, error=answer)
-            else:
-                self._dashboard_mark(task, "completed", event_type="task_completed", message="Task completed", result_summary=answer)
-        finally:
-            self._finish_task(task)
+        if heartbeat_stop is not None:
+            heartbeat_stop.set()
+        return self._finish_task_result(task, answer, failed=failed)
 
-    def _finish_task(self, task: NyaNyaTask) -> None:
-        next_task = None
-        with self._task_lock:
-            state = self._state_for_owner(task.owner_key)
-            if state["current"] is task:
-                state["current"] = None
-            queue = state["queue"]
-            if queue:
-                next_task = queue.pop(0)
-                state["current"] = next_task
-        if next_task is not None:
-            self._start_task(next_task)
+    def _finish_task_result(self, task: NyaNyaTask, answer: str | TaskOutcome, *, failed: bool = False) -> TaskOutcome:
+        outcome = as_outcome(answer)
+        return outcome
 
     def _task_ack_text(self, task: NyaNyaTask, *, queued: int, started: bool) -> str:
         state_line = "즉시 실행을 시작합니다." if started else f"대기열에 등록했습니다. 현재 위치 {queued}/{self.task_queue_max}."
@@ -510,6 +577,8 @@ class NyaNyaConversationStore:
         }.get(task.mode, f"{task.mode} 모드로 처리합니다.")
         return (
             "요청을 접수했습니다.\n"
+            f"task_id: {task.task_id or '-'}\n"
+            f"project_id: {task.project_id or '-'}\n"
             f"목표: {preview_text(task.prompt, limit=240)}\n"
             "범위: 요청에 명시된 대상과 허용된 작업공간만 처리합니다. 명시되지 않은 외부 변경은 제외합니다.\n"
             "단계 일정:\n"

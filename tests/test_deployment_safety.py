@@ -165,8 +165,52 @@ def test_old_execution_cancellation_cannot_cancel_a_new_attempt(operation):
     assert ledger.get_execution(record["execution_id"], db_path=path)["status"] == "running"
 
 
+@pytest.mark.parametrize("endpoint", ["tasks", "executions"])
+@pytest.mark.parametrize("approved", [False, True])
+def test_dashboard_cancel_waiting_parent_prevents_approval_and_apply(operation, monkeypatch, endpoint, approved):
+    from fastapi.testclient import TestClient
+    from nyanya_agent.dashboard_api import create_app
+
+    path, root, _, task = operation
+    plan, apply_record = approved_apply(operation)
+    if not approved:
+        with db.connect(path) as conn:
+            conn.execute("UPDATE change_plans SET status='pending' WHERE id=?", (plan["id"],))
+    parent = ledger.get_task(task["id"], db_path=path)
+    target = task["id"] if endpoint == "tasks" else parent["current_execution_id"]
+    monkeypatch.setenv("NYANYA_DASHBOARD_CONTROL_TOKEN", "fixture-control")
+    with TestClient(create_app(path), client=("127.0.0.1", 50000)) as client:
+        route = f"/v1/{endpoint}/{target}/cancel"
+        assert client.post(route, json={}).status_code == 401
+        response = client.post(route, json={}, headers={"X-Nyanya-Control-Token": "fixture-control"})
+        assert response.status_code == 200
+        assert response.json()["status"] == "cancelled"
+    assert ledger.get_task(task["id"], db_path=path)["status"] == "cancelled"
+    with pytest.raises(SafeOperationError):
+        files.decide(path, plan["id"], "operator", plan["plan_hash"])
+    with pytest.raises(SafeOperationError, match="Original task"):
+        files.apply(path, plan["id"], "operator", record=apply_record)
+    assert (root / "note.txt").read_text() == "before"
 
 
+@pytest.mark.parametrize("endpoint", ["tasks", "executions"])
+def test_dashboard_cancel_does_not_trust_payload_owner(operation, monkeypatch, endpoint):
+    from fastapi.testclient import TestClient
+    from nyanya_agent.dashboard_api import create_app
+
+    path, _, generation, task = operation
+    record = store.claim(path, generation)
+    with db.connect(path) as conn:
+        conn.execute("UPDATE agent_tasks SET requested_by='another-owner',metadata_json='{}' WHERE id=?", (task["id"],))
+    monkeypatch.setenv("NYANYA_DASHBOARD_CONTROL_TOKEN", "fixture-control")
+    target = task["id"] if endpoint == "tasks" else record["execution_id"]
+    client = TestClient(create_app(path), client=("127.0.0.1", 50000))
+    response = client.post(
+        f"/v1/{endpoint}/{target}/cancel", json={"actor": "another-owner"},
+        headers={"X-Nyanya-Control-Token": "fixture-control"},
+    )
+    assert response.status_code == 403
+    assert ledger.get_execution(record["execution_id"], db_path=path)["status"] == "running"
 
 
 @pytest.mark.parametrize("loss", ["eligible", "released", "expired", "current", "worker", "execution", "parent", "missing_record"])

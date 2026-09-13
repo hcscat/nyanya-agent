@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -131,7 +133,7 @@ class TelegramBridge:
                 return "홈워크스페이스 설정은 관리자만 사용할 수 있습니다."
             parts = text.split(maxsplit=2)
             if len(parts) < 3:
-                return "사용법: /set_home telegram_user_id HCS 또는 /set_home discord-user:discord_user_id HCS"
+                return "사용법: /set_home <user-id> /absolute/workspace/path"
             try:
                 target_owner = normalize_owner_key(parts[1], "telegram")
             except ValueError as exc:
@@ -265,7 +267,31 @@ def main() -> int:
     if not token:
         print("Missing NYANYA_TELEGRAM_BOT_TOKEN in .env", file=sys.stderr)
         return 2
-    return TelegramBridge(token, NyaNyaConversationStore(config)).run()
+    store = NyaNyaConversationStore(config)
+    previous = None
+    registered = False
+    terminating = False
+
+    def terminate(*_):
+        nonlocal terminating
+        if not terminating:
+            terminating = True
+            raise KeyboardInterrupt
+
+    try:
+        if threading.current_thread() is threading.main_thread():
+            previous = signal.signal(signal.SIGTERM, terminate)
+            registered = True
+        return TelegramBridge(token, store).run()
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        terminating = True
+        try:
+            store.close()
+        finally:
+            if registered:
+                signal.signal(signal.SIGTERM, previous)
 
 
 if __name__ == "__main__":

@@ -12,9 +12,13 @@ import asyncio
 import os
 import pathlib
 import re
+import signal
 import sys
+import threading
 
-from nyanya_agent import dashboard_store
+from nyanya_agent import dashboard_store, work_queue
+from nyanya_agent.workspace_paths import scoped_path, new_task_directory
+from nyanya_agent.task_outcomes import TaskOutcome
 from nyanya_agent.bridge_common import (
     CANCEL_ALL_COMMANDS,
     CANCEL_COMMANDS,
@@ -22,19 +26,17 @@ from nyanya_agent.bridge_common import (
     GET_HOME_COMMANDS,
     HELP_COMMANDS,
     NyaNyaConversationStore,
+    NyaNyaTask,
     SET_HOME_COMMANDS,
     TASK_STATUS_COMMANDS,
     UNSET_HOME_COMMANDS,
     command_name,
-    default_codex_workdir,
     discord_help_text,
     env_first,
-    is_allowed_workspace_path,
     load_runtime_config,
     normalize_owner_key,
     parse_bool,
     parse_id_set,
-    resolve_workspace_path,
     split_message,
 )
 
@@ -74,6 +76,40 @@ def check_config(token: str, config: dict[str, object]) -> int:
     return 0 if token and discord_installed else 2
 
 
+async def run_client(client, token, store):
+    """Give SIGTERM the same orderly async teardown as asyncio's SIGINT path."""
+    loop = asyncio.get_running_loop()
+    runner = asyncio.current_task()
+    terminating = False
+    previous = None
+    registered = False
+
+    def terminate(*_):
+        nonlocal terminating
+        if not terminating:
+            terminating = True
+            loop.call_soon_threadsafe(runner.cancel)
+
+    try:
+        if threading.current_thread() is threading.main_thread():
+            previous = signal.signal(signal.SIGTERM, terminate)
+            registered = True
+        try:
+            async with client:
+                await client.start(token)
+        except asyncio.CancelledError:
+            if not terminating:
+                raise
+    finally:
+        # Repeated SIGTERM must not interrupt close/reap or cancel its thread.
+        terminating = True
+        try:
+            await asyncio.to_thread(store.close)
+        finally:
+            if registered:
+                signal.signal(signal.SIGTERM, previous)
+
+
 def main() -> int:
     args = parse_args()
     config = load_runtime_config(args.config)
@@ -104,7 +140,7 @@ def main() -> int:
     intents.messages = True
     intents.dm_messages = True
 
-    client = discord.Client(intents=intents)
+    client = discord.Client(intents=intents, allowed_mentions=discord.AllowedMentions.none())
     phase_check_task: asyncio.Task[None] | None = None
 
     def dashboard_recording_enabled() -> bool:
@@ -200,10 +236,6 @@ def main() -> int:
                 print(f"NyaNya phase checker failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
             await asyncio.sleep(max(60, interval))
 
-    def attachment_download_root() -> pathlib.Path:
-        raw = os.getenv("NYANYA_DISCORD_ATTACHMENT_DIR", "nyanya-agent/downloads/discord")
-        return resolve_workspace_path(raw)
-
     def referenced_filenames(text: str) -> set[str]:
         names: set[str] = set()
         for match in ATTACHMENT_FILENAME_RE.finditer(text):
@@ -217,15 +249,14 @@ def main() -> int:
         if attachment.size > max_mb * 1024 * 1024:
             return None
         filename = pathlib.Path(attachment.filename).name
-        if not filename:
+        if not filename or filename in {".", ".."} or "\\" in filename:
             return None
-        target_dir = attachment_download_root() / str(message.channel.id) / str(message.id)
-        target = (target_dir / filename).resolve(strict=False)
-        if not is_allowed_workspace_path(target):
-            return None
-        target_dir.mkdir(parents=True, exist_ok=True)
-        if not target.exists() or target.stat().st_size != attachment.size:
-            await attachment.save(target)
+        workspace = store.execution_workspace(f"discord-user:{message.author.id}")
+        target_dir = new_task_directory(workspace, "attachments")
+        target = scoped_path(workspace, target_dir / filename)
+        # Exclusive creation: existing attachments and symlink targets are not overwritten.
+        with target.open("xb") as output:
+            await attachment.save(output)
         return target
 
     async def find_recent_attachments(message: discord.Message, filenames: set[str]) -> list[pathlib.Path]:
@@ -235,6 +266,8 @@ def main() -> int:
         found: list[pathlib.Path] = []
         limit = int(os.getenv("NYANYA_DISCORD_ATTACHMENT_SEARCH_LIMIT", "1000"))
         async for previous in message.channel.history(limit=limit):
+            if previous.author.id != message.author.id:
+                continue
             for attachment in previous.attachments:
                 if attachment.filename.lower() not in remaining:
                     continue
@@ -339,11 +372,28 @@ def main() -> int:
 
         def respond_later(response: str) -> None:
             for chunk in split_message(response, DISCORD_LIMIT):
-                asyncio.run_coroutine_threadsafe(message.channel.send(chunk), loop)
+                future = asyncio.run_coroutine_threadsafe(message.channel.send(chunk), loop)
+                future.result(timeout=30)
+
+        if command in {'why', 'plan', 'approve', 'revoke', 'resume', 'reconcile', 'resolve', 'plan-file'} or (command == 'cancel' and len(text.split()) == 2):
+            try:
+                response = store.operations.control(text, owner_key, responder=respond_later)
+                return finish(response or '명령 인자를 확인하세요.', mode='control')
+            except (ValueError, PermissionError, OSError) as exc:
+                return finish(f'제어 요청을 처리하지 못했습니다: {type(exc).__name__}. 소유자·상태·변경안 hash를 확인하세요.', status='failed', mode='control')
 
         if not text and attachment_note:
             text = "첨부파일 내용을 확인해 주세요."
             command = command_name(text)
+
+        if command in {"result", "결과"}:
+            parts = text.split(maxsplit=1)
+            if len(parts) != 2:
+                return finish("사용법: result 작업ID", mode="control")
+            saved = work_queue.result(store.durable_tasks.db_path, parts[1].strip(), owner_key)
+            return finish(saved["response"] if saved else "조회 가능한 저장 결과가 없습니다.", mode="control")
+        if command in {"recovery", "복구"}:
+            return finish(store.operations.control("recovery", owner_key), mode="control")
 
         if not text or command in HELP_COMMANDS:
             return finish(
@@ -374,7 +424,7 @@ def main() -> int:
                 return finish("홈워크스페이스 설정은 관리자만 사용할 수 있습니다.", status="failed", error="owner required", mode="control")
             parts = text.split(maxsplit=2)
             if len(parts) < 3:
-                return finish("사용법: set_home discord_user_id HCS 또는 set_home discord-user:discord_user_id HCS", status="failed", error="missing arguments", mode="control")
+                return finish("사용법: set_home <user-id> /absolute/workspace/path", status="failed", error="missing arguments", mode="control")
             try:
                 target_owner = normalize_owner_key(parts[1], "discord")
             except ValueError as exc:
@@ -476,35 +526,27 @@ def main() -> int:
             file_path_str = parts[1].strip().strip("`\"'")
 
             owner_key = f"discord-user:{message.author.id}"
-            user_workdir = store.workspace_for_owner(owner_key) or default_codex_workdir()
-            resolved_path = None
             try:
-                candidate = pathlib.Path(file_path_str).expanduser()
-                if not candidate.is_absolute():
-                    candidate = user_workdir / candidate
-                candidate_resolved = candidate.resolve(strict=False)
-                if is_allowed_workspace_path(candidate_resolved):
-                    resolved_path = candidate_resolved
-            except Exception:
-                pass
-
-            if not resolved_path:
-                try:
-                    resolved_path = resolve_workspace_path(file_path_str)
-                except Exception as exc:
-                    return finish(f"파일 경로 오류: {exc}", status="failed", error=str(exc), mode="upload")
+                user_workdir = store.execution_workspace(owner_key)
+                resolved_path = scoped_path(user_workdir, file_path_str)
+            except Exception as exc:
+                return finish("파일 경로 또는 등록된 작업공간을 확인하세요.", status="failed", error=type(exc).__name__, mode="upload")
 
             if not resolved_path.exists():
                 return finish(f"파일을 찾을 수 없습니다: {resolved_path}", status="failed", error="file not found", mode="upload")
             if not resolved_path.is_file():
                 return finish(f"지정한 경로는 파일이 아닙니다: {resolved_path}", status="failed", error="not a file", mode="upload")
 
-            try:
+            async def send_upload() -> str:
                 upload_channel = await upload_destination_channel(message)
                 upload_to_current_channel = str(getattr(upload_channel, "id", "")) == str(message.channel.id)
                 with open(resolved_path, "rb") as f:
                     discord_file = discord.File(f, filename=resolved_path.name)
-                    content = None if is_file_share_target(upload_channel) else f"일반 채널 요청 파일 공유: {resolved_path.name}"
+                    content = (
+                        None
+                        if is_file_share_target(upload_channel)
+                        else f"일반 채널 요청 파일 공유: {resolved_path.name}"
+                    )
                     await upload_channel.send(content=content, file=discord_file)
                 target_name = str(getattr(upload_channel, "name", "") or upload_channel.id)
                 result = (
@@ -512,20 +554,32 @@ def main() -> int:
                     if upload_to_current_channel and is_file_share_channel(message)
                     else f"파일을 `{target_name}` 채널에 업로드했습니다: `{resolved_path.name}`"
                 )
-                summary = f"uploaded={resolved_path.name} target_channel={target_name}"
-                mark_dashboard_request(
-                    request_id,
-                    "completed",
-                    event_type="file_uploaded",
-                    message=summary,
-                    result_summary=summary,
-                    mode="upload",
-                    provider=str(config.get("provider") or ""),
-                    model=str(config.get("model") or ""),
-                )
                 return result
-            except Exception as e:
-                return finish(f"파일 업로드 실패: {e}", status="failed", error=str(e), mode="upload")
+
+            def upload_operation(task: NyaNyaTask, cancel_event: threading.Event) -> str:
+                if cancel_event.is_set():
+                    return TaskOutcome("cancelled", "요청이 취소되었습니다.")
+                future = asyncio.run_coroutine_threadsafe(send_upload(), loop)
+                while not future.done():
+                    if cancel_event.wait(0.1):
+                        future.cancel()
+                        return TaskOutcome("blocked", "업로드 중 취소가 요청되었습니다. 실제 전달 여부를 확인하세요.")
+                result = future.result()
+                target_name = "configured destination"
+                summary = f"uploaded={resolved_path.name} target_channel={target_name}"
+                store._dashboard_event(task, "file_uploaded", summary, mode="upload")
+                return result
+
+            upload_task = store.submit(
+                owner_key=owner_key,
+                conversation_key=conversation_key,
+                prompt=prompt_with_attachments(text),
+                mode="upload",
+                responder=lambda response: respond_later(response) if response else None,
+                request_id=request_id,
+                operation=upload_operation,
+            )
+            return "" if is_file_share_channel(message) else upload_task
         return store.submit(
             owner_key=owner_key,
             conversation_key=conversation_key,
@@ -535,10 +589,56 @@ def main() -> int:
             request_id=request_id,
         )
 
+    def recovery_message(tasks) -> str:
+        if not tasks:
+            return "확인이 필요한 이전 작업이 없습니다."
+        lines = [f"이전 작업 {len(tasks)}개가 남아 있습니다. 자동 재실행하지 않았습니다."]
+        lines.extend(f"- {item['id']}: {item['status']}" for item in tasks[:20])
+        lines.append("why 작업ID로 원래 요청과 원인을 확인하세요. 안전한 요청은 resume 작업ID로 재시도하고, 파일 적용 중단은 reconcile 변경안ID로 확인하세요.")
+        return "\n".join(lines)
+
+    reported_recovery: set[str] = set()
+    recovery_notice_task = None
+
+    async def recovery_notice_loop() -> None:
+        while not client.is_closed():
+            try:
+                await report_recovery()
+            except Exception as exc:
+                print(f"Recovery inventory unavailable: {type(exc).__name__}", file=sys.stderr, flush=True)
+            await asyncio.sleep(60)
+
+    async def report_recovery() -> None:
+        groups: dict[str, list] = {}
+        from nyanya_agent.operation_store import recovery_inventory
+        for item in recovery_inventory(store.operations.path):
+            if item["id"] in reported_recovery:
+                continue
+            source_id = item.get("delivery_request_id")
+            request = dashboard_store.get_request(source_id, db_path=store.durable_tasks.db_path) if source_id else None
+            if not request or request.get("source") != "discord":
+                continue
+            owner = f"discord-user:{request['user_id']}"
+            if store.workspace_for_owner(owner) is None:
+                continue
+            # Keep historical recovery notices within currently permitted destinations.
+            if request["channel_id"] not in allowed_channel_ids and request["user_id"] not in allowed_user_ids:
+                continue
+            groups.setdefault(request["channel_id"], []).append(item)
+        for channel_id, items in groups.items():
+            try:
+                channel = client.get_channel(int(channel_id)) or await client.fetch_channel(int(channel_id))
+                await channel.send(recovery_message(items))
+                reported_recovery.update(item["id"] for item in items)
+            except Exception as exc:
+                print(f"Recovery notification pending: {type(exc).__name__}", file=sys.stderr, flush=True)
+
     @client.event
     async def on_ready() -> None:
-        nonlocal phase_check_task
-        print(f"NyaNya Agent Discord bridge started as {client.user}")
+        nonlocal phase_check_task, recovery_notice_task
+        print("NyaNya Agent Discord bridge connected")
+        if recovery_notice_task is None or recovery_notice_task.done():
+            recovery_notice_task = asyncio.create_task(recovery_notice_loop())
         if phase_check_task is None or phase_check_task.done():
             phase_check_task = asyncio.create_task(phase_check_loop())
 
@@ -547,13 +647,6 @@ def main() -> int:
         if message.author.bot:
             return
         respond, text, trigger = should_respond(message)
-        print(
-            "Discord message "
-            f"channel_id={message.channel.id} user_id={message.author.id} "
-            f"parent_id={getattr(message.channel, 'parent_id', None)} "
-            f"allowed={is_allowed(message)} respond={respond} trigger={trigger} text_len={len(text)}",
-            flush=True,
-        )
         if not respond:
             return
         request_id = create_dashboard_request(message, text, trigger)
@@ -600,7 +693,11 @@ def main() -> int:
         if res:
             await reply(message, res)
 
-    client.run(token)
+    discord.utils.setup_logging()
+    try:
+        asyncio.run(run_client(client, token, store))
+    except KeyboardInterrupt:
+        pass  # Preserve client.run's existing SIGINT behavior.
     return 0
 
 
