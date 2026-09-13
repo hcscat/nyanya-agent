@@ -30,7 +30,7 @@ The line is simple:
 | Dashboard static UI | `src/nyanya_agent/dashboard_static/*` | Contains generic local dashboard HTML/CSS/JS. It must not include real request records, private channel IDs, or private user names. |
 | Config templates | `.env.example`, `.env.sample`, `config/nyanya.json`, `config/user_workspaces.example.json` | Show names, defaults, and structure without real credentials or private IDs. |
 | Packaging | `pyproject.toml`, `package.json`, `bin/*.js`, `scripts/*.sh` | Allows installation, local execution, npm wrapper use, and LaunchAgent setup. Generated local plist files are private, but reusable scripts are public. |
-| Documentation | `README.md`, `docs/*.md` | Explains architecture, security model, setup, and decision records. Generated HTML reports remain untracked. |
+| Documentation | Reviewed README and durable `docs` Markdown | Reusable architecture, setup and contracts can be public. Local operational evidence, AI instructions and generated reports stay private. |
 | Project ignore rules | `.gitignore` | A generic project-level `.gitignore` is public when it excludes common private runtime paths. Machine-only ignore rules still belong in `.git/info/exclude`. |
 
 ## Conditionally Public
@@ -121,3 +121,82 @@ git diff --cached | rg -n "<token, private-id, public-ip, local-db patterns>" ||
 ```
 
 Expected result: no runtime DB, logs, downloads, sessions, run files, `.env`, or real user workspace mapping files are staged.
+
+## Portable AGENTS Privacy Policy
+
+Project `AGENTS.md` and `AGENTS.override.md`, including nested copies, are local
+working instructions. They must not enter staging, commits, pushes, packages or
+external publishing without the operator explicitly requesting that file for that
+specific action. General commit, push or deployment requests are not exceptions.
+
+Every project root `.gitignore` must contain these shared patterns:
+
+```gitignore
+AGENTS.md
+AGENTS.override.md
+```
+
+Unlike a machine's global excludes or `.git/info/exclude`, a committed project
+`.gitignore` travels with a clone. Ignore rules do not remove already tracked files
+or old history and do not determine npm package contents. Check all three separately.
+Do not delete local instructions or rewrite history as an automatic remedy.
+
+### Setting up another device or environment
+
+1. Obtain the project's reviewed source and confirm its `.gitignore` has the rules
+   above. This step requires the rules to have been committed and transferred first.
+2. For Codex, open the global `AGENTS.md` in the directory specified by `CODEX_HOME`;
+   when unset, use `.codex` under the current user's home directory. This convention
+   does not require a machine-specific username and applies on macOS/Linux/Windows.
+3. Merge the copyable policy below into that file, preserving other instructions.
+   For another AI tool, use its documented global instruction mechanism instead.
+4. Confirm the tool loads the policy and check both root and nested exclusions
+   with `git check-ignore AGENTS.md nested/AGENTS.md`. Audit release contents too.
+   A clone alone does not install global AI instructions or synchronize credentials.
+
+Copyable global policy (contains no local project contents):
+
+```text
+Keep all project AGENTS.md and AGENTS.override.md files local-only by default.
+Add those exact slash-free patterns to every project's shared .gitignore.
+Commit, push, package or publish them only when the user explicitly requests
+that file for that specific action; general release requests are insufficient.
+Keep real credentials, workspace maps, private prompts, logs, databases, backups
+and operational reports local. Share only sanitized templates and reusable logic.
+Preserve existing instructions and user changes. Check tracked files, outgoing
+commits and package contents separately. Do not automatically rewrite history.
+Reapply this policy through the AI tool's global instruction mechanism on each
+new device. Do not claim remote devices are configured without verification.
+```
+
+The actual global instructions and private project instructions are not part of
+the distributed product. No remote installation or account synchronization is implied.
+
+## Documentation Placement
+
+A file being optional for installation does not make it private. Tests, safety
+contracts and design rationale help reviewers assess code and maintain the product.
+Keep the following boundaries separate:
+
+| Material | Preferred location | Reason |
+|---|---|---|
+| Current installation, operations and execution contracts | Stable Markdown filenames in Git | Versioned with the matching code and available offline to developers and AI |
+| Durable design decisions | Short decision records in Git, with ID/date | Preserve rationale without duplicating the whole project state each session |
+| Work request, alternatives, progress and review discussion | GitHub Issue / Pull Request | Link discussion and acceptance evidence to the actual change |
+| Published version summary | GitHub Release notes | Describe user-visible changes for a tagged version |
+| Long-form user guide with independent editing | Optional GitHub Wiki | Convenient web editing, but code/doc version alignment needs separate discipline |
+| Local paths, identities, live deployment results, raw tokens/logs | Ignored private files | GitHub Issues, PRs and Wiki are also external disclosure channels |
+
+Keep reusable P0/core/architecture records for now; their date alone is not a
+privacy finding. The instance-specific `operational_rollout_20260913.md` stays
+local and is excluded from the package. For future work, update stable documents
+and use Issue/PR summaries instead of creating full dated snapshots each session.
+Moving existing records to GitHub is a separate external action; no migration or
+publication is performed by this policy change.
+
+GitHub capabilities reviewed against official documentation:
+[Issues](https://docs.github.com/en/issues/tracking-your-work-with-issues/learning-about-issues/about-issues),
+[Pull requests](https://docs.github.com/en/pull-requests/get-started/about-pull-requests),
+[Wikis](https://docs.github.com/en/communities/documenting-your-project-with-wikis/about-wikis),
+[Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases).
+Git exclusion semantics: [gitignore](https://git-scm.com/docs/gitignore).

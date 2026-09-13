@@ -1,6 +1,6 @@
 .DS_Store
 .env
-.venv/
+.venv
 config/user_workspaces.json
 __pycache__/
 *.py[cod]
@@ -23,3 +23,64 @@ sessions/
 
 *.log
 *.pid
+
+# Local AI instructions (all directory levels).
+AGENTS.md
+AGENTS.override.md
+
+# Real configuration variants; keep sanitized installation examples.
+.env.*
+!.env.example
+!.env.sample
+config/*.local.*
+config/user_workspaces.json.*
+config/credentials*.json
+config/secrets*.json
+prompts/local_*.md
+
+# Private state, credentials and backups outside standard runtime directories.
+tmp/
+backups/
+credentials/
+secrets/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.db.*
+*.sqlite.*
+*.sqlite3.*
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Generated reports and instance-specific rollout evidence.
+docs/**/*.html
+docs/operational_rollout_20260913.md
+
+# Additional machine-local configuration and generated output.
+config/local.json
+reports/
+keys/
+
+# Private configuration exports and local backup copies.
+config/private/
+config/private.*
+config/*.private.*
+auth.json
+cookies.txt
+credentials.json
+credentials.yaml
+credentials.yml
+secrets.json
+secrets.yaml
+secrets.yml
+*.bak
+*.backup
+id_dsa
+id_ecdsa

@@ -8,6 +8,7 @@ HTML reports are generated only when explicitly requested and are ignored by Git
 | Area | Document | Purpose |
 |---|---|---|
 | Idea and architecture | [Architecture and roadmap](architecture_and_roadmap.md) | Product boundary, component ownership, completed capabilities, and deferred work |
+| Architecture review | [Architecture diagnostic (2026-08-26)](architecture_diagnostic_20260826.md) | Source assessment and target design; executable changes follow in later publication batches |
 | Detailed design | [Execution control plane](execution_control_plane.md) | Task, execution, approval, adapter, event, and recovery contracts |
 | Development and deployment | [Installation and distribution](installation_and_distribution.md) | npm/Python installation model, packaging, update, and release rules |
 | Operations | [Operations guide](operations_guide.md) | Service lifecycle, health checks, backend checks, and recovery commands |
@@ -21,6 +22,7 @@ HTML reports are generated only when explicitly requested and are ignored by Git
 The following files are operational or machine-specific and must stay untracked:
 
 - `private/`
+- `operational_rollout_20260913.md` (instance-specific deployment evidence)
 - `nyanya_remote_access_security_build_plan_20260723.md`
 - generated `*.html` reports
 

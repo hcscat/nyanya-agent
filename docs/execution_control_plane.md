@@ -1,8 +1,18 @@
 # NyaNya Execution Control Plane
 
+supersede earlier callback-only execution, general-file write-hold and legacy mirroring
+statements for normal terminal/Discord operations. Retain historical verification
+and remaining delivery/session/platform limitations; source changes are not deployment.
+
+
+
 ## Scope
 
-The control plane records and observes work executed by local or remote NyaNya workers. It does not expose the dashboard to the public internet, copy OAuth credentials between hosts, or grant unattended writes by default.
+The control plane records and observes work executed by local or remote NyaNya
+workers. It is the product's Local Control Plane: every provider, CLI,
+subprocess, or future remote-host request must enter the durable task path
+before execution. It does not expose the dashboard to the public internet, copy
+OAuth credentials between hosts, or grant unattended writes by default.
 
 ## Data model
 
@@ -10,7 +20,9 @@ The control plane records and observes work executed by local or remote NyaNya w
 |---|---|
 | `hosts` | Mac A/B identity, role, capability inventory, heartbeat, stale/offline projection |
 | `agent_profiles` | Adapter, model, workspace root, and execution policy |
-| `agent_tasks` | User intent and queue state |
+| `execution_projects` | Stable workspace/project identity and lifecycle |
+| `codex_sessions` | Project-scoped logical Codex session identity and model/workspace metadata |
+| `agent_tasks` | User intent, project/session linkage, and queue state |
 | `executions` | One concrete attempt for a task, including status confidence and termination evidence |
 | `runtime_sessions` | PID, tmux session, external handle, heartbeat, and persisted adapter handle |
 | `execution_events` | Append-only ordered event stream with reconnect cursor |
@@ -19,6 +31,12 @@ The control plane records and observes work executed by local or remote NyaNya w
 | `writer_leases` | Single-writer lock with a monotonically increasing fence token |
 
 `schema_migrations` and SQLite `user_version` are applied before the execution API starts. A changed checksum for an already-applied migration fails startup instead of silently mutating history.
+
+`codex_sessions` currently provides a stable project/conversation grouping key
+for NyaNya task management. The bridge still invokes the Codex CLI in ephemeral
+mode, so this registry does not yet promise conversational context replay inside
+Codex. A future persistent Codex session integration may populate
+`external_session_id` after its CLI and recovery contract are verified.
 
 ## State model
 
@@ -61,11 +79,12 @@ Implemented adapters:
 |---|---:|---|
 | managed subprocess | process lifetime | managed child, PID, atomic marker |
 | tmux | host/session lifetime | tmux session, pane/log, atomic marker |
-| Orca | Orca runtime/worktree lifetime | terminal handle, connected state, atomic marker; tmux fallback while offline |
 | Codex | subprocess | explicit NyaNya profile and sandbox plus marker |
 | Antigravity | subprocess | explicit `--sandbox`, auth probe, marker |
 
-The Orca adapter creates a terminal in the worktree selected by the execution working directory. Its persisted handle contains only non-secret terminal and worktree identifiers. Worktree card comments record running, completed, failed-review, or cancelled checkpoints. If Orca cannot be reached before start, the adapter uses tmux only when the configured fallback is enabled. If an already-running Orca terminal becomes unreachable, the execution becomes `stale` instead of being reported as successfully completed or immediately failed.
+The current default adapter registry deliberately excludes Orca. The existing
+adapter implementation remains isolated for historical compatibility tests, but
+the product does not select or operate it.
 
 ## Approval and writer lease
 
@@ -133,6 +152,11 @@ Recovery sequence:
 
 ## Remote boundary
 
-Tailscale is the private transport for dashboard HTTPS, SSH/tmux, and Orca pairing. The application continues to bind to `127.0.0.1`. Tailscale Serve may proxy the local dashboard to the tailnet; no public Funnel configuration is part of this design.
+Tailscale is an acceptable future private transport between approved Mac mini
+hosts. The application continues to bind to `127.0.0.1` unless a separately
+reviewed authenticated private proxy is configured. Tailscale connectivity does
+not grant task authorization, workspace access, or credential synchronization.
 
-Orca integration remains behind the same adapter and approval contract. Pairing URLs, VPN approvals, OAuth, and macOS administrator prompts are operator actions and must not be copied into chat or committed files. The local Orca CLI skill is optional agent guidance; adapter correctness depends on the public JSON CLI and persisted runtime evidence rather than prompt instructions.
+The future remote worker must register host identity, capabilities, heartbeat,
+task ownership, leases, and recovery evidence in this ledger. It is a separate
+phase from the current local/Discord implementation.
