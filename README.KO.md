@@ -1,6 +1,9 @@
 # NyaNya Agent
 
-NyaNya Agent는 Python 중심의 가벼운 로컬 에이전트 래퍼다. Discord, Telegram, Codex 위임, 로컬 운영 대시보드를 선택적으로 함께 사용할 수 있다.
+NyaNya Agent는 작업공간을 원격으로 요청·관리하기 위한 Python 중심의
+**Local Control Plane**이다. 터미널과 Discord 요청은 설정된 provider 또는
+Codex를 호출하기 전에 SQLite durable task/execution 원장에 기록된다.
+대시보드는 지시보다 모니터링·관리 중심이다.
 
 주요 목적:
 
@@ -8,11 +11,19 @@ NyaNya Agent는 Python 중심의 가벼운 로컬 에이전트 래퍼다. Discor
 - Discord 또는 Telegram 요청 접수,
 - 허용된 workspace 안에서만 파일 작업 수행,
 - 복잡한 코드/파일 작업을 Codex로 위임,
-- SQLite 기반 로컬 운영 대시보드 제공,
+- SQLite 기반 durable task/execution 원장과 로컬 운영 대시보드 제공,
 - macOS LaunchAgent 기반 자동 실행,
 - 공개 가능한 소스와 비공개 운영 데이터를 명확히 분리.
 
 English guide: [README.md](README.md)
+
+## P0 실행 구조 갱신 (2026-09-12)
+
+Terminal/Discord 요청은 직렬화된 작업 명세와 별도 worker를 통해 제한된 수로 병렬 처리합니다.
+Gemini Flash가 요청을 판단하고 Flash/Luna/Astra를 선택합니다. 기존 파일은 구체적인 변경안과
+정확한 승인 hash를 확인한 후에만 수정합니다. 중단된 요청은 보류하고 원인을 조회할 수 있습니다.
+[구현·명령어·검증 안내](docs/p0_execution_20260912.md)에서 지원 범위와 남은 제약을 확인하세요.
+이 설명은 소스 구현 기준이며 운영 Discord 서비스에 배포되었다는 뜻은 아닙니다.
 
 ## 프로젝트 상태
 
@@ -28,10 +39,11 @@ src/nyanya_agent/bridge_common.py     # bridge helper 호환 export
 src/nyanya_agent/bridge_constants.py  # 명령어와 routing keyword
 src/nyanya_agent/bridge_policy.py     # workspace, command, safety policy helper
 src/nyanya_agent/bridge_runtime.py    # Codex 위임과 runtime helper
-src/nyanya_agent/bridge_store.py      # 대화 저장소와 사용자별 task queue
+src/nyanya_agent/bridge_store.py      # 대화 컨텍스트와 durable task service 연동
+src/nyanya_agent/task_service.py      # SQLite 기반 task queue와 execution lifecycle
 src/nyanya_agent/dashboard_store.py   # SQLite dashboard/event store
 src/nyanya_agent/execution_store.py   # versioned task/execution/approval ledger
-src/nyanya_agent/execution_adapters.py # subprocess, tmux, Orca, Codex, Antigravity adapter
+src/nyanya_agent/execution_adapters.py # subprocess, tmux, Codex, Antigravity adapter
 src/nyanya_agent/execution_runtime.py # adapter lifecycle, recovery, writer lease coordinator
 src/nyanya_agent/dashboard_api.py     # FastAPI dashboard server
 src/nyanya_agent/memory_worker.py     # 장기기억 후보를 정리하는 background worker
@@ -280,8 +292,13 @@ dashboard DB, WAL/SHM 파일, 실제 요청 로그, private export는 커밋하�
 `0.3.0`부터 기존 `agent_requests`를 유지하면서 versioned migration으로 다음 원장을 추가한다.
 
 - `hosts`, `agent_profiles`, `agent_tasks`, `executions`
+- `execution_projects`, project별 `codex_sessions`
 - `runtime_sessions`, append-only `execution_events`
 - `approvals`, `artifacts`, `writer_leases`
+
+터미널과 Discord의 외부 작업은 `task_service.py`를 통해 provider/Codex를
+호출하기 전에 durable task를 생성하거나 채택한다. 대시보드는 모니터링과
+인증된 관리가 우선이다.
 
 읽기 API는 localhost dashboard에서 조회할 수 있다. 승인, 취소, 재시도, 복구처럼 상태를 바꾸는 API는 `NYANYA_DASHBOARD_CONTROL_TOKEN` 또는 owner-only token file이 없으면 닫힌다. token은 URL, HTML, 로그, Git에 기록하지 않는다.
 
@@ -291,6 +308,8 @@ dashboard DB, WAL/SHM 파일, 실제 요청 로그, private export는 커밋하�
 GET  /v1/hosts
 GET  /v1/agents
 GET  /v1/tasks
+GET  /v1/execution-projects
+GET  /v1/execution-projects/{id}/codex-sessions
 GET  /v1/executions
 GET  /v1/approvals
 GET  /v1/events/stream
@@ -299,9 +318,10 @@ POST /v1/executions/{execution_id}/cancel
 POST /v1/recovery/reconcile
 ```
 
-Codex inspection은 `nyanya-readonly`, 승인된 쓰기는 `nyanya-approved-write` profile을 사용한다. Antigravity-compatible CLI는 기본적으로 `--sandbox`를 사용한다. write-capable execution은 승인 row와 writer lease가 모두 있어야 시작할 수 있다.
+Discord/터미널 직접 쓰기 요청은 검토 대기하며 승인 단어로 실행되지 않는다. Codex 조회는 read-only로 강제한다. 별도 저수준 coordinator의 쓰기 승인은 actor·task·명령 범위·만료에 결합하여 한 번만 소비하며 writer lease를 요구한다. 파일별 변경안을 승인하고 적용하는 공통 경로와 agy sandbox 실환경 검증은 후속 작업이다. [구조 안정화 인계](docs/core_stabilization_20260910.md)를 참조한다.
 
-실행 adapter는 managed subprocess, tmux, Orca terminal, Codex, Antigravity를 지원한다. Orca adapter는 execution을 worktree와 terminal handle에 매핑하고 workspace 진행 상태를 갱신하며, 저장된 handle로 재접속한다. 실행 시작 전에 Orca가 오프라인이고 `NYANYA_ORCA_TMUX_FALLBACK=true`이면 같은 요청을 tmux로 전환한다.
+실행 adapter는 managed subprocess, tmux, Codex, Antigravity를 지원한다.
+Orca는 현재 기본 adapter registry와 제품 방향에서 제외한다.
 
 SQLite 온라인 백업과 복구:
 
@@ -514,6 +534,7 @@ PYTHONPATH=src .venv/bin/python -m py_compile \
 - [문서 인덱스](docs/README.md)
 - [아키텍처와 로드맵](docs/architecture_and_roadmap.md)
 - [실행 제어면](docs/execution_control_plane.md)
+- [Canonical 운영 정책](prompts/policy.md)
 - [설치와 배포](docs/installation_and_distribution.md)
 - [운영 가이드](docs/operations_guide.md)
 - [Dashboard 외부 접근](docs/external_dashboard_access.md)

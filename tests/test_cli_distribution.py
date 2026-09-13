@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sqlite3
 
 import pytest
 
@@ -80,7 +81,7 @@ def test_state_backup_copies_only_durable_items(tmp_path):
     (state_root / "logs").mkdir()
     (state_root / ".env").write_text("NYANYA_PROVIDER=gemini_cli\n", encoding="utf-8")
     (state_root / "config" / "user_workspaces.json").write_text("{}\n", encoding="utf-8")
-    (state_root / "data" / "dashboard.db").write_bytes(b"db")
+    sqlite3.connect(state_root / "data" / "dashboard.db").close()
     (state_root / "logs" / "runtime.log").write_text("log\n", encoding="utf-8")
 
     result = run_cli(state_root, "state", "backup", f"--to={backup_root}")
@@ -100,7 +101,7 @@ def test_state_migrate_excludes_venv_and_run(tmp_path):
     (source / "run").mkdir()
     (source / ".venv").mkdir()
     (source / ".env").write_text("NYANYA_PROVIDER=gemini_cli\n", encoding="utf-8")
-    (source / "data" / "dashboard.db").write_bytes(b"db")
+    sqlite3.connect(source / "data" / "dashboard.db").close()
     (source / "run" / "worker.pid").write_text("1\n", encoding="utf-8")
 
     result = run_cli(source, "state", "migrate", f"--to={target}")

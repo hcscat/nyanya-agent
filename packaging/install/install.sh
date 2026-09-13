@@ -99,36 +99,26 @@ PY
 copy_source() {
   local src="$1"
   local dst="$2"
-  mkdir -p "$dst"
-  tar \
-    --exclude .git \
-    --exclude .venv \
-    --exclude .pytest_cache \
-    --exclude .ruff_cache \
-    --exclude __pycache__ \
-    --exclude data \
-    --exclude logs \
-    --exclude run \
-    --exclude downloads \
-    --exclude docs/private \
-    --exclude .env \
-    -C "$src" -cf - . | tar -C "$dst" -xf -
+  python3 "$src/src/nyanya_agent/distribution_copy.py" "$src" "$dst"
 }
 
 write_launcher() {
   local name="$1"
   local module="$2"
   local path="$BIN_DIR/$name"
+  local quoted_code quoted_state
+  printf -v quoted_code '%q' "$INSTALL_DIR"
+  printf -v quoted_state '%q' "$STATE_DIR"
   cat > "$path" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-export NYANYA_PROJECT_ROOT="$INSTALL_DIR"
-export NYANYA_HOME="$STATE_DIR"
-export NYANYA_ENV_FILE="$STATE_DIR/.env"
+export NYANYA_PROJECT_ROOT=$quoted_code
+export NYANYA_HOME=$quoted_state
+export NYANYA_ENV_FILE=$quoted_state/.env
 if [ "$name" = "nyanya" ] && command -v node >/dev/null 2>&1; then
-  exec node "$INSTALL_DIR/dist/bin/nyanya.js" "\$@"
+  exec node $quoted_code/dist/bin/nyanya.js "\$@"
 fi
-exec "$STATE_DIR/.venv/bin/python" -m "$module" "\$@"
+exec $quoted_state/.venv/bin/python -m "$module" "\$@"
 EOF
   chmod 0755 "$path"
 }
@@ -153,6 +143,11 @@ SOURCE_DIR="$(resolve_path "$SOURCE_DIR")"
 if [ ! -f "$SOURCE_DIR/pyproject.toml" ] || [ ! -d "$SOURCE_DIR/src/nyanya_agent" ]; then
   echo "Source path does not look like a nyanya-agent checkout: $SOURCE_DIR" >&2
   exit 1
+fi
+
+if [[ "$INSTALL_DIR" = "$SOURCE_DIR" || "$INSTALL_DIR" = / || "$INSTALL_DIR" = "$HOME" || "$SOURCE_DIR" = "$INSTALL_DIR/"* || "$INSTALL_DIR" = "$SOURCE_DIR/"* || "$STATE_DIR" = "$INSTALL_DIR" || "$STATE_DIR" = "$INSTALL_DIR/"* ]]; then
+  echo "Unsafe install destination" >&2
+  exit 2
 fi
 
 if [ -d "$INSTALL_DIR" ]; then

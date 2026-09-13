@@ -4,6 +4,19 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
+pack_args=(--dry-run --json)
+if [ "$#" -eq 1 ] && [ "$1" = "--skip-build" ]; then
+  pack_args+=(--ignore-scripts)
+elif [ "$#" -ne 0 ]; then
+  echo "Usage: verify_release.sh [--skip-build]" >&2
+  exit 2
+fi
+
+umask 077
+NYANYA_VERIFY_DIR="$(mktemp -d)"
+export NYANYA_VERIFY_DIR
+trap 'rm -rf "$NYANYA_VERIFY_DIR"' EXIT
+
 failures=0
 
 fail() {
@@ -48,20 +61,7 @@ while IFS= read -r pattern; do
   fi
 done < packaging/release/package-denylist.txt
 
-python3 -m py_compile \
-  src/nyanya_agent/runtime_paths.py \
-  src/nyanya_agent/core.py \
-  src/nyanya_agent/bridge_common.py \
-  src/nyanya_agent/discord_bridge.py \
-  src/nyanya_agent/telegram_bridge.py \
-  src/nyanya_agent/dashboard_api.py \
-  src/nyanya_agent/dashboard_store.py \
-  src/nyanya_agent/execution_store.py \
-  src/nyanya_agent/adapter_runner.py \
-  src/nyanya_agent/execution_adapters.py \
-  src/nyanya_agent/execution_runtime.py \
-  src/nyanya_agent/manager.py \
-  src/nyanya_agent/memory_worker.py
+python3 -m compileall -q src/nyanya_agent
 ok "python modules compile"
 
 bash -n packaging/install/install.sh
@@ -72,35 +72,10 @@ bash -n scripts/restore_state.sh
 ok "shell scripts parse"
 
 if command -v npm >/dev/null 2>&1; then
-  npm pack --dry-run --json >/tmp/nyanya-npm-pack.json
-  if node <<'NODE'
-const fs = require("fs");
-const result = JSON.parse(fs.readFileSync("/tmp/nyanya-npm-pack.json", "utf8"))[0];
-const paths = new Set((result.files || []).map((file) => file.path));
-const required = [
-  "src/nyanya_agent/execution_store.py",
-  "src/nyanya_agent/execution_adapters.py",
-  "src/nyanya_agent/execution_runtime.py",
-  "src/nyanya_agent/dashboard_static/index.html",
-  "src/nyanya_agent/dashboard_static/styles.css",
-  "src/nyanya_agent/dashboard_static/app.js",
-];
-const missing = required.filter((path) => !paths.has(path));
-const privatePrefixes = ["data/", "logs/", "run/", "downloads/", "docs/private/"];
-const privatePath = [...paths].find(
-  (path) => path === ".env" || privatePrefixes.some((prefix) => path.startsWith(prefix))
-);
-const localReportPrefixes = ["docs/nyanya_orca_remote_agent_office_plan_", "docs/phase0_baseline_"];
-const localReport = [...paths].find((path) => localReportPrefixes.some((prefix) => path.startsWith(prefix)));
-if (missing.length || privatePath || localReport) {
-  if (missing.length) console.error(`missing package assets: ${missing.join(", ")}`);
-  if (privatePath) console.error(`private/generated package path: ${privatePath}`);
-  if (localReport) console.error(`local planning/evidence document in package: ${localReport}`);
-  process.exit(1);
-}
-NODE
+  npm pack "${pack_args[@]}" >"$NYANYA_VERIFY_DIR/npm-pack.json"
+  if python3 packaging/release/package_checks.py manifest "$NYANYA_VERIFY_DIR/npm-pack.json"
   then
-    ok "npm pack includes dashboard assets and excludes private/generated paths"
+    ok "npm pack includes required assets, resolves documentation links and excludes private/generated paths"
   else
     fail "npm package contents are incomplete or unsafe"
   fi
@@ -110,69 +85,25 @@ fi
 
 tracked_paths=()
 while IFS= read -r -d '' path; do
-  if [ -f "$path" ] && [ "$path" != "packaging/release/verify_release.sh" ]; then
+  if [ -f "$path" ]; then
     tracked_paths+=("$path")
   fi
-done < <(git ls-files -z)
+done < <(git ls-files --cached --others --exclude-standard -z)
 
-python3 - "${tracked_paths[@]}" <<'PY'
-from pathlib import Path
-import re
-import sys
+python3 packaging/release/package_checks.py privacy "$NYANYA_VERIFY_DIR" "${tracked_paths[@]}"
 
-output_paths = {
-    "personal": Path("/tmp/nyanya-personal-data-scan.txt"),
-    "secret": Path("/tmp/nyanya-secret-scan.txt"),
-}
-patterns = {
-    "personal": re.compile(
-        r"/Users/[A-Za-z0-9._-]+/"
-        r"|\b[0-9]{17,20}\b"
-        r"|[A-Za-z0-9._%+-]+@(gmail|naver|icloud|outlook|hotmail)\.[A-Za-z]{2,}"
-        r"|tail[0-9]{4,}\.ts\.net",
-        re.IGNORECASE,
-    ),
-    "secret": re.compile(
-        r"BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY"
-        r"|AKIA[0-9A-Z]{16}"
-        r"|github_pat_[A-Za-z0-9_]{20,}"
-        r"|gh[pousr]_[A-Za-z0-9_]{20,}"
-        r"|AIza[0-9A-Za-z_-]{20,}"
-        r"|sk-[A-Za-z0-9_-]{20,}"
-        r"|xox[baprs]-[A-Za-z0-9-]{20,}"
-        r"|[MN][A-Za-z0-9_-]{23,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{20,}"
-        r"|DISCORD_BOT_TOKEN=.+|NYANYA_DISCORD_BOT_TOKEN=.+|OPENAI_API_KEY=.+"
-    ),
-}
-matches = {name: [] for name in patterns}
-
-for raw_path in sys.argv[1:]:
-    path = Path(raw_path)
-    data = path.read_bytes()
-    if b"\0" in data:
-        continue
-    text = data.decode("utf-8", errors="ignore")
-    for name, pattern in patterns.items():
-        if pattern.search(text):
-            matches[name].append(raw_path)
-
-for name, output_path in output_paths.items():
-    content = "\n".join(matches[name])
-    output_path.write_text(f"{content}\n" if content else "", encoding="utf-8")
-PY
-
-if [ -s /tmp/nyanya-personal-data-scan.txt ]; then
-  sed -n '1,100p' /tmp/nyanya-personal-data-scan.txt
-  fail "personal path, email, tailnet hostname, or long account/message identifier found in tracked files"
+if [ -s "$NYANYA_VERIFY_DIR/personal-data-scan.txt" ]; then
+  sed -n '1,100p' "$NYANYA_VERIFY_DIR/personal-data-scan.txt"
+  fail "personal/default workspace path, email, tailnet hostname, or long identifier found in public worktree files"
 else
-  ok "all tracked files contain no personal path, email, tailnet hostname, or long account/message identifier"
+  ok "all public worktree files contain no personal/default workspace path, email, tailnet hostname, or long identifier"
 fi
 
-if [ -s /tmp/nyanya-secret-scan.txt ]; then
-  sed -n '1,100p' /tmp/nyanya-secret-scan.txt
-  fail "potential secret found in tracked files"
+if [ -s "$NYANYA_VERIFY_DIR/secret-scan.txt" ]; then
+  sed -n '1,100p' "$NYANYA_VERIFY_DIR/secret-scan.txt"
+  fail "potential secret found in public worktree files"
 else
-  ok "all tracked files contain no token-like or private-key values"
+  ok "all public worktree files contain no token-like or private-key values"
 fi
 
 package_version="$(node -p "require('./package.json').version")"

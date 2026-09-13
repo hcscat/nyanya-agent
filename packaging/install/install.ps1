@@ -32,6 +32,14 @@ if (-not (Test-Path (Join-Path $Source "pyproject.toml"))) {
     throw "Source path does not look like a nyanya-agent checkout: $Source"
 }
 
+$fullInstall = [System.IO.Path]::GetFullPath($InstallDir).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+$fullSource = [System.IO.Path]::GetFullPath($Source).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+if ($fullInstall -eq $fullSource -or $fullInstall -eq $env:USERPROFILE -or
+    $fullInstall -eq [System.IO.Path]::GetPathRoot($fullInstall).TrimEnd([System.IO.Path]::DirectorySeparatorChar) -or
+    $fullSource.StartsWith($fullInstall + [System.IO.Path]::DirectorySeparatorChar)) {
+    throw "Unsafe install destination"
+}
+
 if (Test-Path $InstallDir) {
     $backup = "$InstallDir.backup.$(Get-Date -Format yyyyMMddHHmmss)"
     if ($Force -and (Test-Path $backup)) {
@@ -42,13 +50,8 @@ if (Test-Path $InstallDir) {
 }
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-$exclude = @(".git", ".venv", ".pytest_cache", ".ruff_cache", "data", "logs", "run", "downloads")
-Get-ChildItem -Force $Source | Where-Object { $exclude -notcontains $_.Name -and $_.Name -ne ".env" } | ForEach-Object {
-    Copy-Item $_.FullName -Destination $InstallDir -Recurse -Force
-}
-if (Test-Path (Join-Path $InstallDir "docs\private")) {
-    Remove-Item -Recurse -Force (Join-Path $InstallDir "docs\private")
-}
+python (Join-Path $Source "src/nyanya_agent/distribution_copy.py") $Source $InstallDir
+if ($LASTEXITCODE -ne 0) { throw "Public source copy failed" }
 
 $envPath = Join-Path $StateDir ".env"
 foreach ($name in @("config", "data", "downloads", "logs", "run", "sessions")) {

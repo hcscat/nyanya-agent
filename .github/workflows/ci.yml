@@ -29,7 +29,9 @@ jobs:
         run: npm ci
 
       - name: Install Python dependencies
-        run: python -m pip install -e ".[bots,dashboard,dev,security]"
+        run: |
+          python -m pip install --upgrade "pip>=26.2"
+          python -m pip install -e ".[bots,dashboard,dev,security]"
 
       - name: Build and type-check CLI
         run: npm run build && npm run check
@@ -41,6 +43,7 @@ jobs:
 
       - name: Audit dependencies and high-severity Python findings
         run: |
+          npm audit --audit-level=low
           python -m pip_audit --local
           python -m bandit -r src/nyanya_agent -lll
 

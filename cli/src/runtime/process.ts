@@ -7,6 +7,7 @@ export function run(command: string, args: string[], options: { cwd?: string; en
     cwd: options.cwd,
     env: options.env ?? process.env,
     encoding: "utf8",
+    timeout: 35000,
     stdio: "pipe"
   });
 }
