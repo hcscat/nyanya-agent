@@ -1,6 +1,16 @@
 # nyanya-agent Operations Guide
 
-This guide covers the local service command used to manage nyanya-agent, its Discord bridge, and its local dashboard.
+2026-09-12 follow-up: [P0 execution contracts and verification](p0_execution_20260912.md)
+supersede earlier callback-only execution, general-file write-hold and legacy mirroring
+statements for normal terminal/Discord operations. Retain historical verification
+and remaining delivery/session/platform limitations; source changes are not deployment.
+
+
+This guide covers the local service command used to manage nyanya-agent, its
+Discord bridge, and its local dashboard. NyaNya is operated as a Local Control
+Plane: the SQLite execution ledger is the source of truth for task and execution
+status, while the dashboard is primarily a monitoring and authenticated control
+surface.
 
 ## Command
 
@@ -56,11 +66,39 @@ com.hcs.nyanya.discord
 com.hcs.nyanya.dashboard
 ```
 
-The Discord bridge is the runtime entry point for NyaNya Agent. There is no separate always-on "agent server" process in the current architecture. The bridge receives messenger events and invokes the local agent core, conversation store, policy layer, dashboard ledger, and Codex delegation helpers as needed.
+The Discord bridge is the current connector runtime for NyaNya Agent. There is
+no separate always-on "agent server" process in the current architecture. The
+bridge receives messenger events and submits them to the durable task service,
+which writes SQLite task/execution/event state before invoking the local agent
+core or Codex delegation helper. The terminal CLI uses the same task service.
 
-The dashboard is a separate local observability process. It serves `http://127.0.0.1:8765` by default and reads/writes `data/nyanya_dashboard.db`.
+The dashboard is a separate local observability process. It serves
+`http://127.0.0.1:8765` by default and reads/writes `data/nyanya_dashboard.db`.
+Use `/v1/execution-projects`, `/v1/execution-projects/{id}/codex-sessions`, and
+`/v1/tasks?project_id={id}` for the authoritative project/session/task view.
 
 ## Codex Separation Policy
+
+### Executable readiness
+
+Management health checks and Discord delegation share `codex_cli.resolve_codex_cli`.
+Set `NYANYA_CODEX_CLI` to a verified executable path or command. When unset,
+discovery uses `codex` on the service PATH. An explicit invalid setting fails
+closed instead of silently selecting another installation. Directories,
+non-executable files, and broken symlinks are rejected. Avoid pinning the CLI to
+a desktop app's internal bundle path when an independently installed CLI is used.
+
+After changing this setting, restart the Discord bridge to reload its environment.
+Verify the selected binary with `--version`, then verify bridge reconnection and
+a read-only delegated request. A successful version check alone does not prove
+authentication, model/profile compatibility, or end-to-end task completion.
+
+OS launch failures are reported with a sanitized errno and actionable guidance,
+not raw local executable/workspace paths. ENOENT means a missing executable,
+working directory, or interpreter; EACCES means permission denied; EPERM means
+operation not permitted; ENOEXEC means an invalid executable format. These errno
+definitions come from the OS/Python standard library, not NyaNya-specific codes.
+Permission errors must not trigger automatic privilege elevation.
 
 Codex must remain separate from the NyaNya Agent service lifecycle.
 
@@ -257,3 +295,13 @@ sessions/
 downloads/
 run/
 ```
+
+## CORE-STAB-01 recovery behavior
+
+See [the current stabilization handoff](core_stabilization_20260910.md) before upgrading. Schema v3 is applied on runtime initialization; preserve a verified pre-upgrade backup. No live upgrade was performed by the source change.
+
+Discord `recovery` / `복구` lists held work; `result <task-id>` / `결과 <task-id>` retrieves the caller's persisted result. Reconnect notices are checked every 60 seconds and may wait for lease expiry. Records without a known allowed destination need local review. Notices can repeat across bridge restart; this is not a durable outbox.
+
+Interrupted work is not replayed automatically. Review external processes and side effects before cancelling or making a replacement request. An unresolved claim can hold later owner work; do not edit SQLite to bypass it or assume a cancellation request terminated a process. Dashboard retry returns a conflict until explicit reconciliation is implemented.
+
+The TypeScript state backup command uses SQLite online backup and rejects unsafe destinations/symlinks. Backups are per database/file, not an atomic snapshot of all state. Legacy shell backup/restore helpers use separate path selection; inspect that path and stop writers before a restore. Never restore over a running service.

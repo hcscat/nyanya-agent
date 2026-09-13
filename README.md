@@ -1,18 +1,31 @@
 # NyaNya Agent
 
-NyaNya Agent is a lightweight Python-first local agent wrapper with optional Discord, Telegram, Codex delegation, and a local operations dashboard.
+NyaNya Agent is a Python-first **Local Control Plane** for operator-managed
+workspaces. Terminal and Discord requests enter a SQLite durable task/execution
+ledger before configured providers or Codex are called. The dashboard is a
+monitoring-first operational surface.
 
-It is designed for a personal or small-team workspace that needs:
+It is designed for a single-operator workspace that needs:
 
 - a terminal LLM wrapper,
 - Discord or Telegram request intake,
 - controlled file and workspace access,
 - optional Codex delegation for complex code/file work,
-- a local SQLite-backed operations dashboard,
+- a local SQLite-backed task and execution ledger plus operations dashboard,
 - macOS LaunchAgent service management,
 - clear separation between public source code and private runtime data.
 
 Korean guide: [README.KO.md](README.KO.md)
+
+## P0 execution update (2026-09-12)
+
+Normal terminal/Discord requests now use serialized operations and a dedicated
+worker with bounded parallelism. Gemini Flash assesses requests and selects a
+Flash/Luna/Astra execution profile. Existing-file edits require a concrete reviewed
+plan and exact approval hash; interrupted work stays held with queryable reasons.
+See the [P0 implementation and command guide](docs/p0_execution_20260912.md) for
+supported file operations, recovery commands, model mappings and verification limits.
+This is source implementation, not evidence of a deployed Discord service.
 
 ## Project Status
 
@@ -28,10 +41,11 @@ src/nyanya_agent/bridge_common.py     # compatibility exports for bridge helpers
 src/nyanya_agent/bridge_constants.py  # command names and routing keyword tables
 src/nyanya_agent/bridge_policy.py     # workspace, command, and safety policy helpers
 src/nyanya_agent/bridge_runtime.py    # Codex delegation and runtime helpers
-src/nyanya_agent/bridge_store.py      # conversation store and per-user task queue
+src/nyanya_agent/bridge_store.py      # conversation context and durable task service
+src/nyanya_agent/task_service.py      # SQLite-backed task queue and execution lifecycle
 src/nyanya_agent/dashboard_store.py   # SQLite dashboard/event store
 src/nyanya_agent/execution_store.py   # versioned task/execution/approval ledger
-src/nyanya_agent/execution_adapters.py # subprocess, tmux, Orca, Codex, and Antigravity adapters
+src/nyanya_agent/execution_adapters.py # subprocess, tmux, Codex, and Antigravity adapters
 src/nyanya_agent/execution_runtime.py # adapter lifecycle, recovery, and writer-lease coordinator
 src/nyanya_agent/dashboard_api.py     # FastAPI dashboard server
 src/nyanya_agent/memory_worker.py     # background long-term memory candidate worker
@@ -207,7 +221,7 @@ Useful Discord commands:
 | `!nyanya upload <file_path>` | Upload a local workspace file. Outside a configured file-share channel, the file is sent to `NYANYA_DISCORD_FILE_SHARE_CHANNEL_IDS`. |
 | `!nyanya gemini <prompt>` | Send a prompt directly through the configured Google/Gemini-style backend. |
 | `!nyanya codex <prompt>` | Delegate review or investigation work to Codex. |
-| `!nyanya codex-work <prompt>` | Delegate file/code-changing work to Codex when write delegation is enabled. |
+| `!nyanya codex-work <prompt>` | Return a review hold for file/code-changing work; direct write delegation is disabled. |
 | `!nyanya cancel` | Cancel the current user's queued/running task. |
 
 Long-running task visibility:
@@ -272,8 +286,13 @@ The dashboard is split into five screens:
 Version `0.3.0` preserves the legacy `agent_requests` contract and adds versioned migrations for:
 
 - `hosts`, `agent_profiles`, `agent_tasks`, and `executions`;
+- `execution_projects` and project-scoped `codex_sessions`;
 - `runtime_sessions` and append-only `execution_events`;
 - `approvals`, `artifacts`, and fenced `writer_leases`.
+
+Terminal and Discord external work is submitted through `task_service.py`,
+which creates or adopts the durable task before provider/Codex execution. The
+dashboard is primarily for monitoring and authenticated management.
 
 Read APIs are available through the localhost dashboard. Mutating approval, cancellation, retry, and recovery APIs fail closed unless `NYANYA_DASHBOARD_CONTROL_TOKEN` or an owner-only token file is configured. Tokens are never placed in URLs, HTML, logs, or Git.
 
@@ -281,6 +300,8 @@ Read APIs are available through the localhost dashboard. Mutating approval, canc
 GET  /v1/hosts
 GET  /v1/agents
 GET  /v1/tasks
+GET  /v1/execution-projects
+GET  /v1/execution-projects/{id}/codex-sessions
 GET  /v1/executions
 GET  /v1/approvals
 GET  /v1/events/stream
@@ -289,9 +310,10 @@ POST /v1/executions/{execution_id}/cancel
 POST /v1/recovery/reconcile
 ```
 
-Codex inspection uses the `nyanya-readonly` profile. Approved writes use `nyanya-approved-write`. Antigravity-compatible invocations use `--sandbox` by default. A write-capable execution requires both an approved approval row and a writer lease.
+Discord/terminal direct write requests are held for review; approval words do not authorize execution. Codex inspection is forced read-only. The separate low-level coordinator binds one-use write approval to actor, task, exact command scope and expiry, with a writer lease. This is not yet a file-by-file reviewed apply workflow. Antigravity sandbox behavior still requires live acceptance. See the [stabilization handoff](docs/core_stabilization_20260910.md).
 
-Execution adapters cover managed subprocesses, tmux, Orca terminals, Codex, and Antigravity. The Orca adapter maps each execution to a worktree and terminal handle, updates the workspace progress card, and reconnects through the persisted handle. If Orca is offline before start and `NYANYA_ORCA_TMUX_FALLBACK=true`, the same request runs through tmux instead.
+Execution adapters cover managed subprocesses, tmux, Codex, and Antigravity.
+Orca is not in the current default adapter registry or product direction.
 
 Create and restore an online SQLite backup with:
 
@@ -513,6 +535,7 @@ PYTHONPATH=src .venv/bin/python -m py_compile \
 - [Documentation map](docs/README.md)
 - [Architecture and roadmap](docs/architecture_and_roadmap.md)
 - [Execution control plane](docs/execution_control_plane.md)
+- [Canonical operating policy](prompts/policy.md)
 - [Installation and distribution](docs/installation_and_distribution.md)
 - [Operations guide](docs/operations_guide.md)
 - [External dashboard access guide](docs/external_dashboard_access.md)

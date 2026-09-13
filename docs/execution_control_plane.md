@@ -1,10 +1,12 @@
 # NyaNya Execution Control Plane
 
+2026-09-12 follow-up: [P0 execution contracts and verification](p0_execution_20260912.md)
 supersede earlier callback-only execution, general-file write-hold and legacy mirroring
 statements for normal terminal/Discord operations. Retain historical verification
 and remaining delivery/session/platform limitations; source changes are not deployment.
 
 
+> Current implementation update (2026-09-10): [CORE-STAB-01](core_stabilization_20260910.md) records schema-v3 claims/results, manual recovery holds, typed outcomes and the remaining worker/approval/migration gaps. Older phase descriptions below are design/history where they conflict with that update. This is not a stable-release or live-acceptance declaration.
 
 ## Scope
 

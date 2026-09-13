@@ -9,6 +9,7 @@ function run(command, args, options = {}) {
         cwd: options.cwd,
         env: options.env ?? process.env,
         encoding: "utf8",
+        timeout: 35000,
         stdio: "pipe"
     });
 }
