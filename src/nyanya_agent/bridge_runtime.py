@@ -15,6 +15,8 @@ import time
 from typing import Any
 
 from nyanya_agent import core as nyanya
+from nyanya_agent.task_outcomes import OutcomeSignal
+from nyanya_agent.codex_cli import codex_launch_error, resolve_codex_cli
 from nyanya_agent.bridge_constants import *
 from nyanya_agent.bridge_policy import *
 
@@ -286,23 +288,24 @@ def run_codex_task(
     workdir: pathlib.Path | None = None,
 ) -> str:
     if not parse_bool(os.getenv("NYANYA_CODEX_ENABLED"), False):
-        return "Codex CLI 위임이 꺼져 있습니다. NYANYA_CODEX_ENABLED=true 로 켠 뒤 다시 시도하세요."
+        raise OutcomeSignal("blocked", "Codex CLI 위임이 꺼져 있습니다. 설정을 확인하세요.")
     if write and not parse_bool(os.getenv("NYANYA_CODEX_WRITE_ENABLED"), False):
-        return "Codex 쓰기 작업은 꺼져 있습니다. 검수/조사는 /codex 로 실행할 수 있습니다."
+        raise OutcomeSignal("blocked", "Codex 쓰기 작업은 꺼져 있습니다. 검수/조사는 /codex 로 실행할 수 있습니다.")
 
-    cli = resolve_executable(os.getenv("NYANYA_CODEX_CLI", "codex"))
+    cli = resolve_codex_cli()
+    if cli is None:
+        raise RuntimeError(
+            "Codex 실행 파일을 찾을 수 없거나 실행할 수 없습니다. "
+            "NYANYA_CODEX_CLI와 서비스 PATH를 확인한 뒤 Discord 서비스를 다시 시작하세요."
+        )
     if workdir is None:
         workdir = default_codex_workdir()
     workdir = workdir.resolve(strict=False)
     if not is_allowed_workspace_path(workdir):
-        return f"Codex 작업 경로가 허용 범위 밖입니다: {workdir}"
+        raise OutcomeSignal("blocked", "Codex 작업 경로가 허용 범위 밖입니다.")
     protected_violation = protected_delete_violation(prompt, workdir=workdir)
     if protected_violation:
-        return (
-            "요청을 거부했습니다. NyaNya 정상 동작에 필요한 보호 파일/디렉토리는 삭제, 이동, 이름 변경, "
-            f"비우기 작업을 할 수 없습니다.\n이유: {protected_violation}\n"
-            f"보호 목록: {protected_delete_paths_text()}"
-        )
+        raise OutcomeSignal("blocked", "보호 파일 또는 디렉토리에 대한 변경 요청을 거부했습니다.")
     risk = classify_request_risk(prompt, workdir=workdir)
     if write and not risk["requires_approval"]:
         risk = {
@@ -312,12 +315,12 @@ def run_codex_task(
             "reasons": [*risk["reasons"], "Codex 쓰기 가능 모드로 실행되는 작업입니다."],
         }
     if risk["stop"] or (risk["requires_approval"] and not risk["approval_granted"]):
-        return risk_plan_response(prompt, risk, workdir=workdir)
+        raise OutcomeSignal("blocked" if risk["stop"] else "awaiting_approval", risk_plan_response(prompt, risk, workdir=workdir))
     timeout = int(os.getenv("NYANYA_CODEX_TIMEOUT_SECONDS", str(DEFAULT_CODEX_TIMEOUT_SECONDS)))
     max_chars = int(os.getenv("NYANYA_CODEX_MAX_OUTPUT_CHARS", str(DEFAULT_CODEX_MAX_OUTPUT_CHARS)))
-    sandbox = os.getenv("NYANYA_CODEX_WRITE_SANDBOX" if write else "NYANYA_CODEX_SANDBOX", "")
-    if not sandbox:
-        sandbox = "workspace-write" if write else "read-only"
+    sandbox = "read-only"
+    if write:
+        raise OutcomeSignal("awaiting_approval", "기존 파일 변경은 파일별 변경안 검토가 필요합니다. 직접 쓰기 위임은 보류합니다.")
     profile = os.getenv(
         "NYANYA_CODEX_WRITE_PROFILE" if write else "NYANYA_CODEX_PROFILE",
         "nyanya-approved-write" if write else "nyanya-readonly",
@@ -350,8 +353,7 @@ def run_codex_task(
         " If parallel investigation or implementation is useful, prefer Codex's built-in "
         "subagent/multi-agent workflow when available. Do not launch multiple external agy or "
         "codex terminal sessions yourself unless the user explicitly asks for external terminal "
-        "orchestration. Use the latest configured Codex model for main planning/review; gpt-5.4 "
-        "is acceptable for bounded sidecar subagents when the task difficulty allows it."
+        "orchestration. Use explicitly configured model profiles; do not invent model identifiers."
     )
     memory_context = nyanya.build_dynamic_memory_context(prompt)
     memory_policy = f"\n\nApproved NyaNya long-term memory for this request:\n{memory_context}" if memory_context else ""
@@ -359,7 +361,7 @@ def run_codex_task(
     instruction = (
         "You are being invoked by NyaNya from an allowed Telegram/Discord user. "
         f"Current workspace: {workdir}. "
-        f"Allowed workspace roots: {', '.join(str(root) for root in workspace_roots())}. "
+        f"Allowed workspace root: {workdir}. "
         f"Trusted workspace roots: {', '.join(str(root) for root in trusted_workspace_roots())}. "
         f"Protected delete paths: {protected_delete_paths_text()}. "
         "Do not inspect, modify, create, delete, move, or summarize files outside these allowed workspace roots. "
@@ -396,9 +398,6 @@ def run_codex_task(
     ]
     if profile:
         command.extend(["--profile", profile])
-    for root in workspace_roots():
-        if root != workdir:
-            command.extend(["--add-dir", str(root)])
     model = os.getenv("NYANYA_CODEX_MODEL", "").strip()
     if model:
         command.extend(["-m", model])
@@ -413,24 +412,25 @@ def run_codex_task(
                 cancel_event=cancel_event,
             )
         except subprocess.TimeoutExpired:
-            return f"Codex CLI 실행이 {timeout}초를 넘겨 중단됐습니다."
+            raise OutcomeSignal("timed_out", "Codex 실행 제한 시간을 초과했습니다.") from None
+        except OSError as exc:
+            raise RuntimeError(codex_launch_error(exc)) from None
         final = output_path.read_text(encoding="utf-8").strip() if output_path.exists() else ""
     finally:
         output_path.unlink(missing_ok=True)
 
     if returncode == -15:
-        return "요청이 취소되었습니다."
+        raise OutcomeSignal("cancelled", "요청이 취소되었습니다.")
     if returncode != 0:
-        detail = (stderr or stdout).strip()
-        if len(detail) > max_chars:
-            detail = detail[:max_chars].rstrip() + "\n...[truncated]"
-        return f"Codex CLI 실행 실패: {detail or f'exit code {returncode}'}"
+        raise OutcomeSignal("failed", f"Codex CLI 실행 실패 (exit={returncode}). 로컬 실행 환경을 확인하세요.")
 
     if not final:
         final = (stdout or stderr).strip()
     if len(final) > max_chars:
         final = final[:max_chars].rstrip() + "\n...[truncated]"
-    return final or "Codex CLI가 응답을 반환하지 않았습니다."
+    if not final:
+        raise OutcomeSignal("failed", "Codex CLI가 응답을 반환하지 않았습니다.")
+    return final
 
 
 def task_failure_text(exc: Exception) -> str:

@@ -466,6 +466,23 @@ def test_preview_preserves_original_review_even_after_external_change(setup):
     assert "external" not in preview
 
 
+def test_api_operation_submission_uses_worker_and_preserves_undelivered_result(setup, monkeypatch, fixture_worker):
+    from fastapi.testclient import TestClient
+    from nyanya_agent.dashboard_api import create_app
+
+    path, root, _ = setup
+    monkeypatch.setenv("NYANYA_DASHBOARD_CONTROL_TOKEN", "fixture-control")
+    with TestClient(create_app(path), client=("127.0.0.1", 50000)) as client:
+        payload = {"prompt": "inspect", "workspace": str(root)}
+        assert client.post("/v1/operations", json=payload).status_code == 401
+        response = client.post("/v1/operations", json=payload, headers={"X-Nyanya-Control-Token": "fixture-control"})
+        assert response.status_code == 201
+        task_id = response.json()["id"]
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and not work_queue.result(path, task_id, "operator"):
+            time.sleep(0.05)
+        saved = work_queue.result(path, task_id, "operator")
+        assert saved["outcome"] == "succeeded" and saved["delivery_status"] == "pending"
 
 
 def claim_in_process(args):
@@ -555,6 +572,20 @@ def test_worker_start_failure_retains_request_and_reason(setup):
     service.close()
 
 
+def test_remote_and_forwarded_reads_require_authentication(setup, monkeypatch):
+    from fastapi.testclient import TestClient
+    from nyanya_agent.dashboard_api import create_app
+
+    path, _, _ = setup
+    monkeypatch.setenv("NYANYA_DASHBOARD_CONTROL_TOKEN", "fixture-control")
+    app = create_app(path)
+    with TestClient(app, client=("remote-client", 50000)) as client:
+        assert client.get("/health").status_code == 200
+        assert client.get("/v1/tasks").status_code == 401
+        assert client.get("/v1/tasks", headers={"X-Nyanya-Control-Token": "fixture-control"}).status_code == 200
+    with TestClient(create_app(path), client=("127.0.0.1", 50000)) as client:
+        assert client.get("/v1/tasks").status_code == 200
+        assert client.get("/v1/tasks", headers={"X-Forwarded-For": "remote-client"}).status_code == 401
 
 
 def test_schema_three_backup_upgrade_and_restore_preserve_work(tmp_path, monkeypatch):

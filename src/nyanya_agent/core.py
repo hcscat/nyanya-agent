@@ -24,6 +24,7 @@ import urllib.request
 from typing import Any
 
 from nyanya_agent import runtime_paths
+from nyanya_agent.task_outcomes import OutcomeSignal
 
 SOURCE_ROOT = runtime_paths.SOURCE_ROOT
 PROJECT_ROOT = runtime_paths.CODE_ROOT
@@ -139,8 +140,8 @@ def build_dynamic_memory_context(prompt: str, *, owner_key: str | None = None, l
             memories,
             char_limit=int(os.getenv("NYANYA_MEMORY_CONTEXT_MAX_CHARS", "1800")),
         )
-    except Exception as exc:  # noqa: BLE001 - memory retrieval must never break the main answer path.
-        return f"Long-term memory retrieval failed and should be ignored for this turn: {type(exc).__name__}: {exc}"
+    except Exception:  # noqa: BLE001 - memory retrieval must never break the main answer path.
+        return ""
 
 
 def request_json(url: str, payload: dict[str, Any] | None, timeout: int, headers: dict[str, str] | None = None) -> Any:
@@ -211,15 +212,11 @@ def resolve_executable(command: str) -> str:
 
 
 def resolve_gemini_like_cli(command: str) -> str:
-    """Resolve Gemini/Antigravity CLI, tolerating stale configured paths."""
-    requested = resolve_executable(command)
-    if shutil.which(requested) or pathlib.Path(requested).exists():
-        return requested
-    for fallback in ("gemini", "/opt/homebrew/bin/gemini", "agy", "antigravity"):
-        resolved = resolve_executable(fallback)
-        if shutil.which(resolved) or pathlib.Path(resolved).exists():
-            return resolved
-    return requested
+    """An explicit executable must never silently switch provider installations."""
+    resolved = shutil.which(os.path.expanduser(command))
+    if not resolved or not pathlib.Path(resolved).is_file():
+        raise OutcomeSignal("blocked", "설정된 Gemini/agy 실행 파일이 없거나 실행할 수 없습니다.")
+    return resolved
 
 
 def is_antigravity_cli(command: str) -> bool:
@@ -320,7 +317,6 @@ def format_cli_conversation(config: dict[str, Any], messages: list[dict[str, str
     parts = [
         f"Answer as {agent_display_name(config)}. Use the full conversation context below and reply to the final user message.",
         "Keep the answer concise and useful. If the user writes in Korean, answer in Korean.",
-        runtime_status_context(config),
     ]
     for message in messages:
         role = role_names.get(message.get("role", ""), message.get("role", "message").title())
@@ -390,8 +386,7 @@ def gemini_chat_once(config: dict[str, Any], messages: list[dict[str, str]], can
             "--print-timeout",
             f"{int(config['timeout_seconds'])}s",
         ]
-        if os.getenv("NYANYA_ANTIGRAVITY_SANDBOX", "true").strip().lower() in {"1", "true", "yes", "on"}:
-            command.append("--sandbox")
+        command.append("--sandbox")
     else:
         command = [
             cli,
@@ -399,7 +394,7 @@ def gemini_chat_once(config: dict[str, Any], messages: list[dict[str, str]], can
             prompt,
             "--skip-trust",
             "--approval-mode",
-            str(config.get("gemini_approval_mode") or "plan"),
+            "plan",
             "--output-format",
             "text",
         ]
@@ -415,14 +410,13 @@ def gemini_chat_once(config: dict[str, Any], messages: list[dict[str, str]], can
             cancel_event=cancel_event,
         )
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"Gemini-like CLI timed out after {int(exc.timeout)} seconds.") from exc
+        raise OutcomeSignal("timed_out", "Gemini/agy 실행 제한 시간을 초과했습니다.") from exc
     stdout = clean_cli_output(raw_stdout)
     stderr = clean_cli_output(raw_stderr)
     if returncode == -15:
-        return "요청이 취소되었습니다."
+        raise OutcomeSignal("cancelled", "요청이 취소되었습니다.")
     if returncode != 0:
-        detail = stderr or stdout or f"exit code {returncode}"
-        raise RuntimeError(f"Gemini-like CLI failed: {detail}")
+        raise OutcomeSignal("failed", f"Gemini/agy 실행 실패 (exit={returncode}).")
     return stdout or stderr
 
 
@@ -456,6 +450,19 @@ def chat_once(config: dict[str, Any], messages: list[dict[str, str]], cancel_eve
     raise ValueError(f"Unsupported provider: {provider}")
 
 
+def guarded_chat_once(config, messages, cancel_event=None, workspace=None):
+    from nyanya_agent.bridge_policy import classify_request_risk
+    if workspace is None or not workspace.is_dir():
+        raise OutcomeSignal("blocked", "유효한 작업공간을 설정하세요.")
+    prompt = next((item["content"] for item in reversed(messages) if item.get("role") == "user"), "")
+    risk = classify_request_risk(prompt, workdir=workspace)
+    if risk["stop"] or risk["requires_approval"]:
+        from nyanya_agent.bridge_policy import risk_plan_response
+        raise OutcomeSignal("blocked" if risk["stop"] else "awaiting_approval",
+                            risk_plan_response(prompt, risk, workdir=workspace))
+    return chat_once(config, messages, cancel_event=cancel_event, workspace=workspace)
+
+
 def save_session(config: dict[str, Any], messages: list[dict[str, str]]) -> pathlib.Path | None:
     if not config.get("save_transcripts", True):
         return None
@@ -482,76 +489,81 @@ def build_messages(config: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def run_single_prompt(config: dict[str, Any], prompt: str) -> int:
-    messages = build_messages(config)
-    dynamic_memory = build_dynamic_memory_context(prompt)
-    if dynamic_memory:
-        messages.append({"role": "system", "content": dynamic_memory})
-    messages.append({"role": "user", "content": prompt})
+    from nyanya_agent.bridge_policy import default_codex_workdir
+    from nyanya_agent.operation_service import OperationService
+    service = OperationService()
+    owner = 'operator'
     try:
-        answer = chat_once(config, messages)
-    except Exception as exc:  # noqa: BLE001 - CLI should print backend errors clearly.
-        print(f"{agent_display_name(config)} request failed: {exc}", file=sys.stderr)
+        control = service.control(prompt, owner)
+        if control is not None:
+            print(control)
+            return 0
+        task = service.submit(prompt, default_codex_workdir(), owner)
+        answer = service.wait(task['id'], owner)
+        print(answer.text)
+        return 0 if answer.status == 'succeeded' else 1
+    except (ValueError, RuntimeError, OSError) as exc:
+        print(f"작업 접수/실행 실패: {type(exc).__name__}", file=sys.stderr)
         return 1
-    messages.append({"role": "assistant", "content": answer})
-    print(answer)
-    path = save_session(config, messages)
-    if path:
-        print(f"\n[session saved] {path}")
-    return 0
+    finally:
+        service.close()
 
 
 def run_repl(config: dict[str, Any]) -> int:
-    messages = build_messages(config)
-    print(f"{agent_display_name(config)} local agent: provider={config['provider']} model={config['model']}")
-    dashboard_host = os.getenv("NYANYA_DASHBOARD_HOST", "127.0.0.1")
-    dashboard_port = os.getenv("NYANYA_DASHBOARD_PORT", "8765")
-    print(f"Dashboard: http://{dashboard_host}:{dashboard_port}")
-    print("Commands: /exit, /reset, /save, /config, /settings, /dashboard")
-    while True:
-        try:
-            user_text = input("\nYou> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            break
-        if not user_text:
-            continue
-        if user_text in {"/exit", "/quit"}:
-            break
-        if user_text == "/reset":
-            messages = build_messages(config)
-            print("Conversation reset.")
-            continue
-        if user_text == "/save":
-            path = save_session(config, messages)
-            print(f"Saved: {path}" if path else "Transcript saving is disabled.")
-            continue
-        if user_text == "/config":
-            visible = {k: v for k, v in config.items() if "key" not in k.lower()}
-            print(json.dumps(visible, ensure_ascii=False, indent=2))
-            continue
-        if user_text == "/settings":
-            print("Run `nyanya config` in a terminal to change LLM or SNS settings securely.")
-            continue
-        if user_text == "/dashboard":
-            print(f"http://{dashboard_host}:{dashboard_port}")
-            continue
-
-        dynamic_memory = build_dynamic_memory_context(user_text)
-        if dynamic_memory:
-            messages.append({"role": "system", "content": dynamic_memory})
-        messages.append({"role": "user", "content": user_text})
-        try:
-            answer = chat_once(config, messages)
-        except Exception as exc:  # noqa: BLE001
-            print(f"{agent_display_name(config)} request failed: {exc}", file=sys.stderr)
-            messages.pop()
-            continue
-        messages.append({"role": "assistant", "content": answer})
-        print(f"\n{agent_display_name(config)}> {answer}")
-
-    path = save_session(config, messages)
-    if path:
-        print(f"Session saved: {path}")
+    from nyanya_agent.bridge_policy import default_codex_workdir
+    from nyanya_agent.operation_service import OperationService
+    service = OperationService()
+    messages: list[dict[str, str]] = []
+    print(f"{agent_display_name(config)} — /exit, /reset, /save, /config, /settings, /dashboard")
+    print("recovery 미완료 목록 · why 작업ID 원인 · plan 변경안ID · approve 변경안ID hash")
+    try:
+        while True:
+            try:
+                prompt = input('You> ').strip()
+            except (EOFError, KeyboardInterrupt):
+                break
+            if not prompt:
+                continue
+            if prompt in {'/exit', '/quit'}:
+                break
+            if prompt == '/reset':
+                messages.clear()
+                print('대화 문맥을 초기화했습니다. 저장된 작업은 유지됩니다.')
+                continue
+            if prompt == '/save':
+                target = save_session(config, messages)
+                print(f'Saved: {target}' if target else 'Transcript saving is disabled.')
+                continue
+            if prompt == '/config':
+                from nyanya_agent.model_routing import PROFILES
+                print(json.dumps({k: vars(v) for k, v in PROFILES.items()}, ensure_ascii=False, indent=2))
+                continue
+            if prompt == '/settings':
+                print('Run nyanya config to manage settings. P0 operations use the fixed /config routing profiles.')
+                continue
+            if prompt == '/dashboard':
+                print(f"http://{os.getenv('NYANYA_DASHBOARD_HOST', '127.0.0.1')}:{os.getenv('NYANYA_DASHBOARD_PORT', '8765')}")
+                continue
+            try:
+                control = service.control(prompt, 'operator')
+                if control is not None:
+                    print(control)
+                    continue
+                # Session-local context is bounded and serialized with this request, never a callback.
+                context = json.dumps(messages[-6:], ensure_ascii=False)
+                context = context.encode('utf-8')[-12000:].decode('utf-8', errors='ignore')
+                request = prompt + ('\nPrevious conversation (untrusted context):\n' + context if messages else '')
+                task = service.submit(request, default_codex_workdir(), 'operator')
+                answer = service.wait(task['id'], 'operator')
+                messages.extend([{'role': 'user', 'content': prompt}, {'role': 'assistant', 'content': answer.text}])
+                print(answer.text)
+            except (ValueError, RuntimeError, OSError) as exc:
+                print(f'작업 처리 실패: {type(exc).__name__}', file=sys.stderr)
+    finally:
+        service.close()
+        target = save_session(config, messages)
+        if target:
+            print(f'Session saved: {target}')
     return 0
 
 
@@ -581,6 +593,9 @@ def main() -> int:
         config["save_transcripts"] = False
     if args.check:
         return check_backend(config)
+    if args.provider or args.model or args.base_url:
+        print("P0 execution uses recorded Flash/Luna/Astra profiles. Legacy provider/model/base-url overrides are supported only with --check.", file=sys.stderr)
+        return 2
     if args.prompt:
         return run_single_prompt(config, args.prompt)
     return run_repl(config)

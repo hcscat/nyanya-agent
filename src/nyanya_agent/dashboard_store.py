@@ -9,17 +9,16 @@ import datetime as dt
 from datetime import UTC, datetime
 import json
 import logging
-import os
 from pathlib import Path
 import re
 import sqlite3
 from typing import Any
 from uuid import uuid4
 
-from nyanya_agent import core as nyanya
+from nyanya_agent import database as db
 
 
-DEFAULT_DB_PATH = nyanya.STATE_ROOT / "data" / "nyanya_dashboard.db"
+DEFAULT_DB_PATH = db.resolve_db_path()
 LOGGER = logging.getLogger(__name__)
 PHASE_ORDER = ("planning", "design", "implementation", "test")
 PHASE_LABELS = {
@@ -50,203 +49,19 @@ def decode_json(value: str | None, fallback: Any = None) -> Any:
 
 
 def resolve_db_path(db_path: str | Path | None = None) -> Path:
-    raw = db_path or os.getenv("NYANYA_DASHBOARD_DB_PATH") or DEFAULT_DB_PATH
-    path = Path(raw).expanduser()
-    if not path.is_absolute():
-        path = nyanya.STATE_ROOT / path
-    return path.resolve(strict=False)
+    return db.resolve_db_path(db_path)
 
 
 @contextmanager
 def connect(db_path: str | Path | None = None) -> Iterable[sqlite3.Connection]:
-    path = resolve_db_path(db_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
-    try:
+    with db.connect(db_path) as conn:
         yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
 
-
-SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS agent_requests (
-  id TEXT PRIMARY KEY,
-  source TEXT NOT NULL DEFAULT 'discord',
-  guild_id TEXT NOT NULL DEFAULT '',
-  channel_id TEXT NOT NULL DEFAULT '',
-  channel_name TEXT NOT NULL DEFAULT '',
-  user_id TEXT NOT NULL DEFAULT '',
-  trigger TEXT NOT NULL DEFAULT '',
-  command TEXT NOT NULL DEFAULT '',
-  mode TEXT NOT NULL DEFAULT 'auto',
-  provider TEXT NOT NULL DEFAULT '',
-  model TEXT NOT NULL DEFAULT '',
-  prompt TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL DEFAULT 'received',
-  result_summary TEXT NOT NULL DEFAULT '',
-  error TEXT NOT NULL DEFAULT '',
-  prompt_tokens INTEGER,
-  completion_tokens INTEGER,
-  total_tokens INTEGER,
-  started_at TEXT,
-  ended_at TEXT,
-  duration_ms INTEGER,
-  metadata_json TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_agent_requests_created_at ON agent_requests(created_at);
-CREATE INDEX IF NOT EXISTS idx_agent_requests_status ON agent_requests(status);
-CREATE INDEX IF NOT EXISTS idx_agent_requests_source_channel ON agent_requests(source, channel_id);
-
-CREATE TABLE IF NOT EXISTS request_events (
-  id TEXT PRIMARY KEY,
-  request_id TEXT NOT NULL REFERENCES agent_requests(id) ON DELETE CASCADE,
-  event_type TEXT NOT NULL,
-  message TEXT NOT NULL DEFAULT '',
-  metadata_json TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_request_events_request_id ON request_events(request_id, created_at);
-
-CREATE TABLE IF NOT EXISTS projects (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  goal TEXT NOT NULL DEFAULT '',
-  owner TEXT NOT NULL DEFAULT 'operator',
-  status TEXT NOT NULL DEFAULT 'active',
-  health TEXT NOT NULL DEFAULT 'green',
-  current_phase TEXT NOT NULL DEFAULT 'planning',
-  next_action TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS project_phases (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  phase_key TEXT NOT NULL,
-  title TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'waiting',
-  summary TEXT NOT NULL DEFAULT '',
-  next_action TEXT NOT NULL DEFAULT '',
-  requires_confirmation INTEGER NOT NULL DEFAULT 0,
-  last_checked_at TEXT,
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  UNIQUE(project_id, phase_key)
-);
-
-CREATE INDEX IF NOT EXISTS idx_project_phases_project ON project_phases(project_id, sort_order);
-
-CREATE TABLE IF NOT EXISTS phase_checks (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  phase_key TEXT NOT NULL,
-  status TEXT NOT NULL,
-  finding TEXT NOT NULL DEFAULT '',
-  recommended_next_action TEXT NOT NULL DEFAULT '',
-  confirmation_required INTEGER NOT NULL DEFAULT 0,
-  discord_message TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_phase_checks_project ON phase_checks(project_id, created_at);
-
-CREATE TABLE IF NOT EXISTS audit_logs (
-  id TEXT PRIMARY KEY,
-  actor TEXT NOT NULL,
-  action TEXT NOT NULL,
-  entity_type TEXT NOT NULL,
-  entity_id TEXT NOT NULL,
-  detail_json TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS memory_items (
-  id TEXT PRIMARY KEY,
-  owner_key TEXT NOT NULL DEFAULT 'global',
-  memory_type TEXT NOT NULL,
-  title TEXT NOT NULL,
-  content TEXT NOT NULL,
-  importance REAL NOT NULL DEFAULT 0,
-  confidence REAL NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'pending',
-  source_request_id TEXT REFERENCES agent_requests(id) ON DELETE SET NULL,
-  evidence_count INTEGER NOT NULL DEFAULT 1,
-  explicit_score REAL NOT NULL DEFAULT 0,
-  frequency_score REAL NOT NULL DEFAULT 0,
-  outcome_score REAL NOT NULL DEFAULT 0,
-  correction_score REAL NOT NULL DEFAULT 0,
-  risk_score REAL NOT NULL DEFAULT 0,
-  recency_score REAL NOT NULL DEFAULT 0,
-  graph_score REAL NOT NULL DEFAULT 0,
-  retrieval_score REAL NOT NULL DEFAULT 0,
-  staleness_penalty REAL NOT NULL DEFAULT 0,
-  sensitivity TEXT NOT NULL DEFAULT 'normal',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  last_used_at TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_memory_items_status ON memory_items(status, updated_at);
-CREATE INDEX IF NOT EXISTS idx_memory_items_owner_type ON memory_items(owner_key, memory_type, importance);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_items_source_type_title
-  ON memory_items(COALESCE(source_request_id, ''), memory_type, title);
-
-CREATE VIRTUAL TABLE IF NOT EXISTS memory_items_fts USING fts5(
-  title,
-  content,
-  memory_type UNINDEXED,
-  owner_key UNINDEXED,
-  content='memory_items',
-  content_rowid='rowid'
-);
-
-CREATE TRIGGER IF NOT EXISTS memory_items_ai AFTER INSERT ON memory_items BEGIN
-  INSERT INTO memory_items_fts(rowid, title, content, memory_type, owner_key)
-  VALUES (new.rowid, new.title, new.content, new.memory_type, new.owner_key);
-END;
-
-CREATE TRIGGER IF NOT EXISTS memory_items_ad AFTER DELETE ON memory_items BEGIN
-  INSERT INTO memory_items_fts(memory_items_fts, rowid, title, content, memory_type, owner_key)
-  VALUES('delete', old.rowid, old.title, old.content, old.memory_type, old.owner_key);
-END;
-
-CREATE TRIGGER IF NOT EXISTS memory_items_au AFTER UPDATE ON memory_items BEGIN
-  INSERT INTO memory_items_fts(memory_items_fts, rowid, title, content, memory_type, owner_key)
-  VALUES('delete', old.rowid, old.title, old.content, old.memory_type, old.owner_key);
-  INSERT INTO memory_items_fts(rowid, title, content, memory_type, owner_key)
-  VALUES (new.rowid, new.title, new.content, new.memory_type, new.owner_key);
-END;
-
-CREATE TABLE IF NOT EXISTS memory_edges (
-  id TEXT PRIMARY KEY,
-  source_id TEXT NOT NULL REFERENCES memory_items(id) ON DELETE CASCADE,
-  target_id TEXT NOT NULL REFERENCES memory_items(id) ON DELETE CASCADE,
-  relation TEXT NOT NULL DEFAULT 'related_to',
-  weight REAL NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL,
-  UNIQUE(source_id, target_id, relation)
-);
-
-CREATE INDEX IF NOT EXISTS idx_memory_edges_source ON memory_edges(source_id);
-"""
 
 
 def init_db(db_path: str | Path | None = None) -> None:
-    with connect(db_path) as conn:
-        conn.executescript(SCHEMA_SQL)
+    from nyanya_agent import execution_store
+    execution_store.apply_migrations(db_path)
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -353,19 +168,6 @@ def create_agent_request(
     return request_id
 
 
-def _mirror_request_to_execution_ledger(
-    request_id: str,
-    *,
-    db_path: str | Path | None = None,
-) -> None:
-    try:
-        from nyanya_agent import execution_store
-
-        execution_store.mirror_legacy_request(request_id, db_path=db_path)
-    except Exception:
-        LOGGER.exception("Could not synchronize request %s to the execution ledger", request_id)
-
-
 def append_request_event_conn(
     conn: sqlite3.Connection,
     request_id: str,
@@ -417,6 +219,8 @@ def mark_request_status(
     init_db(db_path)
     timestamp = now_iso()
     with connect(db_path) as conn:
+        if conn.execute('SELECT 1 FROM agent_tasks t JOIN task_operations o ON o.task_id=t.id WHERE t.source_request_id=?', (request_id,)).fetchone():
+            return  # Operation ledger is the sole runtime write authority.
         current = conn.execute("SELECT * FROM agent_requests WHERE id = ?", (request_id,)).fetchone()
         if current is None:
             return
@@ -471,18 +275,18 @@ def list_requests(
         if status:
             data = rows(
                 conn,
-                "SELECT * FROM agent_requests WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+                "SELECT * FROM request_read_model WHERE status = ? ORDER BY created_at DESC LIMIT ?",
                 (status, limit),
             )
         else:
-            data = rows(conn, "SELECT * FROM agent_requests ORDER BY created_at DESC LIMIT ?", (limit,))
+            data = rows(conn, "SELECT * FROM request_read_model ORDER BY created_at DESC LIMIT ?", (limit,))
     return [parse_json_fields(item, ("metadata_json",)) for item in data]
 
 
 def get_request(request_id: str, *, db_path: str | Path | None = None) -> dict[str, Any] | None:
     init_db(db_path)
     with connect(db_path) as conn:
-        request = row_to_dict(conn.execute("SELECT * FROM agent_requests WHERE id = ?", (request_id,)).fetchone())
+        request = row_to_dict(conn.execute("SELECT * FROM request_read_model WHERE id = ?", (request_id,)).fetchone())
         if request is None:
             return None
         request = parse_json_fields(request, ("metadata_json",))
@@ -490,6 +294,12 @@ def get_request(request_id: str, *, db_path: str | Path | None = None) -> dict[s
             parse_json_fields(item, ("metadata_json",))
             for item in rows(conn, "SELECT * FROM request_events WHERE request_id = ? ORDER BY created_at ASC", (request_id,))
         ]
+        task = conn.execute('SELECT * FROM agent_tasks WHERE source_request_id=?', (request_id,)).fetchone()
+        if task:
+            request['status'] = task['status']
+            result = conn.execute('SELECT response FROM task_results WHERE execution_id=?', (task['current_execution_id'],)).fetchone()
+            if result:
+                request['result_summary'] = result['response']
         return request
 
 
@@ -736,7 +546,7 @@ def usage_series(period: str = "daily", limit: int = 30, *, db_path: str | Path 
                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
                    SUM(COALESCE(total_tokens, 0)) AS total_tokens,
                    AVG(duration_ms) AS avg_duration_ms
-            FROM agent_requests
+            FROM request_read_model
             GROUP BY bucket
             ORDER BY bucket DESC
             LIMIT ?
@@ -751,17 +561,17 @@ def dashboard_summary(*, db_path: str | Path | None = None) -> dict[str, Any]:
     with connect(db_path) as conn:
         status_counts = {
             row["status"]: row["count"]
-            for row in conn.execute("SELECT status, COUNT(*) AS count FROM agent_requests GROUP BY status").fetchall()
+            for row in conn.execute("SELECT status, COUNT(*) AS count FROM request_read_model GROUP BY status").fetchall()
         }
         today = datetime.now(UTC).strftime("%Y-%m-%d")
         today_count = conn.execute(
-            "SELECT COUNT(*) AS count FROM agent_requests WHERE substr(created_at, 1, 10) = ?",
+            "SELECT COUNT(*) AS count FROM request_read_model WHERE substr(created_at, 1, 10) = ?",
             (today,),
         ).fetchone()["count"]
         running = rows(
             conn,
             """
-            SELECT * FROM agent_requests
+            SELECT * FROM request_read_model
             WHERE status IN ('queued', 'running', 'received')
             ORDER BY created_at DESC
             LIMIT 8
@@ -770,7 +580,7 @@ def dashboard_summary(*, db_path: str | Path | None = None) -> dict[str, Any]:
         recent_failures = rows(
             conn,
             """
-            SELECT * FROM agent_requests
+            SELECT * FROM request_read_model
             WHERE status = 'failed'
             ORDER BY created_at DESC
             LIMIT 8
@@ -1024,7 +834,7 @@ def create_memory_item_conn(
 def extract_memory_candidates_from_requests(
     *,
     limit: int = 50,
-    owner_key: str = "global",
+    owner_key: str | None = None,
     db_path: str | Path | None = None,
 ) -> dict[str, Any]:
     init_db(db_path)
@@ -1034,8 +844,8 @@ def extract_memory_candidates_from_requests(
         candidates = rows(
             conn,
             """
-            SELECT id, prompt, result_summary, status, created_at
-            FROM agent_requests
+            SELECT id, prompt, result_summary, status, created_at, source, user_id
+            FROM request_read_model
             WHERE TRIM(prompt) != ''
               AND status IN ('completed', 'failed', 'cancelled')
             ORDER BY created_at DESC
@@ -1066,7 +876,7 @@ def extract_memory_candidates_from_requests(
                 continue
             memory_id = create_memory_item_conn(
                 conn,
-                owner_key=owner_key,
+                owner_key=owner_key or (f"{request['source']}-user:{request['user_id']}" if request["user_id"] else "operator:local"),
                 memory_type=memory_type,
                 title=title,
                 content=content,
@@ -1135,9 +945,7 @@ def search_approved_memories(
     db_path: str | Path | None = None,
 ) -> list[dict[str, Any]]:
     init_db(db_path)
-    owner_keys = ["global"]
-    if owner_key and owner_key not in owner_keys:
-        owner_keys.append(owner_key)
+    owner_keys = [owner_key or "operator:local"]
     max_limit = max(1, min(20, limit))
     fts_query = _fts_query(query)
     memories: list[dict[str, Any]] = []

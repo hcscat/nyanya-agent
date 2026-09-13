@@ -53,7 +53,7 @@ def test_codex_read_only_invocation_uses_nyanya_profile(monkeypatch):
 
     monkeypatch.setenv("NYANYA_CODEX_ENABLED", "true")
     monkeypatch.delenv("NYANYA_CODEX_PROFILE", raising=False)
-    monkeypatch.setattr(bridge_runtime, "resolve_executable", lambda value: "/usr/local/bin/codex")
+    monkeypatch.setattr(bridge_runtime, "resolve_codex_cli", lambda: "/usr/local/bin/codex")
     monkeypatch.setattr(
         bridge_runtime,
         "classify_request_risk",

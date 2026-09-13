@@ -107,11 +107,10 @@ function fmtDuration(value) {
 }
 
 async function api(path, options = {}) {
-  const method = String(options.method || "GET").toUpperCase();
-  const controlHeaders = method !== "GET" && state.controlToken ? { Authorization: `Bearer ${state.controlToken}` } : {};
+  const controlHeaders = state.controlToken ? { Authorization: `Bearer ${state.controlToken}` } : {};
   const response = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...controlHeaders, ...(options.headers || {}) },
     ...options,
+    headers: { "Content-Type": "application/json", ...controlHeaders, ...(options.headers || {}) },
   });
   if (!response.ok) {
     const body = await response.text();
@@ -774,7 +773,8 @@ $("unlockControlBtn").addEventListener("click", async () => {
   const previous = state.controlToken;
   state.controlToken = token.trim();
   try {
-    await api("/v1/recovery/reconcile", { method: "POST" });
+    await api("/v1/operations/incomplete");
+    await loadAll();
     $("unlockControlBtn").textContent = "제어 활성";
     $("unlockControlBtn").disabled = true;
   } catch (error) {
@@ -804,7 +804,7 @@ let operationReloadTimer = null;
 function setStreamStatus(connected) {
   const status = $("streamStatus");
   status.classList.toggle("offline", !connected);
-  status.textContent = connected ? "실시간 연결" : "재연결 중";
+  status.textContent = connected ? "5초 주기 갱신" : "연결·인증 확인";
 }
 
 function scheduleOperationReload() {
@@ -815,22 +815,26 @@ function scheduleOperationReload() {
 }
 
 function connectEventStream() {
-  state.eventSource?.close();
-  const source = new EventSource(`/v1/events/stream?cursor=${state.eventCursor}`);
-  state.eventSource = source;
-  source.onopen = () => setStreamStatus(true);
-  source.onerror = () => setStreamStatus(false);
-  source.addEventListener("ledger", (event) => {
-    const cursor = Number(event.lastEventId || 0);
-    if (Number.isFinite(cursor)) state.eventCursor = Math.max(state.eventCursor, cursor);
-    scheduleOperationReload();
-  });
+  // Authenticated polling also works through private proxies; no token in URLs.
+  window.clearInterval(state.eventPollTimer);
+  state.eventPollTimer = window.setInterval(async () => {
+    try {
+      const events = await api(`/v1/events?after_seq=${state.eventCursor}&limit=1000`);
+      for (const event of events) state.eventCursor = Math.max(state.eventCursor, Number(event.seq) || 0);
+      if (events.length) scheduleOperationReload();
+      setStreamStatus(true);
+    } catch {
+      setStreamStatus(false);
+    }
+  }, 5000);
 }
 
 setView(location.hash.replace("#", ""), { updateHash: false });
 
 loadAll().catch((error) => {
-  document.body.innerHTML = `<main class="workspace"><section class="panel"><h1>Load failed</h1><pre>${escapeHtml(error.message)}</pre></section></main>`;
+  setStreamStatus(false);
+  $("streamStatus").title = "조회에 인증이 필요하면 제어 활성 버튼에서 토큰을 입력하세요.";
+  console.error("Dashboard load failed", error.name);
 });
 
 connectEventStream();

@@ -32,10 +32,16 @@ def test_resolve_state_root_honors_explicit_home(tmp_path, monkeypatch):
 
 
 def test_dashboard_relative_db_path_uses_state_root(tmp_path, monkeypatch):
-    monkeypatch.setattr(dashboard_store.nyanya, "STATE_ROOT", tmp_path)
+    monkeypatch.setenv("NYANYA_HOME", str(tmp_path))
     monkeypatch.setenv("NYANYA_DASHBOARD_DB_PATH", "data/dashboard.db")
 
     assert dashboard_store.resolve_db_path() == (tmp_path / "data" / "dashboard.db").resolve(strict=False)
+    from nyanya_agent import database, execution_store
+    assert database.resolve_db_path() == execution_store.legacy.resolve_db_path() == dashboard_store.resolve_db_path()
+    with dashboard_store.connect() as conn:
+        conn.execute("CREATE TABLE fixture(id INTEGER)")
+    if __import__("os").name == "posix":
+        assert dashboard_store.resolve_db_path().stat().st_mode & 0o077 == 0
 
 
 def test_launchagent_uses_separate_code_and_state_paths(tmp_path, monkeypatch):

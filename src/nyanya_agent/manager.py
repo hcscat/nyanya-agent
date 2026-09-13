@@ -18,6 +18,7 @@ import urllib.request
 from typing import Any
 
 from nyanya_agent import core as nyanya
+from nyanya_agent.codex_cli import resolve_codex_cli
 
 
 nyanya.load_env(nyanya.DEFAULT_ENV)
@@ -93,18 +94,7 @@ def resolve_executable(command: str) -> str | None:
 
 def configured_codex_cli() -> str | None:
     load_env()
-    candidates = [
-        os.getenv("NYANYA_CODEX_CLI", "").strip(),
-        "codex",
-        str(CODEX_APP_PATH / "Contents" / "Resources" / "codex"),
-    ]
-    for candidate in candidates:
-        if not candidate:
-            continue
-        resolved = resolve_executable(candidate)
-        if resolved:
-            return resolved
-    return None
+    return resolve_codex_cli()
 
 
 def launch_environment() -> dict[str, str]:
@@ -375,12 +365,19 @@ def status_all() -> int:
 
 
 def check_config(*, include_backend: bool = True) -> int:
+    load_env()
     python = python_executable()
     commands = []
     if include_backend:
         commands.append([python, "-m", "nyanya_agent.core", "--check"])
     commands.append([python, "-m", "nyanya_agent.discord_bridge", "--check-config"])
     rc = 0
+    if os.getenv("NYANYA_CODEX_ENABLED", "").strip().lower() in {"1", "true", "yes", "y", "on"}:
+        ready = configured_codex_cli() is not None
+        print(f"codex_cli_ready={str(ready).lower()}")
+        if not ready:
+            print("Codex executable unavailable: check NYANYA_CODEX_CLI and service PATH.", file=sys.stderr)
+            rc = 1
     for command in commands:
         result = run(command, check=False)
         if result.stdout:
