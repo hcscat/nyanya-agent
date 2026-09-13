@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 import sqlite3
 
@@ -15,7 +16,7 @@ def test_versioned_migration_is_idempotent_and_events_are_append_only(tmp_path):
     first = store.schema_state(db_path)
     second = store.schema_state(db_path)
 
-    assert first["version"] == first["latest"] == 1
+    assert first["version"] == first["latest"] == 4
     assert second["migrations"] == first["migrations"]
 
     task = store.create_task(title="Build ledger", db_path=db_path)
@@ -26,6 +27,16 @@ def test_versioned_migration_is_idempotent_and_events_are_append_only(tmp_path):
             conn.execute("UPDATE execution_events SET message = 'changed' WHERE seq = ?", (event["seq"],))
 
     assert store.get_task(task["id"], db_path=db_path)["status"] == "queued"
+
+
+def test_concurrent_schema_bootstrap_is_serialized(tmp_path):
+    db_path = tmp_path / "ledger.db"
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        versions = list(executor.map(lambda _index: store.apply_migrations(db_path), range(12)))
+
+    assert versions == [4] * 12
+    assert store.schema_state(db_path)["version"] == 4
 
 
 def test_task_execution_lifecycle_and_status_projection(tmp_path):
@@ -49,6 +60,46 @@ def test_task_execution_lifecycle_and_status_projection(tmp_path):
     assert store.get_task(task["id"], db_path=db_path)["status"] == "completed"
     with pytest.raises(ValueError, match="Invalid execution transition"):
         store.transition_execution(execution["id"], "running", db_path=db_path)
+
+
+def test_projects_and_codex_sessions_are_linked_to_tasks(tmp_path):
+    db_path = tmp_path / "ledger.db"
+    project = store.create_project(
+        name="NyaNya",
+        owner="operator",
+        workspace_root=str(tmp_path / "workspace"),
+        db_path=db_path,
+    )
+    session = store.create_codex_session(
+        project_id=project["id"],
+        session_key="discord:operator:project",
+        name="Messenger Codex session",
+        model="codex-test",
+        db_path=db_path,
+    )
+    task = store.create_task(
+        title="Codex task",
+        project_id=project["id"],
+        codex_session_id=session["id"],
+        metadata={"api_key": "must not persist"},
+        db_path=db_path,
+    )
+
+    loaded = store.get_task(task["id"], db_path=db_path)
+    assert loaded["project_id"] == project["id"]
+    assert loaded["codex_session_id"] == session["id"]
+    assert loaded["metadata"]["api_key"] == "[REDACTED]"
+    assert store.get_project(project["id"], db_path=db_path)["task_count"] == 1
+    assert store.list_codex_sessions(project_id=project["id"], db_path=db_path)[0]["id"] == session["id"]
+
+    other = store.create_project(name="Other", db_path=db_path)
+    with pytest.raises(ValueError, match="does not belong"):
+        store.create_task(
+            title="Mismatched task",
+            project_id=other["id"],
+            codex_session_id=session["id"],
+            db_path=db_path,
+        )
 
 
 def test_approval_and_audit_metadata_are_redacted(tmp_path):
@@ -115,18 +166,14 @@ def test_heartbeat_reports_stale_and_offline_without_destroying_raw_status(tmp_p
     assert store.list_runtime_sessions(db_path=db_path)[0]["observed_status"] == "offline"
 
 
-def test_legacy_request_is_synchronized_on_status_change(tmp_path):
-    db_path = tmp_path / "ledger.db"
-    request_id = legacy.create_agent_request(prompt="legacy request", db_path=db_path)
-
+def test_legacy_import_is_one_way_and_never_overwrites_current_ledger(tmp_path):
+    db_path = tmp_path / 'ledger.db'
+    request_id = legacy.create_agent_request(prompt='legacy request', db_path=db_path)
+    legacy.mark_request_status(request_id, 'completed', result_summary='old result', db_path=db_path)
+    assert store.list_tasks(db_path=db_path) == []
+    assert store.reconcile_legacy_requests(db_path=db_path)['synchronized'] == 1
     task = store.list_tasks(db_path=db_path)[0]
-    assert task["source_request_id"] == request_id
-    assert task["status"] == "queued"
-
-    legacy.mark_request_status(request_id, "running", db_path=db_path)
-    legacy.mark_request_status(request_id, "completed", result_summary="ok", db_path=db_path)
-
-    task = store.get_task(task["id"], db_path=db_path)
-    assert task is not None
-    assert task["status"] == "completed"
-    assert task["executions"][0]["status"] == "succeeded"
+    assert task['source_request_id'] == request_id and task['status'] == 'completed'
+    legacy.mark_request_status(request_id, 'failed', db_path=db_path)
+    assert store.reconcile_legacy_requests(db_path=db_path)['synchronized'] == 0
+    assert store.get_task(task['id'], db_path=db_path)['status'] == 'completed'

@@ -38,9 +38,11 @@ def test_build_messages_allows_missing_agent_memory(tmp_path):
 
 
 def test_dynamic_memory_context_includes_approved_memory(tmp_path, monkeypatch):
+    monkeypatch.setenv("NYANYA_MEMORY_RETRIEVAL_ENABLED", "true")
     db_path = tmp_path / "dashboard.db"
     monkeypatch.setenv("NYANYA_DASHBOARD_DB_PATH", str(db_path))
     request_id = store.create_agent_request(
+        user_id="test",
         prompt="항상 파일공유 채널 일반 대화는 무시하고 업로드 명령만 처리한다.",
         db_path=db_path,
     )

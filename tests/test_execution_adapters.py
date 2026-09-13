@@ -2,13 +2,45 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import shlex
 import shutil
+import subprocess
 import sys
+import tempfile
 import time
 
 import pytest
 
 from nyanya_agent import execution_adapters as adapters
+
+
+@pytest.fixture
+def isolated_tmux_adapter():
+    real_tmux = shutil.which("tmux")
+    assert real_tmux is not None  # Only installation absence is skipped by callers.
+    # pytest's temp paths can exceed Unix socket limits, especially on macOS.
+    # A private directory also makes fixed session names safe across test runs.
+    with tempfile.TemporaryDirectory(prefix="nya-tm-", dir="/tmp") as directory:
+        socket = Path(directory) / "s"
+        wrapper = Path(directory) / "tmux"
+        command = [real_tmux, "-S", str(socket), "-f", "/dev/null"]
+        wrapper.write_text(
+            "#!/bin/sh\nunset TMUX TMUX_PANE\n"
+            + "exec " + shlex.join(command) + ' "$@"\n',
+            encoding="utf-8",
+        )
+        wrapper.chmod(0o700)
+        try:
+            yield adapters.TmuxAdapter(tmux_binary=str(wrapper))
+        finally:
+            # Always target only this fixture's server, including failed starts
+            # and assertions. An already-exited server is normal for short jobs.
+            subprocess.run(
+                [str(wrapper), "kill-server"],
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
 
 
 def wait_for_terminal(adapter, handle, timeout: float = 5.0):
@@ -57,9 +89,9 @@ def test_managed_subprocess_can_cancel_process_group(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux is not installed")
-def test_tmux_adapter_discovers_and_completes_session(tmp_path, monkeypatch):
+def test_tmux_adapter_discovers_and_completes_session(tmp_path, monkeypatch, isolated_tmux_adapter):
     monkeypatch.setattr(adapters, "is_allowed_workspace_path", lambda path: True)
-    adapter = adapters.TmuxAdapter()
+    adapter = isolated_tmux_adapter
     request = adapters.AdapterRequest(
         execution_id="tmux-adapter-test",
         command=(sys.executable, "-c", "print('tmux-ok')"),
@@ -155,7 +187,9 @@ def test_orca_adapter_uses_completion_marker(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux is not installed")
-def test_orca_adapter_falls_back_to_tmux_when_runtime_is_offline(tmp_path, monkeypatch):
+def test_orca_adapter_falls_back_to_tmux_when_runtime_is_offline(
+    tmp_path, monkeypatch, isolated_tmux_adapter
+):
     monkeypatch.setattr(adapters, "is_allowed_workspace_path", lambda path: True)
     fake_orca = tmp_path / "orca-offline"
     fake_orca.write_text(
@@ -166,7 +200,9 @@ exit 1
         encoding="utf-8",
     )
     fake_orca.chmod(0o755)
-    adapter = adapters.OrcaAdapter(binary=str(fake_orca), fallback_to_tmux=True)
+    adapter = adapters.OrcaAdapter(
+        binary=str(fake_orca), fallback_to_tmux=True, tmux_adapter=isolated_tmux_adapter
+    )
     request = adapters.AdapterRequest(
         execution_id="orca-fallback-test",
         command=(sys.executable, "-c", "print('fallback-ok')"),
@@ -199,3 +235,34 @@ def test_artifact_collector_rejects_escape_and_records_hash(tmp_path, monkeypatc
     assert len(evidence["sha256"]) == 64
     with pytest.raises(PermissionError):
         collector.inspect(outside)
+
+
+def test_restarted_adapter_does_not_signal_unowned_pid(monkeypatch):
+    adapter = adapters.ManagedSubprocessAdapter()
+    handle = adapters.AdapterHandle('subprocess', 'old', 'old', 123, '', '', '', '', '')
+    monkeypatch.setattr(adapters, '_pid_alive', lambda pid: True)
+    monkeypatch.setattr(adapters.os, 'killpg', lambda *args: pytest.fail('unowned PID signalled'))
+    observation = adapter.cancel(handle, grace_seconds=0)
+    assert observation.status == 'lost'
+    assert observation.running
+
+
+def test_permission_denied_is_not_reported_as_cancelled(monkeypatch):
+    class StillRunning:
+        def poll(self):
+            return None
+
+        def wait(self, timeout):
+            raise adapters.subprocess.TimeoutExpired('child', timeout)
+
+    adapter = adapters.ManagedSubprocessAdapter()
+    adapter._processes[123] = StillRunning()
+    handle = adapters.AdapterHandle('subprocess', 'owned', 'owned', 123, '', '', '', '', '')
+
+    def denied(*args):
+        raise PermissionError('fixture')
+
+    monkeypatch.setattr(adapters.os, 'killpg', denied)
+    observation = adapter.cancel(handle, grace_seconds=0)
+    assert observation.status == 'lost'
+    assert observation.running
