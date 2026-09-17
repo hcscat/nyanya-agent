@@ -1,20 +1,20 @@
-# Python 테스트 안내서 — 311개 케이스
+# Python 테스트 안내서 — 318개 케이스
 
-OPS-DEPLOY-01 후속 갱신, 2026-09-13.
+CI 의존성 제외 회귀 검사 후속 갱신, 2026-09-17.
 
 ## 테스트 수의 의미
 
-정확한 폴더 이름은 tests다. 현재 테스트 파일 28개, 테스트 함수 176개이며
-파라미터별 반복을 포함한 pytest 케이스는 311개다. conftest.py를 포함하면 Python 파일은 29개다.
+정확한 폴더 이름은 tests다. 현재 테스트 파일 28개, 테스트 함수 178개이며
+파라미터별 반복을 포함한 pytest 케이스는 318개다. conftest.py를 포함하면 Python 파일은 29개다.
 2026-09-12의 22개 파일/132개 함수/150개 케이스에 종료 14개 함수/24개 케이스,
 배포 안전성 16개 함수/36개 케이스, 패키지 7개 함수/11개 케이스와 표준입력 격리 1개 함수/2개 케이스를 추가했다.
-함수와 매개변수 조합 수는 Python AST로 정적 확인했다. 테스트 모듈을 import하거나 pytest를 실행하지 않았다.
-현재 호스트 전체 실행 결과는 **311 passed, upstream Starlette deprecation warning 1건**이다.
-이 문서 작업의 재실행 결과가 아니며, 합계는 기존 150 + 종료 24 + 배포 36 + 패키지 11 + 표준입력 2 + 접수 차단 10 + 공개 경계 78 = 311이다.
+2026-09-13까지의 검증은 **311 passed, upstream Starlette deprecation warning 1건**이었다.
+이번에는 node_modules의 Git 제외·강제 추가 차단·패키지 제외 7개 사례를 추가했다.
+합계는 기존 150 + 종료 24 + 배포 36 + 패키지 11 + 표준입력 2 + 접수 차단 10 + 공개 경계 85 = 318이다.
 이전의 111개는 2026-09-10 기준이고, P0 테스트 파일의 32개 함수/39개 케이스가 추가되었다.
 기존 일부 케이스는 callback/legacy 동기화 대신 새 worker/원장 계약을 검증하도록 바뀌었다.
 
-223은 제품 기능 수나 코드 커버리지 비율이 아니다. 실제 모델 호출은 pytest 밖에서
+테스트 케이스 수는 제품 기능 수나 코드 커버리지 비율이 아니다. 실제 모델 호출은 pytest 밖에서
 별도 임시 환경으로 확인했다. [P0 검증 문서](p0_execution_20260912.md)를 함께 본다.
 원래 TC-001–111 식별자는 유지하고 신규 P0 케이스는 별도 표에 입력별로 정리했다.
 
@@ -62,8 +62,8 @@ OPS-DEPLOY-01 후속 갱신, 2026-09-13.
 | [test_package_followup.py](../tests/test_package_followup.py) | 7 | 11 | 명시적 신뢰·개인정보 스캔·배포 파일과 링크 |
 | [test_model_stdin.py](../tests/test_model_stdin.py) | 1 | 2 | 열린 부모 파이프와 모델 표준입력 격리 |
 | [test_workspace_intake.py](../tests/test_workspace_intake.py) | 2 | 10 | 등록 누락·접수 실패 상태와 민감정보 차단 |
-| [test_publication_privacy.py](../tests/test_publication_privacy.py) | 4 | 78 | 비공개 파일의 설치·패키지 포함 차단과 공개 필수 파일 유지 |
-| **합계** | **176** | **311** | 공통 설정 파일 제외 |
+| [test_publication_privacy.py](../tests/test_publication_privacy.py) | 6 | 85 | 비공개 파일·설치 의존성의 Git/패키지 포함 차단과 공개 필수 파일 유지 |
+| **합계** | **178** | **318** | 공통 설정 파일 제외 |
 
 ## test_agent_memory.py — 3개
 
@@ -536,10 +536,28 @@ Ruff, TypeScript typecheck/build, JavaScript 구문 검사, release/privacy 검�
 
 | 식별자 | 입력·조건 | 기대 결과 | 구현 |
 |---|---|---|---|
-| TC-234–271 | PRIVATE_PATHS의 중첩 AGENTS, env 변형, 비공개 설정, 키, DB 백업, 보고서 등 38종 | 명시적으로 manifest에 넣어도 대상 폴더 생성 전 설치 복사 거부 | [test_private_manifest_rejected_before_any_copy](../tests/test_publication_privacy.py#L44) |
-| TC-272–309 | 같은 비공개 경로 38종을 패키지 파일 목록에 삽입 | 파일 내용을 읽지 않고 경로만으로 패키지 오류 반환 | [test_package_audit_rejects_same_private_paths_without_reading_them](../tests/test_publication_privacy.py#L55) |
-| TC-310 | 공개 env 예제, 일반 설정, launchd 템플릿, 제품 dashboard HTML, 소스와 설계 문서 | 공개 필수 파일은 설치 복사 및 패키지 검사 통과 | [test_required_public_templates_copy_and_pass_package_audit](../tests/test_publication_privacy.py#L64) |
-| TC-311 | Python isolated mode, PYTHONPATH 없이 패키지 검사 실행 | 독립 검사 도구 정상 실행 및 빈 검사 결과 파일 생성 | [test_package_checker_runs_standalone_without_pythonpath](../tests/test_publication_privacy.py#L76) |
+| TC-234–271 | PRIVATE_PATHS의 중첩 AGENTS, env 변형, 비공개 설정, 키, DB 백업, 보고서 등 38종 | 명시적으로 manifest에 넣어도 대상 폴더 생성 전 설치 복사 거부 | [test_private_manifest_rejected_before_any_copy](../tests/test_publication_privacy.py#L69) |
+| TC-272–309 | 같은 비공개 경로 38종을 패키지 파일 목록에 삽입 | 파일 내용을 읽지 않고 경로만으로 패키지 오류 반환 | [test_package_audit_rejects_same_private_paths_without_reading_them](../tests/test_publication_privacy.py#L80) |
+| TC-310 | 공개 env 예제, 일반 설정, launchd 템플릿, 제품 dashboard HTML, 소스와 설계 문서 | 공개 필수 파일은 설치 복사 및 패키지 검사 통과 | [test_required_public_templates_copy_and_pass_package_audit](../tests/test_publication_privacy.py#L89) |
+| TC-311 | Python isolated mode, PYTHONPATH 없이 패키지 검사 실행 | 독립 검사 도구 정상 실행 및 빈 검사 결과 파일 생성 | [test_package_checker_runs_standalone_without_pythonpath](../tests/test_publication_privacy.py#L101) |
 
-최신 공개 경계 후속 검증: 전체 311 passed, upstream 경고 1건. 위 233개 검증
+2026-09-13 공개 경계 후속 검증: 전체 311 passed, upstream 경고 1건. 위 233개 검증
 기록은 이전 단계이며, 이번 변경에서 78개 경로·설치·패키지 회귀 사례를 추가했다.
+
+### CI 의존성 경계 후속 검사 — 2026-09-17
+
+기존 TC 식별자는 유지한다. PRIVATE_PATHS에 두 의존성 경로를 추가했으며
+기존 복사·패키지 파라미터 검사가 각각 38개에서 40개로 증가했다.
+
+| 식별자 | 입력·조건 | 기대 결과 | 구현 |
+|---|---|---|---|
+| TC-312–313 | root/nested node_modules 파일을 설치 manifest에 명시 | 대상 생성 전에 설치 복사 거부 | [설치 경계 검사](../tests/test_publication_privacy.py) |
+| TC-314–315 | 같은 두 경로를 npm 패키지 파일 목록에 삽입 | 파일을 읽기 전에 금지 경로 오류 | [패키지 경계 검사](../tests/test_publication_privacy.py) |
+| TC-316 | 전역/시스템 Git 설정과 로컬 제외 목록이 없는 새 저장소에 root/nested 의존성 생성 | 공유 .gitignore만으로 미추적 공개 후보에서 제외 | [Git 제외 회귀 검사](../tests/test_publication_privacy.py) |
+| TC-317–318 | 개인정보 패턴이 없는 root/nested 의존성 파일을 git add -f로 강제 스테이징 | 실제 verify_release.sh가 추적 금지 경로를 보고하고 실패 | [배포 검사 회귀 사례](../tests/test_publication_privacy.py) |
+
+임시 저장소에서 Git과 Bash 배포 검사를 실제 실행한다. 설치 서버에 생성된
+미추적 node_modules와 Git에 추가된 파일을 구분한다. 개인정보 검사 자체를
+완화하거나 추적된 의존성 내용을 무조건 건너뛰는 동작은 추가하지 않았다.
+
+이번 후속 변경의 실제 전체 실행: `PYTHONPATH=src .venv/bin/python -m pytest -q tests` → **318 passed**, upstream Starlette 경고 1건. Ruff 및 전체 release/privacy/package 검사도 통과했다.

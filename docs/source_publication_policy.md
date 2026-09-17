@@ -122,6 +122,22 @@ git diff --cached | rg -n "<token, private-id, public-ip, local-db patterns>" ||
 
 Expected result: no runtime DB, logs, downloads, sessions, run files, `.env`, or real user workspace mapping files are staged.
 
+## Installed Dependency Boundary
+
+Keep `node_modules/` out of Git and release assets, including nested copies.
+Commit `package.json` and `package-lock.json`; CI recreates dependencies with
+`npm ci`. The shared `.gitignore` must provide this exclusion without relying
+on a developer's global excludes or local `.git/info/exclude`.
+
+Ignore rules do not remove already tracked files. The release denylist must also
+reject dependency files added with `git add --force`, even when their contents
+contain no recognizable secret. Package and source-copy checks independently
+reject dependency paths selected by an overbroad manifest.
+
+A path reported by the worktree privacy scan is not evidence that it was pushed:
+the scan includes public untracked candidates as well as tracked files. Check the
+Git index, outgoing history, and package file list separately when investigating.
+
 ## Portable AGENTS Privacy Policy
 
 Project `AGENTS.md` and `AGENTS.override.md`, including nested copies, are local
