@@ -1,5 +1,9 @@
 # External Dashboard Access
 
+Status (2026-09-21): external access and its server/database/hosting setup are
+deferred. This document preserves reference options; the current review does
+not authorize configuring them or establish any live tunnel state.
+
 ## Security boundary
 
 The dashboard should remain bound to loopback:
@@ -12,9 +16,11 @@ NYANYA_DASHBOARD_PORT=8765
 This prevents direct access from the LAN or public internet. Remote access should
 arrive through a private network or an authenticated reverse proxy.
 
-The dashboard control token protects mutating API routes. Read-only operational
-data must still be protected by the network access layer because it can reveal
-tasks, execution state, artifacts, or project information.
+The dashboard control token protects mutating APIs and remote/forwarded `/v1/`
+reads. Keep the network access layer as well: a proxy login does not replace
+application authorization. Local loopback reads, health and static assets are
+not permission to expose operational information publicly. The browser sends
+the token in headers and polls events every five seconds.
 
 ## Recommended choices
 

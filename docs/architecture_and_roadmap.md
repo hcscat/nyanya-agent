@@ -1,88 +1,90 @@
 # NyaNya Agent Architecture and Roadmap
 
-2026-09-12 follow-up: [P0 execution contracts and verification](p0_execution_20260912.md)
-supersede earlier callback-only execution, general-file write-hold and legacy mirroring
-statements for normal terminal/Discord operations. Retain historical verification
-and remaining delivery/session/platform limitations; source changes are not deployment.
-
-
-> Current implementation update (2026-09-10): [CORE-STAB-01](core_stabilization_20260910.md) records schema-v3 claims/results, manual recovery holds, typed outcomes and the remaining worker/approval/migration gaps. Older phase descriptions below are design/history where they conflict with that update. This is not a stable-release or live-acceptance declaration.
+Reviewed 2026-09-21 against source commit `bb8774b`. See
+[development status](development_status.md) for the four-batch review and
+[P0 contracts](p0_execution_20260912.md) for detailed execution limits.
 
 ## Product boundary
 
-NyaNya Agent is a local-first Python **Local Control Plane**. It accepts
-terminal or connector requests, applies workspace and approval policy, routes
-approved work to configured runtimes, and records operational state in one
-SQLite execution ledger.
-
-It is not a replacement for Codex, Antigravity, tmux, Tailscale, or an LLM
-runtime. Those systems remain independent behind explicit adapters. Orca is not
-part of the current product direction.
+NyaNya Agent is a single-operator, local-first Python **Local Control Plane**.
+Terminal and Discord are the primary request interfaces. The dashboard is a
+lower-priority local monitoring and authenticated management surface.
+Codex, Antigravity, tmux and model runtimes remain independent systems. Orca is
+excluded from the product direction. Telegram remains compatibility code.
 
 ## Component ownership
 
 | Component | Responsibility |
 |---|---|
-| Python runtime | Provider calls, bridge policy, queues, execution adapters, memory, and dashboard API |
-| TypeScript CLI | Setup, configuration, diagnostics, state backup, service management, and Python entrypoints |
-| SQLite control plane | Tasks, executions, events, approvals, artifacts, leases, projects, Codex sessions, and host observations |
-| Discord bridge | Current authenticated request intake, progress replies, commands, and controlled file delivery |
-| Terminal CLI | Local synchronous facade over the same durable task service |
-| Dashboard | Lower-priority local monitoring and authenticated management surface |
-| External runtimes | Codex, Antigravity, tmux, and local model execution |
+| Python runtime | Workspace policy, operations, file plans, model calls, memory and dashboard API |
+| TypeScript CLI | Installation, configuration, diagnostics, backup and service management |
+| SQLite | Authoritative operation/task/execution state, approvals, results, events and apply journal |
+| OperationService | Validate intake, supervise an on-demand worker and watch saved results |
+| Dedicated operation worker | Claim serialized operations and execute a bounded thread pool |
+| Discord bridge | Authenticated intake, workspace ownership, commands and result/file delivery |
+| Dashboard | Local FastAPI/static UI, authenticated operations API and event polling |
+| Compatibility services | Upload callbacks, legacy request/project records and memory extraction |
 
-## Request lifecycle
+## Normal request lifecycle
 
-1. A request enters through the terminal or an enabled connector.
-2. The task service resolves or creates the workspace project and writes one
-   durable `agent_tasks` row before calling an external provider or CLI.
-3. Policy assigns risk, approval requirements, and an execution adapter.
-4. The task service creates/adopts one current `executions` row and records
-   append-only events, queue status, cancellation, and terminal evidence.
-5. A Codex-routed task is linked to a project-scoped `codex_sessions` record.
-6. The dashboard reads the ledger for monitoring and authenticated control.
-7. Legacy request/project tables remain compatibility projections until a later
-   migration removes the dual-store boundary.
+1. Resolve the registered workspace and authenticated owner.
+2. Persist a validated request OperationSpec and task before model execution.
+3. A dedicated worker atomically claims work; concurrency defaults to two.
+4. Flash assesses importance, impact and complexity; the selected Flash/Luna/Astra
+   profile returns a summary and optional file plan from a bounded snapshot.
+5. Create new files exclusively in a task directory. Existing-file modification
+   or deletion waits for exact owner/plan/hash/expiry-bound approval.
+6. Apply with ownership, workspace and file preimage checks, a workspace lock
+   and a journal. Commit task/result/event state atomically.
+7. Attempt connector delivery; retain results independently of delivery success.
+   Interrupted work stays held for explicit review, resume or reconciliation.
 
-## Current implemented baseline
+Parallelism currently means independent operations, not decomposition of one
+request into collaborating agents. A failed worker is not automatically replaced
+to replay old work. Detailed limits are in the P0 contract.
 
-- npm-distributed TypeScript CLI with a managed Python environment
-- Discord bridge as the current supported connector; Telegram remains optional
-- plan-first approval for side-effecting requests
-- per-user queue and task-status commands
-- SQLite dashboard, projects, phase tracking, and approved memory retrieval
-- task, execution, event, approval, artifact, writer-lease, project, and
-  Codex-session ledger
-- common durable task service used by terminal and Discord execution paths
-- subprocess, tmux, Codex, and Antigravity adapters; Orca is excluded from the
-  default registry
-- SSE dashboard updates, cancellation, retry, and recovery reconciliation
-- backup, restore, LaunchAgent, release, and privacy validation tooling
+## Implemented baseline and boundaries
 
-## Near-term roadmap
+- Schema v4 and normal terminal/Discord/authenticated API operations use the
+  serializable worker path. Legacy upload callbacks remain separate.
+- Reviewed UTF-8 regular-file creation/modification/deletion is implemented on
+  supported POSIX systems. Binary edits, directory moves/deletion and Windows
+  file apply are outside the supported contract.
+- Model routing records scores and selection. It is not resource-aware scheduling
+  and does not establish that a configured model is available in every install.
+- Dashboard updates use authenticated polling every five seconds. The SSE API
+  remains available, but the current browser does not use it.
+- Logical project/session tables, legacy memory extraction and owner-scoped
+  retrieval helpers exist. Normal Discord operations do not inject prior
+  conversation or approved memory; the terminal REPL embeds bounded in-process
+  history. Durable context integration remains unfinished.
+- Installation, backup/restore, packaging/privacy checks and CI exist. Automated
+  checks are separate from live Discord and operational acceptance.
 
-1. Replace legacy request/project synchronization with ledger-backed projections.
-2. Complete live backend and Discord acceptance tests after authentication.
-3. Add local-model profiles that separate public aliases from private model paths
-   and collect measured VRAM/GPU/CPU/resource evidence.
-4. Add model-routing policy and persist complexity/importance decisions.
-5. Add a private Tailscale transport and a second Mac mini worker only after
-   host authorization, credential, and recovery design is reviewed.
-6. Exercise backup, restore, restart, cancellation, and failed-adapter recovery
-   as repeatable operational drills.
+## Next priorities
 
-## Deferred remote work
+1. Complete live Discord acceptance for a fresh result, approved file change,
+   held restart recovery and independent concurrent requests.
+2. DELIVERY-01: durable inbox deduplication, delivery destinations, outbox retry
+   and receipts; handle send-success/receipt-write failure explicitly.
+3. CONTEXT-01: explicit project/session selection, request-relevant snapshot
+   selection and owner/project-scoped memory in the normal operation path.
+4. Complete legacy memory/project read-model migration with upgrade/restore
+   evidence before removing compatibility storage.
+5. Design bounded single-request decomposition only after delivery/context
+   contracts are reliable. Add resource/latency/cost scheduling when measured.
 
-Mac-to-Mac networking, remote worker operation, SSH hardening, public port
-removal, and Wake-on-LAN relay remain deferred until the operator starts the
-remote-host project. Tailscale is an acceptable future private transport; it is
-not configured by this repository yet. The private remote-access plan is
-intentionally excluded from Git.
+## Deferred work
+
+External dashboard access and its server/database/hosting setup are deferred by
+the operator as of 2026-09-21. The [access guide](external_dashboard_access.md)
+is reference material, not a deployment instruction for the current phase.
+Remote hosts, credential/host enrollment, broader connectors and npm publishing
+remain separate work. Wiki and Release Notes publication also remain separate.
 
 ## Non-goals
 
-- unrestricted autonomous writes
-- public unauthenticated dashboard exposure
-- credential synchronization between hosts
-- open-ended bot-to-bot conversation loops
-- replacing mature terminal, worktree, VPN, or model runtimes
+- unrestricted autonomous writes or public unauthenticated controls;
+- credential synchronization or shared SQLite files between hosts;
+- open-ended bot-to-bot conversations;
+- replacing independent terminal, VPN or model runtimes.

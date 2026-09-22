@@ -17,6 +17,12 @@ It is designed for a single-operator workspace that needs:
 
 Korean guide: [README.KO.md](README.KO.md)
 
+Current completion, limitations and verification: [development status](docs/development_status.md).
+
+For a workspace with separate installed and development copies, run Git and
+development checks from the `source` checkout. See
+[development isolation](docs/installation_and_distribution.md#separate-an-operational-workspace-from-development).
+
 ## P0 execution update (2026-09-12)
 
 Normal terminal/Discord requests now use serialized operations and a dedicated
@@ -42,7 +48,10 @@ src/nyanya_agent/bridge_constants.py  # command names and routing keyword tables
 src/nyanya_agent/bridge_policy.py     # workspace, command, and safety policy helpers
 src/nyanya_agent/bridge_runtime.py    # Codex delegation and runtime helpers
 src/nyanya_agent/bridge_store.py      # conversation context and durable task service
-src/nyanya_agent/task_service.py      # SQLite-backed task queue and execution lifecycle
+src/nyanya_agent/task_service.py      # compatibility callback task service
+src/nyanya_agent/operation_service.py # normal serialized request/control facade
+src/nyanya_agent/operation_worker.py  # dedicated worker and bounded concurrency
+src/nyanya_agent/reviewed_changes.py  # immutable file plans, approved apply and journal
 src/nyanya_agent/dashboard_store.py   # SQLite dashboard/event store
 src/nyanya_agent/execution_store.py   # versioned task/execution/approval ledger
 src/nyanya_agent/execution_adapters.py # subprocess, tmux, Codex, and Antigravity adapters
@@ -213,30 +222,35 @@ Useful Discord commands:
 |---|---|
 | `!nyanya status` | Show bridge runtime status. |
 | `!nyanya config` | Show non-secret runtime configuration. |
-| `!nyanya reset` | Reset the conversation context for the current user/channel. |
-| `!nyanya save` | Save the current conversation session when session saving is enabled. |
+| `!nyanya reset` | Reset legacy conversation context; normal operations do not consume it yet. |
+| `!nyanya save` | Save legacy context when enabled; not external Codex session persistence. |
 | `!nyanya resources` | Show local system resource information. |
 | `!nyanya tasks` | Show the current user's pending, running, and queued tasks. |
 | `!nyanya tasks all` | Show all users' tasks. Admin only. |
 | `!nyanya upload <file_path>` | Upload a local workspace file. Outside a configured file-share channel, the file is sent to `NYANYA_DISCORD_FILE_SHARE_CHANNEL_IDS`. |
-| `!nyanya gemini <prompt>` | Send a prompt directly through the configured Google/Gemini-style backend. |
-| `!nyanya codex <prompt>` | Delegate review or investigation work to Codex. |
-| `!nyanya codex-work <prompt>` | Return a review hold for file/code-changing work; direct write delegation is disabled. |
+| `!nyanya gemini <prompt>` | Assess with Flash and execute with the Flash profile. |
+| `!nyanya codex <prompt>` | Assess with Flash and execute with the Luna/Codex profile. |
+| `!nyanya codex-work <prompt>` | Use Luna/Codex to propose changes; existing-file apply needs exact plan approval. |
 | `!nyanya cancel` | Cancel the current user's queued/running task. |
 
 Long-running task visibility:
 
-- the first reply is an operational plan and current queue state;
-- worker start, routing, and backend delegation are sent as progress messages;
-- `NYANYA_TASK_PROGRESS_INTERVAL_SECONDS` controls heartbeat updates while a backend or Codex task is still running;
-- `NYANYA_TASK_START_DELAY_SECONDS` leaves a short delay before worker execution so the plan reply appears first in chat.
+- intake returns a task ID and planned stages, and a watcher attempts to send the saved result;
+- use `tasks`, `why <task-id>`, `recovery`, and `result <task-id>` to inspect work;
+- intermediate heartbeat delivery and acknowledgment-before-result ordering are not
+  guaranteed by the normal operation path; legacy progress/delay settings do not control it;
+- durable delivery retry after restart remains follow-up work.
 
 Important work policy:
 
-- file creation, editing, deletion, moves, permission changes, system settings, network settings, installs, deploys, and other external side effects are treated as higher-risk work;
-- higher-risk requests return a plan first and require explicit approval before execution;
-- work outside trusted roots but still inside allowed roots uses stricter risk scoring;
-- web or third-party material that appears to contain hidden prompt-like instructions is treated as untrusted and reported instead of followed.
+- work stays within the registered workspace and uses a bounded disposable snapshot;
+- new UTF-8 files may be created exclusively in task directories;
+- existing-file edits/deletes require `plan`, optional `plan-file`, then exact
+  `approve <plan-id> <plan-hash>`; approval words alone grant no authority;
+- arbitrary shell, installs, deployment, permission changes and directory moves
+  are not supported operations in the normal file-plan path;
+- external text remains untrusted; snapshot filtering and CLI sandbox options
+  are not a complete secret detector or host security boundary.
 
 File upload behavior:
 
@@ -276,7 +290,7 @@ The dashboard is split into five screens:
 | Screen | Purpose | Main contents |
 |---|---|---|
 | Main | Current operational state | Total requests, today's requests, running queue, failures, phase confirmations. |
-| Agent Office | Execution control-plane observation | Hosts, agents, tasks, executions, approvals, 2D state zones, and SSE updates. |
+| Agent Office | Execution control-plane observation | Hosts, agents, tasks, executions, approvals, 2D state zones, and authenticated five-second polling. |
 | Projects | Project and phase operation | Project creation, goal entry, phase cards, phase checks. |
 | Memory | Long-term memory review | Pending/approved memory candidates, memory graph, technology graph. |
 | Stats | Historical analysis | Usage trend, request ledger, audit log. |
@@ -290,11 +304,13 @@ Version `0.3.0` preserves the legacy `agent_requests` contract and adds versione
 - `runtime_sessions` and append-only `execution_events`;
 - `approvals`, `artifacts`, and fenced `writer_leases`.
 
-Terminal and Discord external work is submitted through `task_service.py`,
-which creates or adopts the durable task before provider/Codex execution. The
-dashboard is primarily for monitoring and authenticated management.
+Normal terminal and Discord requests use `operation_service.py` and a dedicated
+worker with stored OperationSpec data. Legacy upload callbacks still use
+`task_service.py`. The dashboard is primarily for monitoring and authenticated management.
 
-Read APIs are available through the localhost dashboard. Mutating approval, cancellation, retry, and recovery APIs fail closed unless `NYANYA_DASHBOARD_CONTROL_TOKEN` or an owner-only token file is configured. Tokens are never placed in URLs, HTML, logs, or Git.
+Remote/forwarded read APIs and mutating control APIs require
+`NYANYA_DASHBOARD_CONTROL_TOKEN` or an owner-only token file. Tokens are never
+placed in URLs, HTML, logs, or Git. Local loopback reads do not imply public access.
 
 ```text
 GET  /v1/hosts
@@ -304,13 +320,20 @@ GET  /v1/execution-projects
 GET  /v1/execution-projects/{id}/codex-sessions
 GET  /v1/executions
 GET  /v1/approvals
+GET  /v1/events
 GET  /v1/events/stream
+POST /v1/operations
+POST /v1/operations/control
 POST /v1/approvals/{approval_id}/decision
 POST /v1/executions/{execution_id}/cancel
 POST /v1/recovery/reconcile
 ```
 
-Discord/terminal direct write requests are held for review; approval words do not authorize execution. Codex inspection is forced read-only. The separate low-level coordinator binds one-use write approval to actor, task, exact command scope and expiry, with a writer lease. This is not yet a file-by-file reviewed apply workflow. Antigravity sandbox behavior still requires live acceptance. See the [stabilization handoff](docs/core_stabilization_20260910.md).
+File-by-file reviewed apply is implemented for supported POSIX UTF-8 regular files.
+Approval binds the owner, immutable plan hash and expiry; file preimages and worker
+ownership are rechecked at apply time. Interrupted effects require reconciliation.
+`POST /v1/tasks` creates a draft, while `/v1/operations` submits executable work.
+See the [P0 contract](docs/p0_execution_20260912.md) for limits and commands.
 
 Execution adapters cover managed subprocesses, tmux, Codex, and Antigravity.
 Orca is not in the current default adapter registry or product direction.
@@ -361,7 +384,9 @@ If a phase has a `next_action`, the check result becomes `needs_confirmation` an
 
 ## Long-Term Memory
 
-NyaNya has two memory layers:
+The compatibility memory subsystem has two layers. Normal Discord operations do
+not yet inject these memories or previous conversation turns. The terminal REPL
+embeds a bounded in-process history; this is not durable session continuation.
 
 | Layer | Purpose | Storage |
 |---|---|---|
@@ -370,13 +395,15 @@ NyaNya has two memory layers:
 
 Dynamic memory flow:
 
-1. Discord, Telegram, CLI, or dashboard requests are recorded in SQLite.
-2. The memory worker scans terminal requests.
+1. Requests with legacy connector envelopes enter the request read model.
+2. The memory worker scans completed envelopes; terminal/dashboard/Telegram
+   operations without envelopes are not included in this extraction source.
 3. Rule-based extraction creates `pending` memory candidates.
 4. Sensitive content is redacted or skipped.
 5. Optional LLM refinement can be enabled for important candidates.
 6. The dashboard can approve or reject candidates.
-7. Only `approved` and non-sensitive memories are retrieved for future prompts.
+7. Compatibility retrieval helpers use approved, non-sensitive, owner-scoped
+   memories. Connecting them to normal operations remains follow-up work.
 
 Run the worker once:
 
@@ -463,7 +490,7 @@ Core guardrails:
 - per-user task queue,
 - plan-first approval for higher-risk work,
 - SQLite request/audit ledger,
-- approved-only memory retrieval,
+- approved-only, owner-scoped compatibility memory retrieval,
 - local `.env` secrets,
 - optional Codex sandbox settings.
 
@@ -487,12 +514,13 @@ NYANYA_DASHBOARD_HOST=127.0.0.1
 NYANYA_DASHBOARD_PORT=8765
 ```
 
-Recommended order for remote access:
+External access and server/database/hosting setup are deferred as of 2026-09-21.
+The following choices are reference material for a later authorized task:
 
 1. Keep it local-only when possible.
 2. Use Tailscale Serve for private device access.
 3. Use Cloudflare Tunnel plus Access for a controlled public hostname.
-4. Use raw router port forwarding only with TLS, authentication, and a reverse proxy.
+4. Raw router port forwarding is not an approved deployment mode.
 
 Do not expose the FastAPI dashboard directly to the public internet without authentication.
 
@@ -501,7 +529,7 @@ Do not expose the FastAPI dashboard directly to the public internet without auth
 Run unit tests:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m pytest -q
+PYTHONPATH=src .venv/bin/python -m pytest -q tests
 ```
 
 Run focused dashboard lint:

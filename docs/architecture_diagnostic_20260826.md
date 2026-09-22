@@ -47,7 +47,7 @@ services and public npm version.
 
 Verified snapshot:
 
-- Branch `main` matched `origin/main` at commit `historical source baseline` during review.
+- Branch `main` matched `origin/main` at commit `52a1bb5` during review.
 - `package.json` and public npm both reported version `0.3.0`.
 - Discord bridge, dashboard, and memory worker were running.
 - Dashboard health returned `status=ok` on its local endpoint.

@@ -1,16 +1,20 @@
-# Python 테스트 안내서 — 318개 케이스
+# Python 테스트 안내서 — 327개 케이스
 
-CI 의존성 제외 회귀 검사 후속 갱신, 2026-09-17.
+개발/운영 환경 분리 회귀 검사 후속 갱신, 2026-09-22.
+
+2026-09-21 재검토에서도 318개가 통과했다. 새로 확인한 결함과 수용 검증 공백은
+[개발 현황](development_status.md)에 기록했다. 테스트 수를 기능 완성률로 해석하지 않는다.
 
 ## 테스트 수의 의미
 
-정확한 폴더 이름은 tests다. 현재 테스트 파일 28개, 테스트 함수 178개이며
-파라미터별 반복을 포함한 pytest 케이스는 318개다. conftest.py를 포함하면 Python 파일은 29개다.
+정확한 폴더 이름은 tests다. 현재 테스트 파일 29개, 테스트 함수 186개이며
+파라미터별 반복을 포함한 pytest 케이스는 327개다. conftest.py를 포함하면 Python 파일은 30개다.
+2026-09-22에 개발 환경 분리용 8개 함수/9개 케이스를 추가했다.
 2026-09-12의 22개 파일/132개 함수/150개 케이스에 종료 14개 함수/24개 케이스,
 배포 안전성 16개 함수/36개 케이스, 패키지 7개 함수/11개 케이스와 표준입력 격리 1개 함수/2개 케이스를 추가했다.
 2026-09-13까지의 검증은 **311 passed, upstream Starlette deprecation warning 1건**이었다.
-이번에는 node_modules의 Git 제외·강제 추가 차단·패키지 제외 7개 사례를 추가했다.
-합계는 기존 150 + 종료 24 + 배포 36 + 패키지 11 + 표준입력 2 + 접수 차단 10 + 공개 경계 85 = 318이다.
+2026-09-17에는 node_modules의 Git 제외·강제 추가 차단·패키지 제외 7개 사례를 추가했다.
+합계는 기존 150 + 종료 24 + 배포 36 + 패키지 11 + 표준입력 2 + 접수 차단 10 + 공개 경계 85 + 개발 격리 9 = 327이다.
 이전의 111개는 2026-09-10 기준이고, P0 테스트 파일의 32개 함수/39개 케이스가 추가되었다.
 기존 일부 케이스는 callback/legacy 동기화 대신 새 worker/원장 계약을 검증하도록 바뀌었다.
 
@@ -43,6 +47,7 @@ CI 의존성 제외 회귀 검사 후속 갱신, 2026-09-17.
 | [test_codex_cli_resolution.py](../tests/test_codex_cli_resolution.py) | 9 | 14 | Codex 실행 파일·OS 오류 |
 | [test_dashboard_execution_api.py](../tests/test_dashboard_execution_api.py) | 3 | 3 | FastAPI 작업·승인·조회 |
 | [test_dashboard_store.py](../tests/test_dashboard_store.py) | 3 | 3 | 요청·프로젝트 집계 |
+| [test_dev_environment.py](../tests/test_dev_environment.py) | 8 | 9 | 개발 설정·가상환경·명령 경계·비공개 상태 복사 차단 |
 | [test_distribution_safety.py](../tests/test_distribution_safety.py) | 3 | 3 | 공개 파일 복사·설치 |
 | [test_execution_adapters.py](../tests/test_execution_adapters.py) | 10 | 10 | 실행 adapter·산출물 |
 | [test_execution_runtime.py](../tests/test_execution_runtime.py) | 3 | 3 | 실행 조정·승인·취소 |
@@ -63,7 +68,26 @@ CI 의존성 제외 회귀 검사 후속 갱신, 2026-09-17.
 | [test_model_stdin.py](../tests/test_model_stdin.py) | 1 | 2 | 열린 부모 파이프와 모델 표준입력 격리 |
 | [test_workspace_intake.py](../tests/test_workspace_intake.py) | 2 | 10 | 등록 누락·접수 실패 상태와 민감정보 차단 |
 | [test_publication_privacy.py](../tests/test_publication_privacy.py) | 6 | 85 | 비공개 파일·설치 의존성의 Git/패키지 포함 차단과 공개 필수 파일 유지 |
-| **합계** | **178** | **318** | 공통 설정 파일 제외 |
+| **합계** | **186** | **327** | 공통 설정 파일 제외 |
+
+## test_dev_environment.py — 9개
+
+임시 소스 트리와 가짜 실행기를 사용한다. 실제 운영 서비스나 모델을 호출하지 않는다.
+개발용 실행 방법은 [설치·개발 환경 안내](installation_and_distribution.md#development-install)를 따른다.
+
+| 사례 | 준비·행동 → 기대 결과 | 케이스 수 |
+|---|---|---:|
+| 환경 상속 | 운영 NYANYA 설정·provider 인증 변수·Python 경로를 주입 → 개발 경로로 교체하거나 제거, HOME은 보존 | 1 |
+| 경로 조회 | 가상환경 없는 트리에서 paths → JSON 진단만 반환, 상태 파일 생성 없음 | 1 |
+| 명령 경계 | service/setup 요청 → 지원하지 않는 명령으로 거절 | 1 |
+| 상태 경로 | 외부를 가리키는 상태 디렉터리 symlink → 실행 전 거절 | 1 |
+| 명령 실행 | 테스트 명령에 가짜 실행기 연결 → 개발 Python·cwd·상태 환경 사용, 종료 코드 유지 | 1 |
+| 지연 생성 | lint 후 dashboard 명령 준비 → lint는 상태를 만들지 않고 dashboard만 개발 상태 디렉터리 생성 | 1 |
+| 가상환경 누락 | 개발 가상환경 없이 실행 → 설치·실행기 호출 없이 명시적 실패 | 1 |
+| 배포 경계 | 루트 또는 중첩 .dev-state 파일을 공개 manifest에 넣어 복사 → 대상 생성 전 거절 | 2 |
+
+환경 격리는 OS sandbox가 아니다. 보존된 HOME 아래의 외부 CLI 인증 파일까지
+차단하지 않으며, 실제 모델·Discord·운영 복구 수용 검사는 별도로 필요하다.
 
 ## test_agent_memory.py — 3개
 
@@ -364,10 +388,10 @@ Orca 관련 시험 3개는 남아 있는 호환 코드의 회귀 검사다. Orca
 
 ```bash
 # 케이스 수집만 수행: 실제 테스트 본문은 실행하지 않음
-PYTHONPATH=src .venv/bin/python -m pytest --collect-only -q
+PYTHONPATH=src .venv/bin/python -m pytest --collect-only -q tests
 
 # 전체 실행
-PYTHONPATH=src .venv/bin/python -m pytest -q
+PYTHONPATH=src .venv/bin/python -m pytest -q tests
 
 # 중요한 큐·안전 경계만 실행
 PYTHONPATH=src .venv/bin/python -m pytest -v tests/test_work_queue.py tests/test_safety_boundaries.py
@@ -376,7 +400,7 @@ PYTHONPATH=src .venv/bin/python -m pytest -v tests/test_work_queue.py tests/test
 PYTHONPATH=src .venv/bin/python -m pytest -v tests/test_work_queue.py::test_separate_processes_claim_once
 
 # skip 사유까지 표시
-PYTHONPATH=src .venv/bin/python -m pytest -q -rs
+PYTHONPATH=src .venv/bin/python -m pytest -q -rs tests
 ```
 
 Node CLI 시험 전에 build 결과가 필요하다. 누락된 CLI 때문에 5건이 skip되면 통과로 해석하지 않는다.
@@ -388,7 +412,7 @@ Ruff, TypeScript typecheck/build, JavaScript 구문 검사, release/privacy 검�
 
 ## 문서 작업 인계 — 2026-09-12 이력
 
-2026-09-12 / CORE-STAB-01 P0 후속. main, 기준 commit historical source baseline.
+2026-09-12 / CORE-STAB-01 P0 후속. main, 기준 commit 52a1bb5.
 기존 미커밋 변경을 보존하고 runtime·tests 변경에 맞춰 이 안내서를 갱신했다.
 당시 22개 테스트 파일/132개 함수/150개 수집 항목을 안내했다. 원래 111개 안내의
 문서 전용 작업은 2026-09-10 기록이며 이번 구현 작업과 구분한다.

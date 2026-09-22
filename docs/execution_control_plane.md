@@ -1,5 +1,13 @@
 # NyaNya Execution Control Plane
 
+This document retains the low-level adapter/state design. The normal executable
+path is now [OperationService and its dedicated worker](local_control_plane_implementation.md).
+Use [development status](development_status.md) for current completion and
+[P0 contracts](p0_execution_20260912.md) for reviewed file apply. Adapter marker
+recovery and writer leases below must not be confused with operation claims and
+the file-plan journal; logical project/session tables do not establish normal
+operation linkage or real external-session continuation.
+
 2026-09-12 follow-up: [P0 execution contracts and verification](p0_execution_20260912.md)
 supersede earlier callback-only execution, general-file write-hold and legacy mirroring
 statements for normal terminal/Discord operations. Retain historical verification
@@ -106,6 +114,9 @@ An approval ID for another task, a pending/rejected approval, or a busy writer l
 
 Read APIs remain bound to the local dashboard. Mutating routes require a bearer token or `X-Nyanya-Control-Token`. The token comes from an environment variable or an owner-only local file and is never returned by `/health`.
 
+Remote/forwarded `/v1/` reads also require that token. Execution intake uses
+`POST /v1/operations` and `/v1/operations/control`; `/v1/tasks` creation is a draft.
+
 The following routes require control authentication:
 
 - project creation, phase updates, and phase checks;
@@ -119,9 +130,12 @@ When no token exists, control routes return `503`. A wrong or missing token retu
 
 The dashboard asks for the token only when the operator unlocks controls. It keeps the value in JavaScript memory for the current page lifetime and does not place it in HTML, a URL, logs, `localStorage`, or `sessionStorage`.
 
-## SSE reconnect
+## Event updates and SSE compatibility
 
-`GET /v1/events/stream` emits ordered events with the SQLite sequence as the SSE `id`. Clients reconnect with `Last-Event-ID` or the `cursor` query parameter. The browser refreshes only the operational datasets after new events and uses keepalive comments during idle periods.
+`GET /v1/events/stream` retains the ordered SSE API with sequence IDs and
+`Last-Event-ID`/`cursor` support. The current dashboard instead polls `/v1/events`
+every five seconds with authentication headers and refreshes operational views
+when new events arrive. Do not put a token in an EventSource URL.
 
 ## Host heartbeat
 
@@ -142,6 +156,11 @@ Create an online backup:
 ```
 
 Recovery sequence:
+
+The sequence below concerns low-level adapter recovery. For normal operations,
+inspect `recovery` and `why`; explicitly `resume` safe requests or use
+`reconcile`/`resolve` for file plans. The legacy recovery endpoint is not a
+replacement for file-plan reconciliation and does not authorize replay.
 
 1. stop the Discord bridge, dashboard, and memory worker;
 2. preserve current logs and create a last-chance backup;

@@ -17,7 +17,7 @@ def is_private_distribution_path(path: str) -> bool:
     normalized = "/".join(parts)
     if any(part in {
         ".git", ".venv", "node_modules", "__pycache__", ".pytest_cache", ".ruff_cache",
-        "data", "logs", "run", "sessions", "downloads", "tmp", "private", ".secrets",
+        "data", "logs", "run", "sessions", ".dev-state", "downloads", "tmp", "private", ".secrets",
         "backups", "credentials", "secrets", "keys", "reports",
     } for part in parts[:-1]):
         return True

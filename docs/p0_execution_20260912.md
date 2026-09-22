@@ -1,5 +1,9 @@
 # CORE-STAB-01 / P0 실행·파일 승인·복구·원장 구현
 
+이 문서는 2026-09-12 구현 당시의 계약과 검증 기록이다. 이후 main 통합, CI 보완,
+현재 테스트와 새 검토 항목은 [개발 현황](development_status.md)을 참고한다.
+아래 150개 테스트·미커밋·미배포 표시는 당시 상태이며 현재 상태 선언이 아니다.
+
 2026-09-12. 작업 ID: EXEC-02 / APPLY-01 / RECOVERY-02 / LEDGER-02.
 역할: 설계 검토·구현·테스트를 이번 작업에서 함께 수행했다. 개발 세션 모델을
 전환하지 않았다. 운영 배포, 서비스 재시작, 운영 DB migration, 공개 배포는 포함하지 않는다.
@@ -215,7 +219,7 @@ Telegram 확장·Orca·원격 host·public dashboard·npm 발행은 진행하지
 
 ## 최종 handoff
 
-- Branch: main. 기준 commit: historical source baseline. 기존 미커밋 변경을 보존했고 이번 변경도 미커밋이다.
+- Branch: main. 기준 commit: 52a1bb5. 기존 미커밋 변경을 보존했고 이번 변경도 미커밋이다.
 - 신규 주요 소스: database, operation_schema/spec/service/store/worker, model_routing,
   process_runner, reviewed_changes. 공통 work_queue 결과 transaction과 ingress를 갱신했다.
 - 변경 ingress/호환 영역: core, bridge_store/policy, discord_bridge, telegram_bridge,

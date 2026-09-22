@@ -19,6 +19,11 @@ English guide: [README.md](README.md)
 
 ## P0 실행 구조 갱신 (2026-09-12)
 
+현재 완료 범위·남은 작업·검증 결과는 [개발 현황](docs/development_status.md)을 참고한다.
+
+운영 설치본과 개발 저장소를 분리한 환경에서는 `source` checkout 안에서 Git과
+개발 검사를 실행한다. [개발 환경 분리 안내](docs/installation_and_distribution.md#separate-an-operational-workspace-from-development)를 참고한다.
+
 Terminal/Discord 요청은 직렬화된 작업 명세와 별도 worker를 통해 제한된 수로 병렬 처리합니다.
 Gemini Flash가 요청을 판단하고 Flash/Luna/Astra를 선택합니다. 기존 파일은 구체적인 변경안과
 정확한 승인 hash를 확인한 후에만 수정합니다. 중단된 요청은 보류하고 원인을 조회할 수 있습니다.
@@ -40,7 +45,10 @@ src/nyanya_agent/bridge_constants.py  # 명령어와 routing keyword
 src/nyanya_agent/bridge_policy.py     # workspace, command, safety policy helper
 src/nyanya_agent/bridge_runtime.py    # Codex 위임과 runtime helper
 src/nyanya_agent/bridge_store.py      # 대화 컨텍스트와 durable task service 연동
-src/nyanya_agent/task_service.py      # SQLite 기반 task queue와 execution lifecycle
+src/nyanya_agent/task_service.py      # 호환용 callback task service
+src/nyanya_agent/operation_service.py # 일반 요청·제어용 직렬화 operation facade
+src/nyanya_agent/operation_worker.py  # 별도 worker와 제한된 동시 실행
+src/nyanya_agent/reviewed_changes.py  # 불변 파일안·승인 적용·journal
 src/nyanya_agent/dashboard_store.py   # SQLite dashboard/event store
 src/nyanya_agent/execution_store.py   # versioned task/execution/approval ledger
 src/nyanya_agent/execution_adapters.py # subprocess, tmux, Codex, Antigravity adapter
@@ -211,30 +219,34 @@ Discord bridge 직접 실행:
 |---|---|
 | `!nyanya status` | bridge runtime 상태 확인 |
 | `!nyanya config` | 비밀값을 제외한 runtime 설정 확인 |
-| `!nyanya reset` | 현재 사용자/채널 대화 context 초기화 |
-| `!nyanya save` | session 저장이 켜져 있을 때 현재 대화 저장 |
+| `!nyanya reset` | 호환용 대화 context 초기화; 일반 operation에는 아직 연결되지 않음 |
+| `!nyanya save` | 설정 시 호환용 context 저장; 실제 Codex 세션 지속 기능은 아님 |
 | `!nyanya resources` | 로컬 시스템 리소스 정보 확인 |
 | `!nyanya tasks` | 현재 사용자의 펜딩/진행/대기 작업 목록 확인 |
 | `!nyanya tasks all` | 전체 사용자의 작업 목록 확인, 관리자 전용 |
 | `!nyanya upload <file_path>` | 로컬 workspace 파일 업로드. 설정된 파일공유 채널 밖에서 실행하면 `NYANYA_DISCORD_FILE_SHARE_CHANNEL_IDS` 채널로 전송 |
-| `!nyanya gemini <prompt>` | 설정된 Google/Gemini 계열 backend에 직접 질의 |
-| `!nyanya codex <prompt>` | 검토 또는 조사 작업을 Codex에 위임 |
-| `!nyanya codex-work <prompt>` | 쓰기 위임이 켜져 있을 때 코드/파일 변경 작업을 Codex에 위임 |
+| `!nyanya gemini <prompt>` | Flash 판단 후 Flash profile로 실행 |
+| `!nyanya codex <prompt>` | Flash 판단 후 Luna/Codex profile로 실행 |
+| `!nyanya codex-work <prompt>` | Luna/Codex로 파일 변경안 작성; 기존 파일 적용은 정확한 변경안 승인 필요 |
 | `!nyanya cancel` | 현재 사용자의 대기/실행 작업 취소 |
 
 장시간 작업 가시성:
 
-- 첫 응답은 작업 계획과 현재 queue 상태를 먼저 반환한다.
-- worker 시작, routing, backend/Codex 위임 단계는 진행 메시지로 별도 전송한다.
-- `NYANYA_TASK_PROGRESS_INTERVAL_SECONDS` 값으로 backend 또는 Codex 응답 대기 중 heartbeat 주기를 조정한다.
-- `NYANYA_TASK_START_DELAY_SECONDS` 값으로 worker 실행을 아주 짧게 지연해 계획 응답이 채팅에 먼저 표시되도록 한다.
+- 접수 시 task ID와 예정 단계를 반환하고 watcher가 저장 결과 전송을 시도한다.
+- `tasks`, `why 작업ID`, `recovery`, `result 작업ID`로 상태와 결과를 조회한다.
+- 일반 operation의 중간 heartbeat 전달과 접수 안내·결과의 전송 순서는 보장하지 않는다.
+  기존 progress/delay 설정은 호환 경로에만 적용된다.
+- 재시작 후 자동 결과 재전달과 receipt/outbox는 후속 작업이다.
 
 중요 작업 정책:
 
-- 파일 생성, 수정, 삭제, 이동, 권한 변경, 시스템 설정, 네트워크 설정, 설치, 배포, 외부 side effect가 있는 작업은 고위험 작업으로 본다.
-- 고위험 요청은 바로 실행하지 않고 계획을 먼저 반환한 뒤 명시 승인을 요구한다.
-- trusted root 밖이지만 allowed root 안인 작업은 더 엄격하게 점수화한다.
-- 웹 또는 타인 자료에 숨은 프롬프트형 지시가 의심되면 해당 지시를 따르지 않고 보고한다.
+- 등록된 workspace의 제한된 임시 snapshot으로 요청을 분석한다.
+- 신규 UTF-8 파일은 작업 폴더 안에 기존 파일을 덮어쓰지 않고 생성할 수 있다.
+- 기존 파일 수정·삭제는 `plan`, 필요 시 `plan-file`로 검토한 뒤
+  `approve 변경안ID plan_hash`로 승인한다. 승인 단어만으로 권한을 부여하지 않는다.
+- 임의 shell, 설치·배포·권한 변경과 디렉터리 이동은 일반 파일안 경로의 지원 작업이 아니다.
+- 외부 내용은 신뢰하지 않는다. snapshot 필터와 CLI sandbox 옵션은 완전한
+  비밀정보 검출이나 호스트 보안 격리를 보장하지 않는다.
 
 파일 업로드 처리 순서:
 
@@ -274,7 +286,7 @@ http://127.0.0.1:8765
 | 화면 | 목적 | 주요 내용 |
 |---|---|---|
 | 메인 | 현재 운영 상태 확인 | 전체 요청, 오늘 요청, 실행 중 요청, 실패, 확인 필요 단계 |
-| 에이전트실 | 실행 제어면 관찰 | Host, Agent, Task, Execution, Approval, 2D 상태 구역, SSE 실시간 갱신 |
+| 에이전트실 | 실행 제어면 관찰 | Host, Agent, Task, Execution, Approval, 2D 상태 구역, 인증된 5초 주기 조회 |
 | 프로젝트 | 프로젝트와 단계 운영 | 프로젝트 생성, 목표 입력, 단계 카드, 단계 체크 |
 | 메모리 | 장기기억 검토 | pending/approved 기억 후보, memory graph, technology graph |
 | 통계 | 과거 이력 분석 | 사용량 추이, 요청 원장, 감사 로그 |
@@ -296,11 +308,13 @@ dashboard DB, WAL/SHM 파일, 실제 요청 로그, private export는 커밋하�
 - `runtime_sessions`, append-only `execution_events`
 - `approvals`, `artifacts`, `writer_leases`
 
-터미널과 Discord의 외부 작업은 `task_service.py`를 통해 provider/Codex를
-호출하기 전에 durable task를 생성하거나 채택한다. 대시보드는 모니터링과
-인증된 관리가 우선이다.
+일반 터미널/Discord 요청은 `operation_service.py`와 별도 worker를 통해 저장된
+OperationSpec을 실행한다. 업로드 callback은 호환용 `task_service.py` 경로를 유지한다.
+대시보드는 모니터링과 인증된 관리가 우선이다.
 
-읽기 API는 localhost dashboard에서 조회할 수 있다. 승인, 취소, 재시도, 복구처럼 상태를 바꾸는 API는 `NYANYA_DASHBOARD_CONTROL_TOKEN` 또는 owner-only token file이 없으면 닫힌다. token은 URL, HTML, 로그, Git에 기록하지 않는다.
+원격/forwarded 읽기 API와 상태 변경 API는 `NYANYA_DASHBOARD_CONTROL_TOKEN`
+또는 owner-only token file 인증이 필요하다. token은 URL, HTML, 로그, Git에 기록하지 않는다.
+루프백 읽기 허용은 공개 접속 허용을 뜻하지 않는다.
 
 주요 API:
 
@@ -312,13 +326,19 @@ GET  /v1/execution-projects
 GET  /v1/execution-projects/{id}/codex-sessions
 GET  /v1/executions
 GET  /v1/approvals
+GET  /v1/events
 GET  /v1/events/stream
+POST /v1/operations
+POST /v1/operations/control
 POST /v1/approvals/{approval_id}/decision
 POST /v1/executions/{execution_id}/cancel
 POST /v1/recovery/reconcile
 ```
 
-Discord/터미널 직접 쓰기 요청은 검토 대기하며 승인 단어로 실행되지 않는다. Codex 조회는 read-only로 강제한다. 별도 저수준 coordinator의 쓰기 승인은 actor·task·명령 범위·만료에 결합하여 한 번만 소비하며 writer lease를 요구한다. 파일별 변경안을 승인하고 적용하는 공통 경로와 agy sandbox 실환경 검증은 후속 작업이다. [구조 안정화 인계](docs/core_stabilization_20260910.md)를 참조한다.
+POSIX UTF-8 일반 파일의 파일별 승인·적용 경로는 구현되어 있다. 승인에는 owner,
+불변 plan hash와 만료를 결합하고 적용 시 원본 hash와 worker 소유권을 재검사한다.
+중단된 파일 효과는 reconcile이 필요하다. `POST /v1/tasks`는 draft이며 실제 실행
+접수는 `/v1/operations`다. 상세 제한은 [P0 계약](docs/p0_execution_20260912.md)을 참조한다.
 
 실행 adapter는 managed subprocess, tmux, Codex, Antigravity를 지원한다.
 Orca는 현재 기본 adapter registry와 제품 방향에서 제외한다.
@@ -361,7 +381,9 @@ POST /v1/projects/{project_id}/phases/{phase_key}/check
 
 ## 장기기억
 
-NyaNya는 두 가지 기억 계층을 사용한다.
+호환용 메모리 하위 시스템에는 두 계층이 있다. 일반 Discord operation에는 아직
+이 기억이나 이전 대화가 주입되지 않는다. 터미널 REPL은 제한된 프로세스 내 대화를
+프롬프트에 포함하지만 재시작 후 지속되는 외부 모델 세션은 아니다.
 
 | 계층 | 목적 | 저장 위치 |
 |---|---|---|
@@ -370,13 +392,15 @@ NyaNya는 두 가지 기억 계층을 사용한다.
 
 동적 기억 흐름:
 
-1. Discord, Telegram, CLI, dashboard 요청을 SQLite에 기록한다.
-2. memory worker가 완료 상태 요청을 스캔한다.
+1. legacy connector envelope가 있는 요청을 request read model에서 조회한다.
+2. memory worker가 완료 envelope를 스캔한다. envelope가 없는 terminal/dashboard/
+   Telegram operation은 이 추출 원본에 포함되지 않는다.
 3. 규칙 기반 추출로 `pending` 기억 후보를 만든다.
 4. 민감 내용은 redaction하거나 skip한다.
 5. 필요한 경우에만 LLM refinement를 켤 수 있다.
 6. dashboard에서 후보를 승인 또는 거절한다.
-7. `approved`이면서 민감하지 않은 기억만 이후 프롬프트에 검색 주입된다.
+7. 호환용 검색 함수는 owner 범위의 승인된 비민감 기억만 사용한다.
+   일반 operation과의 연결은 후속 작업이다.
 
 worker 1회 실행:
 
@@ -462,7 +486,7 @@ NyaNya Agent는 sandbox가 아니다. routing, policy, operations layer다.
 - per-user task queue,
 - 고위험 작업의 계획 우선 승인,
 - SQLite request/audit ledger,
-- approved memory만 검색 주입,
+- 호환용 검색 함수에서 owner 범위의 approved memory만 사용,
 - local `.env` secrets,
 - optional Codex sandbox settings.
 
@@ -479,6 +503,9 @@ NyaNya Agent는 sandbox가 아니다. routing, policy, operations layer다.
 
 ## Dashboard 외부 접근
 
+2026-09-21 기준 외부 접속과 서버·DB·호스팅 구성은 보류한다.
+아래 내용은 추후 별도로 진행할 때의 참고 자료다.
+
 안전한 기본값은 로컬 전용이다.
 
 ```text
@@ -491,7 +518,7 @@ NYANYA_DASHBOARD_PORT=8765
 1. 가능하면 로컬 전용 유지.
 2. 개인 장치 접근은 Tailscale Serve 사용.
 3. 공개 hostname이 필요하면 Cloudflare Tunnel + Access 사용.
-4. 공유기 포트포워딩은 TLS, 인증, reverse proxy가 있을 때만 최후 수단으로 사용.
+4. 공유기 직접 포트포워딩은 승인된 배포 방식이 아니다.
 
 FastAPI dashboard를 인증 없이 공인 인터넷에 직접 노출하지 않는다.
 
@@ -500,7 +527,7 @@ FastAPI dashboard를 인증 없이 공인 인터넷에 직접 노출하지 않�
 단위 테스트:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m pytest -q
+PYTHONPATH=src .venv/bin/python -m pytest -q tests
 ```
 
 전체 lint:

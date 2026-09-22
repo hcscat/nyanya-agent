@@ -79,6 +79,39 @@ channels, but they must preserve the same state, validation, and removal contrac
 
 ## Development install
 
+### Separate an operational workspace from development
+
+An existing operational workspace may keep its installed code and private state
+at the current root while its Git development checkout lives in a child named
+`source`. This is a local installation layout; the GitHub repository itself still
+starts with `src`, `cli`, `tests` and the package manifests, without an extra
+`source` wrapper directory.
+
+```text
+<operational-workspace>/
+  src/nyanya_agent/       installed Python code
+  dist/                  installed JavaScript CLI
+  scripts/               installed runtime launchers
+  .env, .venv/, data/     private operational configuration and state
+  logs/, sessions/       private operational output
+  backups/               private rollback material
+  source/                development checkout; run Git here
+    .git/
+    src/nyanya_agent/
+    cli/, tests/, docs/
+    .venv/, node_modules/ independent development dependencies
+    .dev-state/          ignored, isolated development runtime state
+```
+
+`src/nyanya_agent` is the Python import package, not a second installation.
+The outer `source` directory separates the development checkout from the local
+operational installation. Do not change the Python package layout to perform
+this separation.
+
+Create development dependencies inside the checkout with the commands below.
+Never reuse an operational virtual environment: an editable development install
+can otherwise redirect the running installation to development code.
+
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
@@ -87,6 +120,51 @@ python -m pip install -e ".[bots,dashboard,dev]"
 npm ci
 npm run build
 ```
+
+Use the development launcher from the Git checkout:
+
+```bash
+python3 scripts/dev.py paths
+python3 scripts/dev.py test
+python3 scripts/dev.py lint
+python3 scripts/dev.py typecheck
+python3 scripts/dev.py build
+python3 scripts/dev.py dashboard
+```
+
+The launcher clears inherited NyaNya settings, selects the checkout's independent
+virtual environment and `.dev-state`, and uses a loopback development dashboard
+port separate from the installed service. `paths` diagnoses paths without running
+the application. The foreground dashboard is optional; it is not a LaunchAgent.
+`terminal` is available for deliberate development requests and can call configured
+model CLIs; automated validation must not invoke live models.
+
+Service/setup/manager commands are not exposed by this launcher. Do not run
+operational service installation or management commands from a development checkout:
+legacy service scripts may use production labels. The launcher is an isolation
+convenience, not an OS sandbox or a substitute for account/provider authorization.
+It preserves the user's home directory; external model CLIs may still use their
+own stored authentication when deliberately invoked by a development request.
+Direct commands outside it may inherit unrelated environment settings.
+
+Only reviewed public code, tests, templates and documentation enter Git. Keep
+development state, dependencies, local AGENTS files and operational backups out of
+Git and packages. Private runtime credentials must not be copied into development.
+Tests use synthetic data, and package/privacy checks run from the Git checkout.
+
+For an existing workspace migration, back up Git metadata (including linked
+worktree indexes), uncommitted changes, configuration and a consistent SQLite
+snapshot. Copy public candidates with hash verification, relocate Git metadata,
+repair linked worktree paths and test independent dependencies before archiving
+development-only files from the operational root. Keep the operational code,
+virtual environment and service paths unchanged where possible. Moving a Git
+repository does not deploy new code or require replaying interrupted work.
+
+To deploy a later change, build a reviewed artifact from a verified commit and
+perform a separate backed-up installation/update. Do not install over an ancestor
+directory that contains the development checkout; existing source installers reject
+overlapping source/destination trees. Do not copy the complete development tree
+over the operational root or replace private state with development fixtures.
 
 Prepare pip 26.2 or newer in the target environment before dependency installation
 or an audit. The npm setup and alternate installers already upgrade pip; verify

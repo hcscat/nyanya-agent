@@ -1,178 +1,104 @@
 # Local Control Plane Implementation
 
-2026-09-12 follow-up: [P0 execution contracts and verification](p0_execution_20260912.md)
-supersede earlier callback-only execution, general-file write-hold and legacy mirroring
-statements for normal terminal/Discord operations. Retain historical verification
-and remaining delivery/session/platform limitations; source changes are not deployment.
+Reviewed 2026-09-21 against source commit `bb8774b`. The four source publication
+batches are integrated into main. P0 source behavior is implemented; live
+acceptance and delivery/context integration remain separate completion criteria.
+See [development status](development_status.md) and [P0 contracts](p0_execution_20260912.md).
 
-
-> Current implementation update (2026-09-10): [CORE-STAB-01](core_stabilization_20260910.md) records schema-v3 claims/results, manual recovery holds, typed outcomes and the remaining worker/approval/migration gaps. Older phase descriptions below are design/history where they conflict with that update. This is not a stable-release or live-acceptance declaration.
-
-Status: first implementation slice completed; migration work remains
-
-## Accepted product direction
-
-NyaNya Agent is a **Local Control Plane**, not only a lightweight messenger
-wrapper. The operator can request work remotely through a connector and inspect
-or manage it later through durable local state.
-
-The current supported slice is:
-
-- terminal requests;
-- Discord requests and controlled file delivery;
-- one local provider or Codex CLI delegation;
-- SQLite task/execution/event history;
-- project and logical Codex-session grouping;
-- local monitoring and authenticated dashboard control.
-
-Telegram remains optional compatibility code. Slack, Kakao, Google Workspace,
-additional local models, and the second Mac mini are later adapters. Orca is not
-used in the current product direction. Tailscale is an acceptable future private
-transport, but this repository does not configure it.
-
-## Authoritative flow
+## Authoritative normal flow
 
 ```text
-terminal / Discord / future connector
-                 |
-                 v
-       DurableTaskService.submit()
-                 |
-       SQLite agent_tasks (queued)
-                 |
-       project + codex_session link
-                 |
-       SQLite executions + append-only events
-                 |
-       provider / Codex / subprocess adapter
-                 |
-       result + artifact + delivery projection
+terminal / Discord / authenticated operations API
+  -> OperationService.submit()
+  -> SQLite task + validated OperationSpec
+  -> dedicated operation_worker + atomic claim + bounded thread pool
+  -> Flash assessment -> selected model -> summary / immutable file plan
+  -> exclusive new-file creation OR exact approval -> reviewed apply
+  -> transactionally saved result / execution / task / events
+  -> connector result watcher (delivery is not yet a durable outbox)
 ```
 
-The invariant is: no provider, CLI, subprocess, or future remote-host work
-starts before its durable task exists. The service owns per-owner queueing,
-writer leases, cancellation signalling, execution status, and final response
-delivery. Callback functions remain process-local; their task and execution
-records remain durable.
+`DurableTaskService` and `ExecutionCoordinator` remain compatibility/low-level
+components. They are not the normal model-request orchestration path.
+The worker is an on-demand child supervised by the submitting controller;
+it is not a standalone LaunchAgent or a worker on another host.
 
 ## SQLite model
 
 | Record | Role |
 |---|---|
-| `execution_projects` | Stable project/workspace identity and lifecycle |
-| `codex_sessions` | Project-scoped logical session key, model, workspace, and optional external ID |
-| `agent_tasks` | User intent, queue status, owner, priority, project/session links |
-| `executions` | One concrete attempt and terminal evidence for a task |
-| `execution_events` | Append-only status and progress history |
-| `approvals` | Exact side-effect decision with expiry and audit trail |
-| `artifacts` | Produced file metadata and task/execution relationship |
-| `writer_leases` | Fenced single-writer coordination |
+| `agent_tasks`, `executions`, `execution_events` | Intent, attempts, persisted result/status and events |
+| `task_operations`, `operation_workers` | Serialized specification, eligibility, generation and heartbeat |
+| File plans and apply journal | Immutable file proposal and before/after mutation evidence |
+| `approvals`, `writer_leases` | Scoped decisions and compatibility adapter coordination |
+| `execution_projects`, `codex_sessions` | Logical project/session metadata; not external conversation resume |
+| `agent_requests`, legacy project/memory tables | Connector envelopes and compatibility readers |
 
-Schema version 2 adds projects and Codex-session links to the existing execution
-ledger. `agent_requests` and the older dashboard project tables remain a
-compatibility projection during migration; they are not the target ownership
-model.
-
-The current Codex CLI invocation remains ephemeral. Therefore a
-`codex_sessions` row groups related NyaNya tasks but does not yet replay a
-Codex conversation after restart. The `external_session_id` field is reserved
-for a future verified persistent Codex integration.
+Schema v4 adds the operation/worker/file-plan structures and request read model.
+Normal operation status/result/events and claim release commit together. Legacy
+requests import once rather than continuously overwriting the execution ledger.
+Memory/project storage still needs a separate migration.
 
 ## Interface responsibilities
 
-### Terminal
+- Terminal prompt/REPL and normal Discord requests use OperationService.
+- Discord `codex` maps to the Luna execution profile; Flash assessment still
+  happens first. An explicit profile does not grant file mutation authority.
+- `POST /v1/operations` executes a validated request. `POST /v1/operations/control`
+  handles operation commands. `/v1/tasks` creation remains a draft-management API.
+- Remote/forwarded `/v1/` reads and all mutating control APIs require the control
+  token. The browser polls events with an authorization header every five seconds.
+- File uploads retain a compatibility callback path. Stored callback records do
+  not make delivery restart-resumable.
 
-`nyanya --prompt` and the interactive REPL use `DurableTaskService.run_sync()`.
-They wait for the same worker result while persisting task and execution state.
+## Implemented safety contracts
 
-### Discord
+- Registered owner workspace at intake and execution; bounded disposable snapshot.
+- Data-only versioned OperationSpec, atomic claims, renewable lease, stale result
+  rejection and explicit resume limited to three total attempts.
+- Default two concurrent operations, configurable from one to four. Apply work
+  serializes within a workspace; controllers must use consistent concurrency limits.
+- Existing-file edits/deletes require the exact reviewed plan hash, same owner,
+  valid approval and unchanged file preimage. New files use exclusive creation.
+- Applying work checks current worker/claim ownership before file mutations.
+  Interrupted or ambiguous effects remain held for `reconcile` and `resolve`.
+- Worker/parent shutdown uses bounded termination and records interruption as
+  blocked, not a user cancellation. Detached descendant termination is unproven.
 
-Discord remains the first remote connector. Normal provider/Codex requests,
-queue/cancel commands, and file uploads use the durable service. Request rows
-are mirrored for compatibility and can be inspected through the execution-ledger
-task ID.
+## Remaining integration work
 
-### Dashboard
+1. Persist connector destinations, deduplication keys, delivery attempts and
+   receipts. Current watchers cannot deliver an undelivered result after restart.
+2. Carry explicit owner/project/session context into operations. The worker
+   currently uses the prompt and bounded file snapshot, without implicit legacy
+   conversation history or approved memory injection. The terminal REPL explicitly
+   embeds bounded in-process history; Discord `reset`/`save` operate on legacy context.
+3. Use request-relevant snapshot selection. A capped directory walk can omit a
+   requested file; the snapshot is not a complete repository or a secret detector.
+4. Verify real external Codex session continuation; logical session rows alone
+   do not provide it. Complete memory/project projections and compatibility migration.
+5. Implement bounded request decomposition/DAG dependencies if later required.
+   Independent job concurrency and recorded model routing are already present.
+6. Run live Discord/file approval/recovery acceptance and supported-platform
+   installation drills. Mock subprocess and SQLite tests do not replace them.
 
-The dashboard is monitoring-first. It exposes ledger-backed hosts, tasks,
-executions, approvals, events, execution projects, and Codex sessions. Mutating
-routes remain authenticated. A dashboard-created task is a durable management
-record; automatic execution from a separate dashboard process is not yet a
-worker-claim feature.
+External dashboard hosting/access, additional hosts and resource scheduling are
+deferred. Existing generic adapters must not be described as verified integration
+of every runtime into the normal request path.
 
-### Policy and governance
-
-Human-maintained Markdown is the canonical policy surface:
-
-- `prompts/policy.md`: universal mission, execution, approval, privacy, and connector rules;
-- `prompts/policy_technical.md`: workspace, process, remote-host, and model-routing constraints;
-- `prompts/policy_governance.md`: decision rights, change control, review gates, and data lifecycle.
-
-Runtime code enforces hard boundaries. The Markdown documents define the
-operator-visible policy contract and are injected into the bridge operating
-protocol.
-
-## Current limitations to resolve
-
-1. Legacy request/project mirroring still creates a dual persistence boundary.
-2. A process restart preserves records but cannot automatically resume a
-   process-local provider callback.
-3. Dashboard retry creates a queued record but needs a worker-claim protocol
-   to execute when no bridge process owns the callback.
-4. Project grouping currently derives from the assigned workspace; explicit
-   project selection in connector commands is not yet implemented.
-5. Codex session grouping is logical until a persistent external session
-   contract is verified.
-6. Automatic multi-model routing and measured VRAM/GPU/CPU scheduling are not
-   implemented; model/profile choice remains configuration-driven.
-7. Tailscale host registration, authorization, transport, heartbeat, and
-   recovery are design work only.
-
-## Recommended next phases
-
-### Phase A — Stabilize the current slice
-
-- complete live Discord and backend acceptance scenarios;
-- exercise backup, restore, cancellation, retry, restart, and failed-adapter
-  recovery;
-- add explicit project/session selection and task query views;
-- document the compatibility window for legacy tables.
-
-### Phase B — Remove the dual write model
-
-- create ledger-backed request and project read projections;
-- migrate memory references from request IDs to durable task/event IDs;
-- stop runtime writes from `dashboard_store` into the execution ledger;
-- retain a read-only compatibility reader for one planned release window;
-- remove circular store ownership after migration verification.
-
-### Phase C — Remote worker over private transport
-
-- define host identity and per-host authorization;
-- use Tailscale only as private transport, never as authorization;
-- add worker claim/lease/recovery semantics;
-- test credential non-synchronization, stale hosts, cancellation, and rollback
-  on both Mac minis.
-
-### Phase D — Resource-aware model routing
-
-- create stable public model profiles with private local paths outside source;
-- collect reproducible CPU, GPU, VRAM, latency, context, and failure evidence;
-- define complexity/importance/risk routing rules;
-- persist the routing decision and reason in task metadata;
-- measure cost/quality before selecting defaults.
-
-## Verification baseline
-
-The implementation slice is considered healthy when these pass together:
+## Verification and rollback
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m pytest -q
+PYTHONPATH=src .venv/bin/python -m pytest -q tests
 .venv/bin/ruff check src/nyanya_agent tests
 npm run typecheck --if-present
 node --check src/nyanya_agent/dashboard_static/app.js
 ./packaging/release/verify_release.sh
 ```
 
-Live service checks and user-visible acceptance tests are separate evidence and
-must be rerun after credentials, host, or service state changes.
+Target `tests/` explicitly so ignored local verification checkouts do not enter
+test collection. Use isolated test state; never point fixtures at live databases.
+Before a separately authorized upgrade, stop old writers, make a consistent SQLite
+backup and verify integrity. Restore matching code and pre-upgrade state together;
+do not run old code against a migrated database. No service or DB change is required
+for this documentation review.

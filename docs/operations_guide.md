@@ -1,9 +1,8 @@
 # nyanya-agent Operations Guide
 
-2026-09-12 follow-up: [P0 execution contracts and verification](p0_execution_20260912.md)
-supersede earlier callback-only execution, general-file write-hold and legacy mirroring
-statements for normal terminal/Discord operations. Retain historical verification
-and remaining delivery/session/platform limitations; source changes are not deployment.
+Current source review: [development status](development_status.md).
+Use the [P0 contracts](p0_execution_20260912.md) for operation commands,
+file approval and held recovery. Historical verification is not current live proof.
 
 
 This guide covers the local service command used to manage nyanya-agent, its
@@ -66,11 +65,12 @@ com.hcs.nyanya.discord
 com.hcs.nyanya.dashboard
 ```
 
-The Discord bridge is the current connector runtime for NyaNya Agent. There is
-no separate always-on "agent server" process in the current architecture. The
-bridge receives messenger events and submits them to the durable task service,
-which writes SQLite task/execution/event state before invoking the local agent
-core or Codex delegation helper. The terminal CLI uses the same task service.
+The Discord bridge is the primary connector controller. Normal requests use
+OperationService, which persists work and supervises a dedicated on-demand
+operation worker process with a bounded thread pool. Terminal and dashboard
+operations use the same facade. The worker is not an independent LaunchAgent;
+controller shutdown closes its liveness pipe and interrupts its work. Upload
+callbacks remain on the compatibility task service.
 
 The dashboard is a separate local observability process. It serves
 `http://127.0.0.1:8765` by default and reads/writes `data/nyanya_dashboard.db`.
@@ -164,7 +164,6 @@ Restart after changing `.env`, prompts, or source:
 ./scripts/nyanya_ctl.sh restart
 ```
 
-Restart the NyaNya runtime entrypoint:
 Restart the NyaNya runtime entrypoint and dashboard:
 
 ```bash
@@ -195,7 +194,6 @@ Run a runtime health check:
 ./scripts/nyanya_ctl.sh health
 ```
 
-Run a deeper health check that also exercises the configured backend:
 Run a deeper health check that also checks the dashboard HTTP endpoint and configured backend:
 
 ```bash

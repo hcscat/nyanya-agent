@@ -122,6 +122,27 @@ git diff --cached | rg -n "<token, private-id, public-ip, local-db patterns>" ||
 
 Expected result: no runtime DB, logs, downloads, sessions, run files, `.env`, or real user workspace mapping files are staged.
 
+## Commit Identity And Historical Cleanup
+
+Use the GitHub-provided noreply address for both author and committer identity.
+Check the effective identities before committing; repository settings can override
+global settings, and another device needs its own verification. Changing the Git
+email setting does not remove the identity from earlier commits.
+
+Historical cleanup requires explicit authorization, private backups and a separate
+rewrite clone. Inspect every branch/tag and preserve ordinary code, commit dates
+and parent relationships where possible. A privacy rewrite changes commit IDs and
+invalidates old signatures. Keep the old-to-new mapping private when it can lead
+back to sensitive objects. Prefer a fresh clone after cleanup; do not merge or push
+old clones, worktrees, backup refs or tool-only refs into the cleaned repository.
+
+GitHub PR references, cached commits, Actions metadata/logs and release assets are
+separate disclosure surfaces. Audit them as well as Git objects. A clean branch
+scan does not prove that GitHub-only references or third-party copies are purged.
+Keep visibility private until outstanding removal and publication review are resolved.
+
+Official guidance: [Removing sensitive data](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository).
+
 ## Installed Dependency Boundary
 
 Keep `node_modules/` out of Git and release assets, including nested copies.
