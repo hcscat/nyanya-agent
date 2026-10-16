@@ -20,6 +20,7 @@ def pytest_configure(config):
             "NYANYA_DASHBOARD_DB_PATH": str(root / "test.db"),
             "NYANYA_WORKSPACE_ROOTS": str(Path(__file__).resolve().parents[1]) + "," + str(root),
             "NYANYA_MEMORY_RETRIEVAL_ENABLED": "false",
+            "NYANYA_LOG_MAINTENANCE_ENABLED": "false",
         }
     )
 

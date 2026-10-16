@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { configure, printConfigStatus } from "../commands/config";
 import { doctor } from "../commands/doctor";
+import { logs } from "../commands/logs";
 import { service } from "../commands/service";
 import { setup } from "../commands/setup";
 import { state } from "../commands/state";
@@ -20,6 +21,7 @@ Usage:
   nyanya repair
   nyanya service [status|start|stop|restart|health|repair|uninstall]
   nyanya state [show|backup|migrate]
+  nyanya logs [status|maintain] [--apply]
   nyanya paths
   nyanya update
   nyanya [agent options]
@@ -89,6 +91,9 @@ export function main(argv: string[]): number {
   }
   if (command === "state") {
     return state(projectRoot, rest);
+  }
+  if (command === "logs") {
+    return logs(projectRoot, rest);
   }
   if (command === "paths") {
     return printConfigStatus(projectRoot);

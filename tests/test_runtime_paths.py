@@ -62,7 +62,9 @@ def test_launchagent_uses_separate_code_and_state_paths(tmp_path, monkeypatch):
     with plist_path.open("rb") as stream:
         payload = plistlib.load(stream)
 
-    assert payload["ProgramArguments"] == [str(python), "-m", "nyanya_agent.dashboard_api"]
+    assert payload["ProgramArguments"][:4] == [str(python), "-m", "nyanya_agent.service_logs", "run"]
+    assert payload["ProgramArguments"][-3:] == [str(python), "-m", "nyanya_agent.dashboard_api"]
+    assert str(state_root / "logs") in payload["ProgramArguments"]
     assert payload["EnvironmentVariables"]["NYANYA_PROJECT_ROOT"] == str(code_root)
     assert payload["EnvironmentVariables"]["NYANYA_HOME"] == str(state_root)
-    assert payload["StandardOutPath"].startswith(str(state_root / "logs"))
+    assert payload["StandardOutPath"] == payload["StandardErrorPath"] == "/dev/null"

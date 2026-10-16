@@ -648,7 +648,7 @@ def dashboard_summary(*, db_path: str | Path | None = None) -> dict[str, Any]:
 def audit_log(limit: int = 50, *, db_path: str | Path | None = None) -> list[dict[str, Any]]:
     init_db(db_path)
     with connect(db_path) as conn:
-        data = rows(conn, "SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT ?", (limit,))
+        data = rows(conn, "SELECT * FROM audit_logs ORDER BY created_at DESC, id DESC LIMIT ?", (limit,))
     return [parse_json_fields(item, ("detail_json",)) for item in data]
 
 

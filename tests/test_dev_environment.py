@@ -32,6 +32,7 @@ def test_environment_scrubs_inherited_runtime_settings(monkeypatch, tmp_path):
     monkeypatch.setenv("NYANYA_HOME", "/production/state")
     monkeypatch.setenv("NYANYA_DASHBOARD_PORT", "8765")
     monkeypatch.setenv("NYANYA_PROVIDER", "production-provider")
+    monkeypatch.setenv("NYANYA_LOG_MAINTENANCE_ENABLED", "true")
     monkeypatch.setenv("PYTHONHOME", "/production/python")
     monkeypatch.setenv("PYTHONPATH", "/production/modules")
     monkeypatch.setenv("VIRTUAL_ENV", "/production/venv")
@@ -43,7 +44,9 @@ def test_environment_scrubs_inherited_runtime_settings(monkeypatch, tmp_path):
     assert not any(key.startswith("NYANYA_") for key in environment if key not in {
         "NYANYA_PROJECT_ROOT", "NYANYA_HOME", "NYANYA_ENV_FILE", "NYANYA_SERVICE_LABEL_PREFIX",
         "NYANYA_DASHBOARD_HOST", "NYANYA_DASHBOARD_PORT", "NYANYA_DASHBOARD_DB_PATH", "NYANYA_SESSIONS_DIR",
+        "NYANYA_LOG_MAINTENANCE_ENABLED",
     })
+    assert environment["NYANYA_LOG_MAINTENANCE_ENABLED"] == "false"
     assert environment["NYANYA_PROJECT_ROOT"] == str(root)
     assert environment["NYANYA_HOME"] == str(root / ".dev-state")
     assert environment["NYANYA_ENV_FILE"] == str(root / ".dev-state" / ".env")
