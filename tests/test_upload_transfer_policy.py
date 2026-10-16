@@ -56,7 +56,8 @@ def test_unknown_destination_limit_fails_closed(sdk):
         discord_bridge.upload_byte_limit(SimpleNamespace(guild=SimpleNamespace(filesize_limit=sdk)))
 
 def test_long_document_inspection_has_a_bounded_execution_time():
-    import subprocess, sys
+    import subprocess
+    import sys
     code = "from nyanya_agent.upload_document_privacy import inspect_document; assert inspect_document(b'x'*2_000_001,'note.txt').counts=={}"
     run = subprocess.run([sys.executable, '-c', code], capture_output=True, timeout=10)
     assert run.returncode == 0, run.stderr.decode()

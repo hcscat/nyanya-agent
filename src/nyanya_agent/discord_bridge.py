@@ -29,7 +29,7 @@ from nyanya_agent.bridge_common import (
     GET_HOME_COMMANDS,
     HELP_COMMANDS,
     NyaNyaConversationStore,
-    NyaNyaTask,
+    NyaNyaTask as NyaNyaTask,
     SET_HOME_COMMANDS,
     TASK_STATUS_COMMANDS,
     UNSET_HOME_COMMANDS,
