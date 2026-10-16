@@ -84,7 +84,8 @@ def test_quiesced_legacy_upgrade_holds_all_attempts_without_replay(tmp_path, mon
     with pytest.raises(PermissionError):
         store.resume(path, task["id"], "operator", "new-worker")
     store.cancel(path, task["id"], "operator")
-    assert ledger.get_task(task["id"], db_path=path)["status"] == "cancelled"
+    assert ledger.get_task(task["id"], db_path=path)["status"] == "blocked"
+    assert ledger.get_execution(first_id, db_path=path)["status"] == "lost"
 
 
 @pytest.mark.parametrize("attempts", [0, 2])
@@ -184,8 +185,9 @@ def test_dashboard_cancel_waiting_parent_prevents_approval_and_apply(operation, 
         assert client.post(route, json={}).status_code == 401
         response = client.post(route, json={}, headers={"X-Nyanya-Control-Token": "fixture-control"})
         assert response.status_code == 200
-        assert response.json()["status"] == "cancelled"
-    assert ledger.get_task(task["id"], db_path=path)["status"] == "cancelled"
+        assert response.json()["status"] == ("blocked" if endpoint == "tasks" else "lost")
+    assert ledger.get_task(task["id"], db_path=path)["status"] == "blocked"
+    assert ledger.get_task(apply_record["task_id"], db_path=path)["status"] == "cancelling"
     with pytest.raises(SafeOperationError):
         files.decide(path, plan["id"], "operator", plan["plan_hash"])
     with pytest.raises(SafeOperationError, match="Original task"):

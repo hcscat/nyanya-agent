@@ -1,28 +1,15 @@
 # NyaNya Execution Control Plane
 
-This document retains the low-level adapter/state design. The normal executable
-path is now [OperationService and its dedicated worker](local_control_plane_implementation.md).
-Use [development status](development_status.md) for current completion and
-[P0 contracts](p0_execution_20260912.md) for reviewed file apply. Adapter marker
-recovery and writer leases below must not be confused with operation claims and
-the file-plan journal; logical project/session tables do not establish normal
-operation linkage or real external-session continuation.
+This document retains the low-level adapter/state design. The normal executable path is now [OperationService and its dedicated worker](local_control_plane_implementation.md). Use [development status](development_status.md) for current completion and [P0 contracts](p0_execution_20260912.md) for reviewed file apply. Adapter marker recovery and writer leases below must not be confused with operation claims and the file-plan journal; logical project/session tables do not establish normal operation linkage or real external-session continuation.
 
-2026-09-12 follow-up: [P0 execution contracts and verification](p0_execution_20260912.md)
-supersede earlier callback-only execution, general-file write-hold and legacy mirroring
-statements for normal terminal/Discord operations. Retain historical verification
-and remaining delivery/session/platform limitations; source changes are not deployment.
+2026-09-12 follow-up: [P0 execution contracts and verification](p0_execution_20260912.md) supersede earlier callback-only execution, general-file write-hold and legacy mirroring statements for normal terminal/Discord operations. Retain historical verification and remaining delivery/session/platform limitations; source changes are not deployment.
 
 
-> Current implementation update (2026-09-10): [CORE-STAB-01](core_stabilization_20260910.md) records schema-v3 claims/results, manual recovery holds, typed outcomes and the remaining worker/approval/migration gaps. Older phase descriptions below are design/history where they conflict with that update. This is not a stable-release or live-acceptance declaration.
+> Historical baseline (2026-09-10): [CORE-STAB-01](core_stabilization_20260910.md) records the earlier schema-v3 design. This feature stage uses schema v5 with atomic reviewed-apply admission and scoped workflow/control indexes; durable conversation/work/Wiki memory is a separate follow-up. The implementation guide and development status supersede older phase descriptions below; retained adapter contracts are not normal command intake.
 
 ## Scope
 
-The control plane records and observes work executed by local or remote NyaNya
-workers. It is the product's Local Control Plane: every provider, CLI,
-subprocess, or future remote-host request must enter the durable task path
-before execution. It does not expose the dashboard to the public internet, copy
-OAuth credentials between hosts, or grant unattended writes by default.
+Current normal work uses one local operation worker path. The adapter/remote-host model below is retained design and compatibility code, not proof of remote-worker integration. New execution paths must preserve durable intake, authenticated scope, claim and approval boundaries. Public access, credential synchronization and unattended writes are outside this contract.
 
 ## Data model
 
@@ -42,11 +29,7 @@ OAuth credentials between hosts, or grant unattended writes by default.
 
 `schema_migrations` and SQLite `user_version` are applied before the execution API starts. A changed checksum for an already-applied migration fails startup instead of silently mutating history.
 
-`codex_sessions` currently provides a stable project/conversation grouping key
-for NyaNya task management. The bridge still invokes the Codex CLI in ephemeral
-mode, so this registry does not yet promise conversational context replay inside
-Codex. A future persistent Codex session integration may populate
-`external_session_id` after its CLI and recovery contract are verified.
+`codex_sessions` is logical project/session metadata. Durable conversational recall remains a separate follow-up, distinct from hidden provider history. The registry does not prove ownership or resume/deletion of a provider conversation; such integration needs its own verified CLI and recovery contract.
 
 ## State model
 
@@ -75,47 +58,21 @@ Terminal execution status is trusted at confidence `1.0` only when an atomic com
 
 ## Adapter contract
 
-Every adapter exposes:
+The retained compatibility adapters provide runtime inventory, persisted-handle observation/cancellation and recovery evidence. Managed subprocess and tmux helpers remain for compatibility recovery and its isolated tests. Codex/Antigravity probes remain available. The scoped `start_command` and Codex/Antigravity request builders are retained as low-level design primitives with isolated tests. No worker, connector or API route uses them for normal intake. They do not supply an authenticated intake boundary, provider readiness or normal file mutation authority.
 
-- capability inventory and a runtime probe;
-- start with a list-form command, bounded workspace, timeout, and private output directory;
-- observe with status, confidence, exit code, output tail, and evidence;
-- cancellation without a shell-expanded user command;
-- reconnect from a persisted handle where supported.
+The command approval contract binds task, actor, expiry and exact command scope, consumes one approved invocation, and uses a fenced writer lease when requested. This compatibility contract does not replace current operation claims or reviewed file plans. Further integration requires a separate reviewed design.
 
-Implemented adapters:
-
-| Adapter | Persistence | Recovery evidence |
-|---|---:|---|
-| managed subprocess | process lifetime | managed child, PID, atomic marker |
-| tmux | host/session lifetime | tmux session, pane/log, atomic marker |
-| Codex | subprocess | explicit NyaNya profile and sandbox plus marker |
-| Antigravity | subprocess | explicit `--sandbox`, auth probe, marker |
-
-The current default adapter registry deliberately excludes Orca. The existing
-adapter implementation remains isolated for historical compatibility tests, but
-the product does not select or operate it.
+Orca support and the unused artifact collector remain removed. Normal requests use OperationService and the bounded model runner; file artifacts use the reviewed apply/provenance engine.
 
 ## Approval and writer lease
 
-Mutating work follows this order:
-
-1. Create an approval row for the exact task and action.
-2. Record an operator decision through the authenticated control API.
-3. Acquire a writer lease for the repository or worktree resource.
-4. Persist the fence token in execution metadata.
-5. Start the adapter.
-6. Renew heartbeat while work is active.
-7. Release the lease on success, failure, timeout, cancellation, or recovery.
-
-An approval ID for another task, a pending/rejected approval, or a busy writer lease fails before command start.
+Normal file changes use an immutable reviewed plan, authenticated owner/hash/expiry decision and preimage validation inside reviewed_changes. Existing-file writes are not authorized by a generic provider or command approval. Execution claims fence current work, and writer leases remain available to reconcile recorded legacy executions. Cancellation and recovery preserve uncertain effects for review.
 
 ## API security
 
-Read APIs remain bound to the local dashboard. Mutating routes require a bearer token or `X-Nyanya-Control-Token`. The token comes from an environment variable or an owner-only local file and is never returned by `/health`.
+All `/v1/` reads and mutating routes require a bearer token or `X-Nyanya-Control-Token`, including loopback connections. Host and Origin validation applies before data access. The token comes from an environment variable or an owner-only local file and is never returned by `/health`.
 
-Remote/forwarded `/v1/` reads also require that token. Execution intake uses
-`POST /v1/operations` and `/v1/operations/control`; `/v1/tasks` creation is a draft.
+Remote/forwarded `/v1/` reads require the same token. Execution intake uses `POST /v1/operations` and `/v1/operations/control`; `/v1/tasks` creation is a draft.
 
 The following routes require control authentication:
 
@@ -128,14 +85,11 @@ The following routes require control authentication:
 
 When no token exists, control routes return `503`. A wrong or missing token returns `401` when control authentication is configured.
 
-The dashboard asks for the token only when the operator unlocks controls. It keeps the value in JavaScript memory for the current page lifetime and does not place it in HTML, a URL, logs, `localStorage`, or `sessionStorage`.
+All operational API clients must supply the control token in request headers. The page shell does not grant data access; the interactive unlock interface is a separate UI follow-up. Tokens must not appear in HTML, URLs or logs.
 
 ## Event updates and SSE compatibility
 
-`GET /v1/events/stream` retains the ordered SSE API with sequence IDs and
-`Last-Event-ID`/`cursor` support. The current dashboard instead polls `/v1/events`
-every five seconds with authentication headers and refreshes operational views
-when new events arrive. Do not put a token in an EventSource URL.
+`GET /v1/events/stream` retains the ordered SSE API with sequence IDs and `Last-Event-ID`/`cursor` support. The current dashboard instead polls `/v1/events` every five seconds with authentication headers and refreshes operational views when new events arrive. Do not put a token in an EventSource URL.
 
 ## Host heartbeat
 
@@ -155,12 +109,9 @@ Create an online backup:
 ./scripts/backup_state.sh
 ```
 
-Recovery sequence:
+Recovery sequence for a selected consistent snapshot under an authorized recovery task. After newer work, do not restore an old whole DB: preserve current rows, approvals, delivery state and effect journals during selected-file rollback. Previous-code schema readability is not a safe rollback guarantee.
 
-The sequence below concerns low-level adapter recovery. For normal operations,
-inspect `recovery` and `why`; explicitly `resume` safe requests or use
-`reconcile`/`resolve` for file plans. The legacy recovery endpoint is not a
-replacement for file-plan reconciliation and does not authorize replay.
+The sequence below concerns low-level adapter recovery. For normal operations, inspect `recovery` and `why`; explicitly `resume` safe requests or use `reconcile`/`resolve` for file plans. The legacy recovery endpoint is not a replacement for file-plan reconciliation and does not authorize replay.
 
 1. stop the Discord bridge, dashboard, and memory worker;
 2. preserve current logs and create a last-chance backup;
@@ -173,11 +124,6 @@ replacement for file-plan reconciliation and does not authorize replay.
 
 ## Remote boundary
 
-Tailscale is an acceptable future private transport between approved Mac mini
-hosts. The application continues to bind to `127.0.0.1` unless a separately
-reviewed authenticated private proxy is configured. Tailscale connectivity does
-not grant task authorization, workspace access, or credential synchronization.
+An approved private proxy may forward to loopback with exact Host/Origin allowlists and application authentication. See [private dashboard access](external_dashboard_access.md). Network reachability grants no task/workspace authority or credential synchronization. Remote-worker coordination remains a future phase.
 
-The future remote worker must register host identity, capabilities, heartbeat,
-task ownership, leases, and recovery evidence in this ledger. It is a separate
-phase from the current local/Discord implementation.
+The future remote worker must register host identity, capabilities, heartbeat, task ownership, leases, and recovery evidence in this ledger. It is a separate phase from the current local/Discord implementation.

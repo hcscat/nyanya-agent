@@ -4,6 +4,11 @@ from nyanya_agent.task_outcomes import SafeOperationError
 from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
+from typing import Literal, get_args
+
+
+OperationProfile = Literal["auto", "flash", "luna", "sol", "astra"]
+OPERATION_PROFILES = get_args(OperationProfile)
 
 
 @dataclass(frozen=True)
@@ -12,14 +17,14 @@ class OperationSpec:
     kind: str = "request"
     prompt: str = ""
     workspace: str = ""
-    profile: str = "auto"
+    profile: OperationProfile = "auto"
     timeout_seconds: int = 600
     plan_id: str = ""
 
     def validate(self):
         if type(self.version) is not int or self.version != 1 or self.kind not in {"request", "apply"}:
             raise SafeOperationError("Unsupported operation version or kind")
-        if self.profile not in {"auto", "flash", "luna", "astra"}:
+        if self.profile not in OPERATION_PROFILES:
             raise SafeOperationError("Unknown model profile")
         if not isinstance(self.prompt, str) or len(self.prompt.encode()) > 60_000:
             raise SafeOperationError("Prompt exceeds operation limit")

@@ -61,7 +61,8 @@ class TelegramBridge:
                 print()
                 return 0
             except Exception as exc:  # noqa: BLE001 - long-running bridge should keep polling.
-                print(f"Telegram bridge error: {exc}", file=sys.stderr)
+                # Provider URLs carry the bot credential; never log raw exceptions.
+                print(f"Telegram bridge error: {type(exc).__name__}", file=sys.stderr)
                 time.sleep(3)
 
     def handle_update(self, update: dict[str, Any]) -> None:

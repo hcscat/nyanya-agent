@@ -11,6 +11,34 @@ Plane: the SQLite execution ledger is the source of truth for task and execution
 status, while the dashboard is primarily a monitoring and authenticated control
 surface.
 
+## Task queries, cancellation and reminders
+
+Operation status comes from the SQLite ledger, not workspace handoff documents. `tasks` or `남은 작업은 무엇인가?` lists the authenticated owner's current work without starting a model or creating another execution task. `why <task-id>` also explains completed and dismissed history. `status` reports local configured limits; it does not contact a provider or prove model readiness.
+
+An explicit list request may include a non-mutation qualifier, for example `미완료 작업 목록만 보여줘. 기존 작업은 변경하거나 취소하지 마.`. It stays in the owner-scoped control path. A mixed request that also asks for cancellation, file work or another effect requires clarification; a negative clause alone does not identify a task to list or cancel.
+
+After listing tasks, `미완료 작업들은 하지 않겠다 취소/제거 해라` acts only on the displayed selection in that conversation, valid for 30 minutes. A changed list requires a fresh list and decision. Use `cancel <task-id>` for an explicit target. Ambiguous or quoted control language asks for clarification.
+
+Cancellation and historical failure are different decisions:
+
+- A failed task can be dismissed with `dismiss <task-id>`; its failure, original request and evidence remain available through `why`.
+- A running task remains pending termination. Lost execution or uncertain file effects stay blocked until inspected; repeated cancellation cannot hide them.
+- Revoked or expired plans settle the parent and approval state when safe. File reconciliation and hash-bound `resolve` remain explicit actions.
+
+Automatic reminders use current state and record a receipt after successful delivery. An unchanged delivered list is not repeated simply because another request finishes or the service restarts. Saved model results do not contain a new reminder footer. Explicit lists remain available. Concurrent sends or a crash between sending and recording a receipt can still duplicate a notice; durable delivery outbox/retry remains future work. Historical saved responses are retained and may contain old text, so compare them with a fresh `tasks` query.
+
+Background reminders exclude ordinary eligible queued work with a live worker and running/cancelling work with a matching, unexpired claim and live worker heartbeat. They retain held or stale work, failures needing a decision, approval waits and ambiguous connector sends. Explicit task lists still show active work. The existing claim/heartbeat policy defines this distinction; an arbitrary task age does not.
+
+Local AI instructions (including AGENTS variants), backup and report paths are excluded from provider snapshots and file-change proposals. This filename policy does not establish that every permitted workspace file is safe to disclose. Explicit no-file-read or inline-only analysis requests use an empty snapshot without walking or reading workspace files. Coordinated Korean prohibitions such as `파일을 읽거나 수정하지 말고` are also handled before discovery. Prohibiting edits alone still allows requested reads. Name a file, a path such as `src/`, or a folder explicitly when workspace context is needed; a generic language name is not a directory request. Conventional `conda_envs`, `site-packages` and `venv` trees are excluded from snapshots, alongside the existing private/dependency exclusions. Secret screening still applies to user input and selected file contents.
+
+An explicitly named full relative or in-workspace absolute file path is checked before bounded directory discovery. A named folder scopes discovery to that folder; the aggregate 200-directory/4,000-name limit remains. Exact files still obey the 80-file/50 KB context limit, no-follow ancestor checks, private/dependency exclusions, UTF-8 regular-file checks and content screening. Unsafe explicit references do not fall back to reading unrelated overview files. For a nested target in a large workspace, name its full relative path rather than only its basename.
+
+## Operation model routing
+
+The current source requests Gemini Flash for initial assessment and low-complexity execution. With importance and impact both below 4, complexity 3–4 selects `luna` (`gpt-6-luna`, `xhigh`). Importance or impact at least 4, or complexity 5, selects `sol` (`gpt-6.1-sol`, `high`). The serialized legacy profile `astra` remains accepted and explicitly aliases that Sol configuration; it does not invoke Astra. Explicit profiles also retain initial Flash assessment.
+
+These fixed source mappings do not prove installation, account access or actual model completion. Failed access stays held without substituting a model. Automatic model discovery, model updates and self-improvement remain deferred. See the [P0 model policy](p0_execution_20260912.md#model-policy) for the full contract.
+
 ## Command
 
 Use one management command:
@@ -303,3 +331,7 @@ Discord `recovery` / `복구` lists held work; `result <task-id>` / `결과 <tas
 Interrupted work is not replayed automatically. Review external processes and side effects before cancelling or making a replacement request. An unresolved claim can hold later owner work; do not edit SQLite to bypass it or assume a cancellation request terminated a process. Dashboard retry returns a conflict until explicit reconciliation is implemented.
 
 The TypeScript state backup command uses SQLite online backup and rejects unsafe destinations/symlinks. Backups are per database/file, not an atomic snapshot of all state. Legacy shell backup/restore helpers use separate path selection; inspect that path and stop writers before a restore. Never restore over a running service.
+
+## Inspected document upload
+
+Explicit file transfer performs bounded local document inspection before Discord transmission. Personal-information patterns require exact one-use owner/hash/destination confirmation; authentication material is blocked. PDF/image and other uninspectable content remain held. See [the upload contract](security_and_reliability.md#upload-file-boundary).

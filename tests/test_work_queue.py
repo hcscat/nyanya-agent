@@ -129,7 +129,7 @@ def test_schema_two_upgrades_preserving_queued_work(tmp_path, monkeypatch):
     monkeypatch.setattr(ledger, "MIGRATIONS", migrations[:2])
     task = ledger.create_task(title="before upgrade", db_path=db)
     monkeypatch.setattr(ledger, "MIGRATIONS", migrations)
-    assert ledger.apply_migrations(db) == 4
+    assert ledger.apply_migrations(db) == ledger.MIGRATIONS[-1][0]
     assert ledger.get_task(task["id"], db_path=db)["status"] == "queued"
     assert work_queue.recovery_tasks(db, "new")[0]["id"] == task["id"]
 

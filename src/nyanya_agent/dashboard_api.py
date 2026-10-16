@@ -26,6 +26,7 @@ from nyanya_agent import dashboard_store as store
 from nyanya_agent import execution_store as ledger
 from nyanya_agent import database as db, operation_store
 from nyanya_agent.execution_runtime import ExecutionCoordinator
+from nyanya_agent.operation_spec import OperationProfile
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "dashboard_static"
@@ -64,7 +65,7 @@ class TaskCreate(BaseModel):
 class OperationCreate(BaseModel):
     prompt: str = Field(min_length=1, max_length=20_000)
     workspace: str = Field(min_length=1, max_length=1000)
-    profile: str = Field(default='auto', pattern='^(auto|flash|luna|astra)$')
+    profile: OperationProfile = "auto"
 
 
 class OperationControl(BaseModel):
@@ -446,6 +447,9 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
     @app.post('/v1/operations', status_code=201, dependencies=[Depends(require_control_token)])
     def create_operation(payload: OperationCreate):
         try:
+            response = app.state.operations.handle_intent(payload.prompt, 'operator', wait=False)
+            if response is not None:
+                return {'kind': 'control', 'message': response}
             return app.state.operations.submit(payload.prompt, payload.workspace, 'operator', profile=payload.profile)
         except (ValueError, PermissionError, OSError, RuntimeError) as exc:
             raise HTTPException(status_code=409, detail=f'Operation prerequisite failed: {type(exc).__name__}') from exc
@@ -513,18 +517,25 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=403, detail="Task owner mismatch")
 
     def cancel_operation_task(task, expected_execution_id=None):
-        with db.connect(app.state.db_path) as conn:
-            operation = conn.execute("SELECT 1 FROM task_operations WHERE task_id=?", (task["id"],)).fetchone()
-        if not operation:
-            return False
+        # All task kinds share the same uncertainty guards, including legacy attempts.
         try:
+            execution_id = expected_execution_id or task.get('current_execution_id')
+            with db.connect(app.state.db_path) as conn:
+                operation = conn.execute('SELECT 1 FROM task_operations WHERE task_id=?', (task['id'],)).fetchone()
+            execution = ledger.get_execution(execution_id, db_path=app.state.db_path) if execution_id else None
+            if (not operation and execution and not execution.get('metadata', {}).get('worker_id')
+                    and execution['status'] not in ledger.EXECUTION_TERMINAL_STATUSES):
+                # Adapter-managed processes need an actual owned-handle stop, not only a ledger change.
+                app.state.execution_coordinator.cancel(execution_id, actor='operator')
             operation_store.cancel(
-                app.state.db_path, task["id"], "operator", expected_execution_id=expected_execution_id
+                app.state.db_path, task["id"], "operator", expected_execution_id=execution_id
             )
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail="Task owner mismatch") from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail="Execution state changed; refresh before cancelling") from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail="Runtime cancellation needs reconciliation") from exc
         return True
 
     @app.post("/v1/tasks/{task_id}/cancel", dependencies=[Depends(require_control_token)])
@@ -533,32 +544,8 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
         if task is None:
             raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
         require_cancel_owner(task)
-        if cancel_operation_task(task):
-            return ledger.get_task(task_id, db_path=app.state.db_path)
-        if task["status"] in ledger.TASK_TERMINAL_STATUSES:
-            return task
-        execution_id = task.get("current_execution_id")
-        if execution_id:
-            execution = ledger.get_execution(execution_id, db_path=app.state.db_path)
-            if execution and execution["status"] not in ledger.EXECUTION_TERMINAL_STATUSES:
-                try:
-                    ledger.transition_execution(
-                        execution_id,
-                        "cancelling",
-                        actor="operator",
-                        message=payload.reason or "Cancellation requested",
-                        db_path=app.state.db_path,
-                    )
-                    return ledger.get_task(task_id, db_path=app.state.db_path)
-                except ValueError as exc:
-                    raise HTTPException(status_code=409, detail="Execution state changed; refresh before cancelling") from exc
-        return ledger.transition_task(
-            task_id,
-            "cancelled",
-            actor="operator",
-            message=payload.reason or "Task cancelled",
-            db_path=app.state.db_path,
-        )
+        cancel_operation_task(task)
+        return ledger.get_task(task_id, db_path=app.state.db_path)
 
     @app.post("/v1/tasks/{task_id}/retry", dependencies=[Depends(require_control_token)])
     def retry_task(task_id: str, payload: ControlAction) -> dict[str, Any]:
@@ -592,22 +579,8 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
             if execution["status"] in ledger.EXECUTION_TERMINAL_STATUSES:
                 return execution
             raise HTTPException(status_code=409, detail="Execution is no longer current")
-        if cancel_operation_task(task, execution_id):
-            return ledger.get_execution(execution_id, db_path=app.state.db_path)
-        if execution and execution.get("metadata", {}).get("worker_id"):
-            if execution["status"] in ledger.EXECUTION_TERMINAL_STATUSES:
-                return execution
-            return ledger.transition_execution(execution_id, "cancelling", force=True, db_path=app.state.db_path)
-        try:
-            return app.state.execution_coordinator.cancel(
-                execution_id,
-                actor="operator",
-                reason=payload.reason,
-            )
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=f"Execution not found: {execution_id}") from exc
-        except RuntimeError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        cancel_operation_task(task, execution_id)
+        return ledger.get_execution(execution_id, db_path=app.state.db_path)
 
     @app.get("/v1/runtime-sessions")
     def runtime_sessions(
