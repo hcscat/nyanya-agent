@@ -182,3 +182,15 @@ def test_release_gate_rejects_forced_staged_node_modules(tmp_path, dependency_pa
     assert result.returncode != 0
     assert dependency_path in output
     assert "denylisted path is tracked by git" in output
+
+
+def test_project_ignore_keeps_all_local_instructions_private(tmp_path):
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    (repo / '.gitignore').write_text((ROOT / '.gitignore').read_text())
+    fixture_git(repo, 'init', '-q')
+    for path in ('AGENTS.md', 'nested/AGENTS.md', 'AGENTS.override.md', 'nested/AGENTS.override.md'):
+        write_fixture(repo, path)
+    public = set(fixture_git(repo, 'ls-files', '--others', '--exclude-standard').stdout.splitlines())
+    assert public == {'.gitignore'}
+    assert CHECKS['is_private_distribution_path']('AGENTS.md')

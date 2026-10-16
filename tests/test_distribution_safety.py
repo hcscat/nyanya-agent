@@ -53,4 +53,4 @@ def test_clean_source_install_without_network_or_services(tmp_path):
     assert (state / ".env").is_file()
     help_result = subprocess.run([str(binary / "nyanya"), "--help"], capture_output=True, text=True, timeout=10)
     assert help_result.returncode == 0
-    assert "Usage:" in help_result.stdout
+    assert "usage:" in help_result.stdout.lower()

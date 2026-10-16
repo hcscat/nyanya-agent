@@ -312,9 +312,7 @@ dashboard DB, WAL/SHM 파일, 실제 요청 로그, private export는 커밋하�
 OperationSpec을 실행한다. 업로드 callback은 호환용 `task_service.py` 경로를 유지한다.
 대시보드는 모니터링과 인증된 관리가 우선이다.
 
-원격/forwarded 읽기 API와 상태 변경 API는 `NYANYA_DASHBOARD_CONTROL_TOKEN`
-또는 owner-only token file 인증이 필요하다. token은 URL, HTML, 로그, Git에 기록하지 않는다.
-루프백 읽기 허용은 공개 접속 허용을 뜻하지 않는다.
+루프백 읽기를 포함한 모든 `/v1/` 데이터·상태 변경 API는 `NYANYA_DASHBOARD_CONTROL_TOKEN` 또는 owner-only token file 인증이 필요하다. 정확한 Host/Origin 검사도 적용한다. token은 URL, HTML, 로그, Git에 기록하지 않는다. 정적 화면과 health는 인증 없이 열리지만 운영 기록을 제공하지 않는다.
 
 주요 API:
 
