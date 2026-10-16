@@ -228,6 +228,9 @@ Useful Discord commands:
 | `!nyanya tasks` | Show the current user's pending, running, and queued tasks. |
 | `!nyanya tasks all` | Show all users' tasks. Admin only. |
 | `!nyanya upload <file_path>` | Upload a local workspace file. Outside a configured file-share channel, the file is sent to `NYANYA_DISCORD_FILE_SHARE_CHANNEL_IDS`. |
+| `!nyanya upload-cancel <id>` | Cancel a pending document-transfer confirmation; it cannot undo an SDK send that has started. |
+| `!nyanya upload-reject <id>` | Reject a pending document-transfer confirmation. |
+| `!nyanya upload-approve <id> <sha256>` | Confirm one inspected file and destination as the original requester in the original channel, before its 300-second expiry. |
 | `!nyanya gemini <prompt>` | Assess with Flash and execute with the Flash profile. |
 | `!nyanya codex <prompt>` | Assess with Flash and execute with the Luna/Codex profile. |
 | `!nyanya codex-work <prompt>` | Use Luna/Codex to propose changes; existing-file apply needs exact plan approval. |
@@ -254,12 +257,17 @@ Important work policy:
 
 File upload behavior:
 
-1. Resolve the requested file path relative to the user's workspace.
-2. Verify that the path is inside an allowed workspace root.
-3. Verify that the target exists and is a file.
-4. Upload it to the current channel when the command is sent inside a configured file-share channel.
-5. When the command is sent from another allowed channel, upload it to the first configured `NYANYA_DISCORD_FILE_SHARE_CHANNEL_IDS` channel and reply with a confirmation in the request channel.
-6. Record the upload request in the dashboard ledger when dashboard recording is enabled.
+1. Resolve the explicitly requested file inside the requester's registered workspace. POSIX no-follow checks cover each path component; only single-link regular files are accepted. Hidden/authentication/session/key paths remain blocked. Ordinary `reports`, `data` and `private` folder names alone do not block an explicit upload; automatic model-context exclusions remain unchanged.
+2. Select the configured file-share destination, or the current channel when it is already a file-share channel or no destination is configured. A failed configured-destination lookup holds the upload rather than falling back to an ordinary channel.
+3. Require a valid SDK guild file-size limit and destination identity. The effective limit is the smaller of that limit and the app's 8 MiB cap (8,388,608 bytes). Missing/invalid SDK metadata, including a DM without guild metadata, holds the upload.
+4. Freeze the bounded original bytes and inspect them locally using Python's standard library. Supported text extensions accept strict UTF-8, BOM-marked UTF-16 or strict CP949. Text-only DOCX/XLSX/PPTX packages require bounded extraction of every XML part and package metadata. No model, OCR, parser download or network extraction is used.
+5. Hold PDFs, images/scans, legacy Office files, ordinary archives, encrypted files, executables and unsupported/incompletely extracted content. Office media/images, external relationships and unknown binary parts are also held. Renaming a binary file to a text extension does not authorize it.
+6. Detected authentication material is blocked and cannot be overridden by confirmation. Personal-information patterns cover email, Korean mobile phone, resident ID, payment card, labeled bank account/passport/name/address, and local home paths. Reports show kinds and counts, never the matched values. No detected pattern is not a guarantee that a document has no personal data.
+7. If patterns are found, hold the transfer and show the approval ID, exact SHA-256, destination, expiry and counts. The original requester must use `upload-approve <id> <sha256>` in the original channel, or reject/cancel it. Generic file-plan `approve` does not approve an upload. At most 16 pending upload confirmations are retained per owner; each confirmation expires after 300 seconds and can authorize only one send attempt.
+8. Immediately before sending, recheck the actor, conversation/channel, registered workspace, relative path, file identity, frozen-byte hash and destination guild/channel. A changed file/destination, wrong hash, rejection, cancellation before sending, expiry or reused approval does not authorize another transfer. The sender receives the exact inspected bytes.
+9. A send that has started can have an uncertain outcome on cancellation or failure. Do not automatically retry or describe cancellation as proof of non-delivery; inspect the destination first. Upload confirmations reuse the private approval/audit ledger under a separate action, while dashboard recording controls the ordinary request record.
+
+See [security and reliability](docs/security_and_reliability.md#upload-file-boundary) for extraction bounds, pattern limitations and confirmation scope. This upload path transfers files; it does not add PDF/image understanding to the model context.
 
 ## Telegram Bridge
 

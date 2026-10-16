@@ -280,13 +280,14 @@ class DurableTaskService:
             saved = work_queue.result(self.db_path, task_id, self._owner_key(task))
             answer = saved["response"] if saved else outcome.text
             self._emit(current, current["status"], answer)
-            try:
-                self._responders[task_id](answer)
-            except Exception as exc:
-                work_queue.record_delivery(self.db_path, claim["execution_id"], delivered=False,
-                                           error=type(exc).__name__)
-            else:
-                work_queue.record_delivery(self.db_path, claim["execution_id"], delivered=True)
+            if work_queue.claim_delivery(self.db_path, task_id, self._owner_key(task), claim["execution_id"]):
+                try:
+                    self._responders[task_id](answer)
+                except Exception as exc:
+                    work_queue.record_delivery(self.db_path, claim["execution_id"], delivered=False,
+                                               error=type(exc).__name__)
+                else:
+                    work_queue.record_delivery(self.db_path, claim["execution_id"], delivered=True)
         except Exception:
             # Preserve an uncommitted/expired attempt for operator reconciliation.
             # Never force a terminal status over a newer execution.
@@ -384,23 +385,45 @@ class DurableTaskService:
             return task
         with self._lock:
             event = self._cancel_events.get(task_id)
-            if event is not None:
-                event.set()
         execution_id = task.get("current_execution_id")
         if execution_id:
+            def completed_attempt() -> dict[str, Any] | None:
+                current = ledger.get_task(task_id, db_path=self.db_path)
+                finished = ledger.get_execution(execution_id, db_path=self.db_path)
+                if (current and finished and current.get("current_execution_id") == execution_id
+                        and finished["task_id"] == task_id
+                        and current["status"] in ledger.TASK_TERMINAL_STATUSES
+                        and finished["status"] in ledger.EXECUTION_TERMINAL_STATUSES):
+                    return current
+                return None
+
             execution = ledger.get_execution(execution_id, db_path=self.db_path)
-            if execution and execution["status"] == "awaiting_approval":
-                return ledger.transition_execution(execution_id, "cancelled", actor=actor,
-                                                   message="Operator dismissed held work", db_path=self.db_path)
+            if execution and execution["status"] in ledger.EXECUTION_TERMINAL_STATUSES:
+                completed = completed_attempt()
+                if completed is not None:
+                    return completed
+                raise ValueError("Stale or inconsistent execution cannot cancel the current task")
             if execution and execution["status"] in ACTIVE_EXECUTION_STATUSES:
-                return ledger.transition_execution(
-                    execution_id,
-                    "cancelling",
-                    actor=actor,
-                    message=reason or "Cancellation requested",
-                    force=True,
-                    db_path=self.db_path,
-                )
+                held = execution["status"] == "awaiting_approval"
+                try:
+                    result = ledger.transition_execution(
+                        execution_id,
+                        "cancelled" if held else "cancelling",
+                        actor=actor,
+                        message="Operator dismissed held work" if held else reason or "Cancellation requested",
+                        force=not held,
+                        db_path=self.db_path,
+                    )
+                except ledger.TerminalExecutionTransitionError:
+                    completed = completed_attempt()
+                    if completed is not None:
+                        return completed
+                    raise
+                # A fast handler may finish as soon as this signal is delivered.
+                # Persist the cancellation first; never signal a rejected request.
+                if event is not None:
+                    event.set()
+                return result
         cancelled = ledger.transition_task(
             task_id,
             "cancelled",

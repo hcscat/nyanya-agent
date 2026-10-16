@@ -5,39 +5,26 @@ POSIX dir-fd traversal refuses symlinks; non-POSIX apply fails closed.
 """
 
 from nyanya_agent.task_outcomes import SafeOperationError
+from nyanya_agent.context_security import (
+    context_references, inline_context_only, select_context_paths, sensitive_content,
+    private_path_part as private_part, PRIVATE_PATH_PARTS,
+)
 from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime, timedelta
 import difflib
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 import stat
 from nyanya_agent import database as db, execution_store as ledger
-from nyanya_agent.operation_store import check_workspace, now, require_apply_ownership
+from nyanya_agent.operation_store import check_workspace, now, require_apply_ownership, _unresolved_effects
 
 
 MAX_BYTES = 2_000_000
-PRIVATE = {
-    ".git",
-    ".env",
-    ".venv",
-    "node_modules",
-    "__pycache__",
-    ".codex",
-    ".gemini",
-    ".ssh",
-    "data",
-    "logs",
-    "run",
-    "sessions",
-    "private",
-    "downloads",
-    "user_workspaces.json",
-    "local_system.md",
-    "credentials.json",
-    "auth.json",
-}
+PRIVATE = PRIVATE_PATH_PARTS
+# Conventional dependency trees are not automatic source context, even when named.
+SNAPSHOT_DEPENDENCIES = {"conda_envs", "site-packages", "venv"}
 
 
 def digest(data):
@@ -53,7 +40,7 @@ def relative(value):
         or path.is_absolute()
         or ".." in path.parts
         or "\\" in value
-        or any(part in PRIVATE or part.startswith(".env") for part in path.parts)
+        or any(private_part(part) for part in path.parts)
     ):
         raise SafeOperationError("Unsafe or private relative file path")
     return path
@@ -61,7 +48,7 @@ def relative(value):
 
 @contextmanager
 def parent_fd(root, value, create=False, mutation_guard=nullcontext):
-    if os.name != "posix":
+    if os.name != "posix" or not all(hasattr(os, flag) for flag in ("O_DIRECTORY", "O_NOFOLLOW")):
         raise SafeOperationError("Reviewed apply requires POSIX no-follow directory operations")
     path = relative(value)
     fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -88,8 +75,10 @@ def read_at(fd, name):
         return None
     try:
         info = os.fstat(child)
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > MAX_BYTES:
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise SafeOperationError("Only bounded, single-link regular files are supported")
+        if info.st_size > MAX_BYTES:
+            raise SafeOperationError("File too large")
         with os.fdopen(os.dup(child), "rb") as stream:
             value = stream.read(MAX_BYTES + 1)
         if len(value) > MAX_BYTES:
@@ -107,37 +96,130 @@ def read_file(root, path):
         return None
 
 
-def snapshot(root):
-    """Bounded text context, not a recursive secret or host inventory."""
-    values = {}
-    total = 0
+def _context_path_allowed(name):
+    path = PurePosixPath(name)
+    return bool(path.parts) and all(
+        not private_part(part) and not part.startswith(".") and part.casefold() not in SNAPSHOT_DEPENDENCIES
+        for part in path.parts
+    ) and not path.name.casefold().endswith((".pem", ".key", ".db", ".sqlite", ".log"))
+
+
+@contextmanager
+def _context_directory(root, name):
+    if (os.name != "posix" or not hasattr(os, "fwalk")
+            or not all(hasattr(os, flag) for flag in ("O_DIRECTORY", "O_NOFOLLOW"))):
+        raise SafeOperationError("Context discovery requires POSIX no-follow directory operations")
+    if name:
+        with parent_fd(root, name) as (parent, basename):
+            fd = os.open(basename, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+    else:
+        fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def _context_names(root, starts):
+    """Bound discovery across all scopes, anchored to no-follow directory handles."""
+    names = []
     scanned = 0
-    for folder, dirs, files in os.walk(root, followlinks=False):
-        scanned += 1
-        if scanned > 200 or len(values) >= 80 or total >= 50_000:
+    seen = set()
+    for start in dict.fromkeys(starts):
+        if scanned >= 200 or len(names) >= 4000:
             break
-        dirs[:] = sorted(
-            d for d in dirs if d not in PRIVATE and not d.startswith(".") and not Path(folder, d).is_symlink()
-        )
-        for filename in sorted(files):
-            if (
-                filename in PRIVATE
-                or filename.startswith(".")
-                or filename.endswith((".pem", ".key", ".db", ".sqlite", ".log"))
-            ):
-                continue
-            name = Path(folder, filename).relative_to(root).as_posix()
+        try:
+            with _context_directory(root, start) as fd:
+                for folder, dirs, filenames, _ in os.fwalk(".", dir_fd=fd, follow_symlinks=False):
+                    scanned += 1
+                    if scanned > 200 or len(names) >= 4000:
+                        return names
+                    dirs[:] = sorted(
+                        d for d in dirs if not private_part(d) and d.casefold() not in SNAPSHOT_DEPENDENCIES
+                        and not d.startswith(".")
+                    )
+                    for filename in sorted(filenames):
+                        name = (PurePosixPath(start) / folder / filename).as_posix()
+                        if _context_path_allowed(name) and name not in seen:
+                            names.append(name)
+                            seen.add(name)
+                        if len(names) >= 4000:
+                            break
+        except (OSError, ValueError):
+            continue
+    return names
+
+
+def snapshot(root, request=None, diagnostics=None):
+    """Read scoped whole files; optional statuses contain no contents or raw errors."""
+    def note(name, reason):
+        if diagnostics is not None and (name in diagnostics or len(diagnostics) < 160):
+            if len(name.encode("utf-8")) <= 1024:
+                diagnostics[name] = reason
+
+    if inline_context_only(request):
+        return {}
+    references, has_explicit = context_references(request, root)
+    allowed = []
+    for name, directory in references:
+        if not name or _context_path_allowed(name):
+            allowed.append((name, directory))
+        else:
+            note(name, "filtered_private")
+    references = allowed
+    values = {}
+    attempted = set()
+    total = 0
+
+    def include(name):
+        nonlocal total
+        if name in attempted:
+            return
+        attempted.add(name)
+        if len(values) >= 80:
+            note(name, "omitted_count_bound")
+            return
+        try:
+            data = read_file(root, name)
+            if data is None:
+                note(name, "missing")
+                return
+            if b"\0" in data:
+                note(name, "unsupported_type")
+                return
+            if total + len(data) > 50_000:
+                note(name, "oversized")
+                return
             try:
-                data = read_file(root, name)
-                if data is None or b"\0" in data:
-                    continue
                 content = data.decode("utf-8")
-            except (OSError, ValueError, UnicodeError):
-                continue
-            if len(values) >= 80 or total + len(data) > 50_000:
-                continue
-            values[name] = {"sha256": digest(data), "content": content}
-            total += len(data)
+            except UnicodeError:
+                note(name, "unsupported_encoding")
+                return
+            if sensitive_content(content):
+                note(name, "filtered_sensitive")
+                return
+        except SafeOperationError as exc:
+            note(name, "oversized" if str(exc) == "File too large" else "unreadable")
+            return
+        except (OSError, ValueError):
+            note(name, "unreadable")
+            return
+        values[name] = {"sha256": digest(data), "content": content}
+        note(name, "included")
+        total += len(data)
+
+    for name, _ in references:
+        if name:
+            include(name)
+    if len(values) >= 80 or total >= 50_000:
+        return values
+    directories = [name for name, directory in references if directory and name not in values]
+    bare_files = [name for name, directory in references if not directory and name and "/" not in name and name not in values]
+    starts = directories + ([""] if not has_explicit or bare_files else [])
+    for name in select_context_paths(_context_names(root, starts), request, root):
+        if len(values) >= 80 or total >= 50_000:
+            break
+        include(name)
     return values
 
 
@@ -261,25 +343,141 @@ def preview(path, plan_id, owner):
 def decide(path, plan_id, owner, plan_hash="", revoke=False):
     with db.connect(path) as conn:
         conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute("SELECT * FROM change_plans WHERE id=? AND owner_key=?", (plan_id, owner)).fetchone()
-        if not row or row["status"] not in {"pending", "approved"}:
-            raise SafeOperationError("Plan is not awaiting a decision")
-        parent = conn.execute("SELECT status FROM agent_tasks WHERE id=?", (row["task_id"],)).fetchone()
-        if not revoke and (not parent or parent["status"] not in {"queued", "running", "awaiting_approval"}):
-            raise SafeOperationError("Original task is no longer eligible for approval")
-        if not revoke and (row["expires_at"] <= now() or row["plan_hash"] != plan_hash):
-            raise SafeOperationError("Plan expired or revision hash changed")
-        conn.execute(
-            "UPDATE change_plans SET status=?,decided_by=? WHERE id=?",
-            ("revoked" if revoke else "approved", owner, plan_id),
-        )
-        ledger.append_event_conn(
-            conn,
-            task_id=row["task_id"],
-            event_type="plan.revoked" if revoke else "plan.approved",
-            message="Authenticated owner decision",
-            metadata={"plan_id": plan_id},
-        )
+        decide_conn(conn, plan_id, owner, plan_hash, revoke)
+
+
+def decide_conn(conn, plan_id, owner, plan_hash="", revoke=False):
+    """Reuse decision checks within the caller's atomic approval/admission transaction."""
+    row = conn.execute("SELECT * FROM change_plans WHERE id=? AND owner_key=?", (plan_id, owner)).fetchone()
+    if not row or row["status"] not in {"pending", "approved"}:
+        raise SafeOperationError("Plan is not awaiting a decision")
+    parent = conn.execute("SELECT status FROM agent_tasks WHERE id=?", (row["task_id"],)).fetchone()
+    if not revoke and (not parent or parent["status"] not in {"queued", "running", "awaiting_approval"}):
+        raise SafeOperationError("Original task is no longer eligible for approval")
+    if not revoke and (row["expires_at"] <= now() or row["plan_hash"] != plan_hash):
+        raise SafeOperationError("Plan expired or revision hash changed")
+    conn.execute(
+        "UPDATE change_plans SET status=?,decided_by=? WHERE id=?",
+        ("revoked" if revoke else "approved", owner, plan_id),
+    )
+    if revoke:
+        _settle_closed_plan(conn, row["task_id"], owner, "revoked")
+    else:
+        conn.execute("UPDATE approvals SET status='approved',decided_by=?,decided_at=? "
+                     "WHERE task_id=? AND action='feedback.review' AND status='pending'",
+                     (owner, now(), row["task_id"]))
+    ledger.append_event_conn(
+        conn,
+        task_id=row["task_id"],
+        event_type="plan.revoked" if revoke else "plan.approved",
+        message="Authenticated owner decision",
+        metadata={"plan_id": plan_id},
+    )
+
+
+def _settle_closed_plan(conn, task_id, owner, reason):
+    """Close review state only after checking all plans, children and effect evidence."""
+    timestamp = now()
+    if conn.execute("SELECT 1 FROM change_plans WHERE task_id=? AND status IN ('pending','approved','applying')",
+                    (task_id,)).fetchone():
+        return
+    conn.execute("UPDATE approvals SET status=?,decided_by=?,decided_at=? "
+                 "WHERE task_id=? AND status='pending'",
+                 ("expired" if reason == "expired" else "rejected", owner, timestamp, task_id))
+    parent = conn.execute("SELECT status FROM agent_tasks WHERE id=?", (task_id,)).fetchone()
+    if not parent:
+        return
+    if conn.execute("SELECT 1 FROM task_claims WHERE task_id=? AND released=0 AND expires_at>?",
+                    (task_id, timestamp)).fetchone():
+        # The worker must finish or lose its claim before the parent is settled.
+        return
+    if parent["status"] in {"completed", "failed", "cancelled"}:
+        # Older ledgers can have a terminal parent and an active-looking review attempt.
+        # Close only approval waits; running/lost attempts remain for reconciliation.
+        uncertain = _unresolved_effects(conn, task_id)
+        _close_review_executions(conn, task_id, timestamp, reason, uncertain)
+        if uncertain:
+            conn.execute("UPDATE agent_tasks SET status='blocked',completed_at=NULL,updated_at=? WHERE id=?",
+                         (timestamp, task_id))
+            ledger.append_event_conn(conn, task_id=task_id, event_type="operation.review_effects_held",
+                                     status="blocked", message="Review effects require reconciliation")
+        return
+    children = conn.execute(
+        "SELECT t.id,t.status FROM agent_tasks t JOIN task_operations o ON o.task_id=t.id "
+        "WHERE o.parent_task_id=?", (task_id,),
+    ).fetchall()
+    for child in children:
+        if child["status"] == "queued":
+            conn.execute("UPDATE agent_tasks SET status='cancelled',completed_at=?,updated_at=? WHERE id=?",
+                         (timestamp, timestamp, child["id"]))
+            conn.execute("UPDATE task_operations SET eligible=0,hold_reason=? WHERE task_id=?",
+                         (f"plan_{reason}", child["id"]))
+        elif child["status"] in {"running", "cancelling"}:
+            conn.execute("UPDATE agent_tasks SET status='cancelling',updated_at=? WHERE id=?",
+                         (timestamp, child["id"]))
+            conn.execute("UPDATE executions SET status='cancelling',updated_at=? "
+                         "WHERE task_id=? AND status='running'", (timestamp, child["id"]))
+    uncertain = _unresolved_effects(conn, task_id)
+    _close_review_executions(conn, task_id, timestamp, reason, uncertain)
+    status = "blocked" if uncertain else "cancelled"
+    conn.execute("UPDATE agent_tasks SET status=?,completed_at=?,updated_at=? WHERE id=?",
+                 (status, None if uncertain else timestamp, timestamp, task_id))
+    conn.execute("UPDATE task_operations SET eligible=0,hold_reason=?,diagnosis=? WHERE task_id=?",
+                 (f"plan_{reason}", "File effects require reconciliation" if uncertain else
+                  f"Review plan {reason} without file apply", task_id))
+    ledger.append_event_conn(conn, task_id=task_id, event_type="operation.plan_closed",
+                             status=status, message=f"Review plan {reason}; parent settled")
+
+
+def _close_review_executions(conn, task_id, timestamp, reason, uncertain):
+    status = "lost" if uncertain else "cancelled"
+    rows = conn.execute(
+        "SELECT id FROM executions WHERE task_id=? AND status='awaiting_approval'",
+        (task_id,),
+    ).fetchall()
+    for row in rows:
+        conn.execute("UPDATE executions SET status=?,error=?,ended_at=?,updated_at=? WHERE id=?",
+                     (status, f"Review plan {reason}", timestamp, timestamp, row["id"]))
+        ledger.append_event_conn(conn, task_id=task_id, execution_id=row["id"],
+                                 event_type="execution.review_closed", status=status,
+                                 message=f"Review plan {reason}; attempt settled")
+
+
+def settle_expired(path):
+    """Explicit maintenance action; listing and explaining tasks stay read-only."""
+    timestamp = now()
+    settled = 0
+    with db.connect(path) as conn:
+        pending = conn.execute("SELECT 1 FROM change_plans WHERE status IN ('pending','approved') "
+                               "AND expires_at<=? LIMIT 1", (timestamp,)).fetchone()
+        stale = conn.execute(
+            "SELECT 1 FROM agent_tasks t JOIN executions e ON e.task_id=t.id "
+            "WHERE t.status IN ('completed','failed','cancelled') AND e.status='awaiting_approval' "
+            "AND NOT EXISTS (SELECT 1 FROM change_plans p WHERE p.task_id=t.id "
+            "AND p.status IN ('pending','approved','applying')) LIMIT 1"
+        ).fetchone()
+        if not pending and not stale:
+            return 0
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute("SELECT id,task_id,owner_key FROM change_plans "
+                            "WHERE status IN ('pending','approved') AND expires_at<=?", (timestamp,)).fetchall()
+        for row in rows:
+            conn.execute("UPDATE change_plans SET status='expired' WHERE id=?", (row["id"],))
+            _settle_closed_plan(conn, row["task_id"], row["owner_key"], "expired")
+            ledger.append_event_conn(conn, task_id=row["task_id"], event_type="plan.expired",
+                                     status="expired", message="Review plan expired",
+                                     metadata={"plan_id": row["id"]})
+            settled += 1
+        # Reconcile historical terminal parents once their plans are no longer open.
+        legacy = conn.execute(
+            "SELECT DISTINCT t.id FROM agent_tasks t JOIN executions e ON e.task_id=t.id "
+            "WHERE t.status IN ('completed','failed','cancelled') AND e.status='awaiting_approval' "
+            "AND NOT EXISTS (SELECT 1 FROM change_plans p WHERE p.task_id=t.id "
+            "AND p.status IN ('pending','approved','applying'))"
+        ).fetchall()
+        for row in legacy:
+            _settle_closed_plan(conn, row["id"], "system", "closed")
+    return settled
 
 
 @contextmanager
@@ -477,6 +675,13 @@ def resolve(path, plan_id, owner, observed_hash):
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT status FROM change_plans WHERE id=?", (plan_id,)).fetchone()
             parent = conn.execute("SELECT status FROM agent_tasks WHERE id=?", (plan["task_id"],)).fetchone()
+            if conn.execute(
+                "SELECT 1 FROM task_claims c JOIN agent_tasks t ON t.id=c.task_id "
+                "LEFT JOIN task_operations o ON o.task_id=t.id "
+                "WHERE (c.task_id=? OR o.parent_task_id=?) AND c.released=0 AND c.expires_at>?",
+                (plan["task_id"], plan["task_id"], now()),
+            ).fetchone():
+                raise SafeOperationError("Active execution must stop before file effects can be resolved")
             if row["status"] not in {"applying", "uncertain", "applied"} or (
                 row["status"] == "applied" and parent["status"] == "completed"
             ):
@@ -485,26 +690,48 @@ def resolve(path, plan_id, owner, observed_hash):
             conn.execute(
                 "UPDATE change_plans SET status=? WHERE id=?", ("applied" if complete else "reconciled", plan_id)
             )
-            conn.execute(
-                "UPDATE agent_tasks SET status=?,updated_at=?,completed_at=? WHERE id=?",
-                ("completed" if complete else "blocked", now(), now() if complete else None, plan["task_id"]),
-            )
             reason = "파일 상태 확인 완료. 남은 변경은 현재 파일 기준의 새 변경안을 요청하세요."
-            conn.execute(
-                "UPDATE task_operations SET eligible=0,hold_reason=?,diagnosis=? WHERE task_id=?",
-                ("" if complete else "partial_apply_resolved", "" if complete else reason, plan["task_id"]),
-            )
             related = conn.execute(
                 "SELECT t.id FROM agent_tasks t JOIN task_operations o ON o.task_id=t.id "
                 "WHERE json_extract(o.spec_json,'$.kind')='apply' AND json_extract(o.spec_json,'$.plan_id')=? "
                 "AND t.status IN ('blocked','failed')",
                 (plan_id,),
             ).fetchall()
+            resolved_executions = [item["id"] for item in conn.execute(
+                "SELECT e.id FROM executions e JOIN agent_tasks t ON t.current_execution_id=e.id "
+                "WHERE t.id=? AND e.task_id=t.id AND e.status='lost' "
+                "AND e.started_at<=? AND e.ended_at>=? "
+                "UNION ALL "
+                "SELECT e.id FROM executions e JOIN task_operations o ON o.task_id=e.task_id "
+                "WHERE o.parent_task_id=? AND json_extract(o.spec_json,'$.plan_id')=? AND e.status='lost'",
+                (plan["task_id"], plan["created_at"], plan["created_at"], plan["task_id"], plan_id),
+            )]
+            ledger.append_event_conn(
+                conn,
+                task_id=plan["task_id"],
+                event_type="plan.resolved",
+                message="Owner acknowledged observed file state; no file writes performed",
+                metadata={"plan_id": plan_id, "files": evidence, "complete": complete,
+                          "resolved_execution_ids": resolved_executions},
+            )
+            unresolved = _unresolved_effects(conn, plan["task_id"])
+            parent_status = "completed" if complete and not unresolved else "blocked"
+            conn.execute(
+                "UPDATE agent_tasks SET status=?,updated_at=?,completed_at=? WHERE id=?",
+                (parent_status, now(), now() if parent_status == "completed" else None, plan["task_id"]),
+            )
+            diagnosis = ("다른 실행 효과의 확인이 필요합니다." if unresolved else "") if complete else reason
+            conn.execute(
+                "UPDATE task_operations SET eligible=0,hold_reason=?,diagnosis=? WHERE task_id=?",
+                ("unresolved_effects" if unresolved else "" if complete else "partial_apply_resolved",
+                 diagnosis, plan["task_id"]),
+            )
             for task in related:
-                status = "completed" if complete else "cancelled"
+                child_unresolved = _unresolved_effects(conn, task["id"])
+                status = "blocked" if child_unresolved else "completed" if complete else "cancelled"
                 conn.execute(
                     "UPDATE agent_tasks SET status=?,completed_at=?,updated_at=? WHERE id=?",
-                    (status, now(), now(), task["id"]),
+                    (status, now() if status in {"completed", "cancelled"} else None, now(), task["id"]),
                 )
                 ledger.append_event_conn(
                     conn,
@@ -514,13 +741,6 @@ def resolve(path, plan_id, owner, observed_hash):
                     message="Owner reconciled interrupted file effects; see plan resolution",
                     metadata={"plan_id": plan_id},
                 )
-            ledger.append_event_conn(
-                conn,
-                task_id=plan["task_id"],
-                event_type="plan.resolved",
-                message="Owner acknowledged observed file state; no file writes performed",
-                metadata={"plan_id": plan_id, "files": evidence, "complete": complete},
-            )
     return "파일 상태 확인을 기록했습니다. " + ("변경안의 모든 결과가 확인되었습니다." if complete else reason)
 
 

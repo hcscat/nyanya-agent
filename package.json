@@ -63,7 +63,9 @@
     "packaging/release/*.py",
     "packaging/release/*.txt",
     ".env.example",
-    "pyproject.toml"
+    "pyproject.toml",
+    "docs/security_and_reliability.md",
+    "docs/user_acceptance_tests.md"
   ],
   "engines": {
     "node": ">=18"

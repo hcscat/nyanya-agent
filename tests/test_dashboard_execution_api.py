@@ -6,6 +6,8 @@ from nyanya_agent import dashboard_api
 from nyanya_agent import execution_store as ledger
 
 
+
+
 def test_execution_read_api_and_authenticated_control_actions(tmp_path, monkeypatch):
     db_path = tmp_path / "dashboard.db"
     monkeypatch.setenv("NYANYA_DASHBOARD_CONTROL_TOKEN", "test-control-token")
@@ -43,10 +45,10 @@ def test_execution_read_api_and_authenticated_control_actions(tmp_path, monkeypa
     assert retried.status_code == 409
     assert client.get(f"/v1/tasks/{task['id']}", headers={"Authorization": "Bearer test-control-token"}).json()["status"] == "cancelled"
 
-    health = client.get("/health").json()
-    assert health["schema_version"] == 4
+    health = client.get("/health", headers={"Authorization": "Bearer test-control-token"}).json()
+    assert health["schema_version"] == ledger.MIGRATIONS[-1][0]
     assert health["control_auth_configured"] is True
-    assert client.get("/v1/summary", headers={"Authorization": "Bearer test-control-token"}).json()["execution_ledger"]["schema_version"] == 4
+    assert client.get("/v1/summary", headers={"Authorization": "Bearer test-control-token"}).json()["execution_ledger"]["schema_version"] == ledger.MIGRATIONS[-1][0]
 
 
 def test_execution_project_codex_session_and_task_filters(tmp_path, monkeypatch):

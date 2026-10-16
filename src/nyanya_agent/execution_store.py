@@ -18,6 +18,10 @@ from nyanya_agent import database as legacy
 from nyanya_agent.operation_schema import SQL as MIGRATION_4
 
 
+class TerminalExecutionTransitionError(ValueError):
+    """The current attempt finished before its requested transition committed."""
+
+
 TASK_TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 EXECUTION_TERMINAL_STATUSES = {"succeeded", "failed", "cancelled", "timed_out", "lost"}
 TASK_TRANSITIONS = {
@@ -284,11 +288,26 @@ CREATE TABLE task_results (
 );
 """
 
+MIGRATION_5 = r"""
+CREATE INDEX IF NOT EXISTS idx_workflow_notice_recipient
+  ON execution_events(event_type, json_extract(metadata_json,'$.recipient'), seq DESC)
+  WHERE event_type='workflow.notice_delivered';
+CREATE INDEX IF NOT EXISTS idx_control_selection_scope
+  ON request_events(event_type, json_extract(metadata_json,'$.actor'),
+                    json_extract(metadata_json,'$.conversation'))
+  WHERE event_type='control.selection';
+"""
+
+
+
+
+
 MIGRATIONS = (
     (1, "execution-ledger", MIGRATION_1),
     (2, "projects-and-codex-sessions", MIGRATION_2),
     (3, "task-claims-and-results", MIGRATION_3),
     (4, "serializable-operations-and-reviewed-apply", MIGRATION_4),
+    (5, "workflow-event-read-indexes", MIGRATION_5),
 )
 
 _MIGRATION_THREAD_LOCK = threading.RLock()
@@ -1247,7 +1266,7 @@ def transition_execution(
         if owner["current_execution_id"] != execution_id:
             raise ValueError("Stale execution cannot change the current task")
         if current["status"] in EXECUTION_TERMINAL_STATUSES and status != current["status"]:
-            raise ValueError("Invalid execution transition from a terminal attempt")
+            raise TerminalExecutionTransitionError("Invalid execution transition from a terminal attempt")
         current_status = current["status"]
         if status != current_status and not force and status not in EXECUTION_TRANSITIONS.get(current_status, set()):
             raise ValueError(f"Invalid execution transition: {current_status} -> {status}")
@@ -1560,6 +1579,8 @@ def decide_approval(
         current = conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
         if current is None:
             raise KeyError(approval_id)
+        if current["action"] == "discord.upload.pii":
+            raise ValueError("Use the dedicated document upload confirmation flow")
         authorized_actor = decode_json(current["metadata_json"], {}).get("authorized_actor")
         if authorized_actor and decided_by != authorized_actor:
             raise ValueError("Approval actor mismatch")
@@ -1785,7 +1806,7 @@ def mirror_legacy_request(request_id: str, *, db_path: str | Path | None = None)
     timestamp = now_iso()
     with legacy.connect(db_path) as conn:
         request = conn.execute("SELECT * FROM agent_requests WHERE id = ?", (request_id,)).fetchone()
-        if request is None:
+        if request is None or request["mode"] in {"control", "access_control", "ignored"}:
             return None
         task_status = {
             "received": "queued",
@@ -1928,7 +1949,11 @@ def reconcile_legacy_requests(*, limit: int = 500, db_path: str | Path | None = 
     with legacy.connect(db_path) as conn:
         request_ids = [
             row["id"]
-            for row in conn.execute("SELECT r.id FROM agent_requests r WHERE NOT EXISTS (SELECT 1 FROM agent_tasks t WHERE t.source_request_id=r.id) ORDER BY r.created_at LIMIT ?", (limit,)).fetchall()
+            for row in conn.execute(
+                "SELECT r.id FROM agent_requests r WHERE r.mode NOT IN ('control','access_control','ignored') "
+                "AND NOT EXISTS (SELECT 1 FROM agent_tasks t WHERE t.source_request_id=r.id) "
+                "ORDER BY r.created_at LIMIT ?", (limit,),
+            ).fetchall()
         ]
     imported = 0
     for request_id in request_ids:
