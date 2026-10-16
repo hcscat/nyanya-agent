@@ -1,9 +1,6 @@
 # NyaNya Agent
 
-NyaNya Agent is a Python-first **Local Control Plane** for operator-managed
-workspaces. Terminal and Discord requests enter a SQLite durable task/execution
-ledger before configured providers or Codex are called. The dashboard is a
-monitoring-first operational surface.
+NyaNya Agent is a Python-first **Local Control Plane** for operator-managed workspaces. Terminal and Discord requests enter a SQLite durable task/execution ledger before configured providers or Codex are called. The dashboard is a monitoring-first operational surface.
 
 It is designed for a single-operator workspace that needs:
 
@@ -19,19 +16,11 @@ Korean guide: [README.KO.md](README.KO.md)
 
 Current completion, limitations and verification: [development status](docs/development_status.md).
 
-For a workspace with separate installed and development copies, run Git and
-development checks from the `source` checkout. See
-[development isolation](docs/installation_and_distribution.md#separate-an-operational-workspace-from-development).
+For a workspace with separate installed and development copies, run Git and development checks from the `github_source` checkout. See [development isolation](docs/installation_and_distribution.md#separate-an-operational-workspace-from-development).
 
-## P0 execution update (2026-09-12)
+## Current execution and memory
 
-Normal terminal/Discord requests now use serialized operations and a dedicated
-worker with bounded parallelism. Gemini Flash assesses requests and selects a
-Flash/Luna/Astra execution profile. Existing-file edits require a concrete reviewed
-plan and exact approval hash; interrupted work stays held with queryable reasons.
-See the [P0 implementation and command guide](docs/p0_execution_20260912.md) for
-supported file operations, recovery commands, model mappings and verification limits.
-This is source implementation, not evidence of a deployed Discord service.
+Normal terminal/Discord requests now use serialized operations and a dedicated worker with bounded parallelism. Gemini Flash assesses requests and selects a Flash/Luna/Sol execution profile. Existing-file edits require a concrete reviewed plan and exact approval hash; interrupted work stays held with queryable reasons. See the [P0 implementation and command guide](docs/p0_execution_20260912.md) for supported file operations, recovery commands, model mappings and verification limits. Schema v9 also connects scoped conversation turns, successful work records and cited topic memory. Replies remain conversational; necessary questions complete normally. Reset/current-only/no-store/forget have distinct effects. See [LLM Wiki](docs/llm_wiki.md) and the development-status verification table for completed source checks and bounded operating acceptance. The repository does not identify every installed instance or a new published release.
 
 ## Project Status
 
@@ -44,14 +33,18 @@ The implementation is intentionally small and inspectable:
 ```text
 src/nyanya_agent/core.py              # CLI and backend providers
 src/nyanya_agent/bridge_common.py     # compatibility exports for bridge helpers
-src/nyanya_agent/bridge_constants.py  # command names and routing keyword tables
+src/nyanya_agent/bridge_constants.py  # command names and supported control vocabulary
 src/nyanya_agent/bridge_policy.py     # workspace, command, and safety policy helpers
-src/nyanya_agent/bridge_runtime.py    # Codex delegation and runtime helpers
+src/nyanya_agent/bridge_runtime.py    # configuration and local resource helpers
 src/nyanya_agent/bridge_store.py      # conversation context and durable task service
 src/nyanya_agent/task_service.py      # compatibility callback task service
 src/nyanya_agent/operation_service.py # normal serialized request/control facade
 src/nyanya_agent/operation_worker.py  # dedicated worker and bounded concurrency
 src/nyanya_agent/reviewed_changes.py  # immutable file plans, approved apply and journal
+src/nyanya_agent/control_intents.py   # owner-scoped conversational task controls
+src/nyanya_agent/conversation_store.py # ledger-based scoped conversation recall/reset/export
+src/nyanya_agent/work_memory.py       # screened successful work evidence
+src/nyanya_agent/wiki_store.py        # cited topic revisions, conflicts and forgetting
 src/nyanya_agent/dashboard_store.py   # SQLite dashboard/event store
 src/nyanya_agent/execution_store.py   # versioned task/execution/approval ledger
 src/nyanya_agent/execution_adapters.py # subprocess, tmux, Codex, and Antigravity adapters
@@ -155,9 +148,6 @@ NYANYA_DISCORD_ALLOWED_USER_IDS=
 NYANYA_DISCORD_FILE_SHARE_CHANNEL_IDS=
 NYANYA_DISCORD_FILE_SHARE_CHANNEL_NAMES=
 NYANYA_CODEX_ENABLED=false
-NYANYA_CODEX_WRITE_ENABLED=false
-NYANYA_CODEX_PROFILE=nyanya-readonly
-NYANYA_CODEX_WRITE_PROFILE=nyanya-approved-write
 NYANYA_ANTIGRAVITY_SANDBOX=true
 NYANYA_DASHBOARD_RECORDING_ENABLED=true
 NYANYA_DASHBOARD_HOST=127.0.0.1
@@ -222,38 +212,36 @@ Useful Discord commands:
 |---|---|
 | `!nyanya status` | Show bridge runtime status. |
 | `!nyanya config` | Show non-secret runtime configuration. |
-| `!nyanya reset` | Reset legacy conversation context; normal operations do not consume it yet. |
-| `!nyanya save` | Save legacy context when enabled; not external Codex session persistence. |
+| `!nyanya reset` | Reset the bounded Discord dialogue without cancelling or deleting tasks. |
+| `!nyanya save` | Export the bounded screened dialogue privately; not a provider session backup. |
 | `!nyanya resources` | Show local system resource information. |
-| `!nyanya tasks` | Show the current user's pending, running, and queued tasks. |
+| `!nyanya tasks` | Show the current user's actionable ledger tasks and select the displayed list for cancellation. |
 | `!nyanya tasks all` | Show all users' tasks. Admin only. |
-| `!nyanya upload <file_path>` | Upload a local workspace file. Outside a configured file-share channel, the file is sent to `NYANYA_DISCORD_FILE_SHARE_CHANNEL_IDS`. |
-| `!nyanya upload-cancel <id>` | Cancel a pending document-transfer confirmation; it cannot undo an SDK send that has started. |
-| `!nyanya upload-reject <id>` | Reject a pending document-transfer confirmation. |
+| `!nyanya upload <file_path>` | Inspect a supported local workspace document; send it when no personal-information pattern is found, or request exact transfer confirmation when patterns are found. |
 | `!nyanya upload-approve <id> <sha256>` | Confirm one inspected file and destination as the original requester in the original channel, before its 300-second expiry. |
+| `!nyanya upload-reject <id>` | Reject a pending document-transfer confirmation. |
+| `!nyanya upload-cancel <id>` | Cancel a pending document-transfer confirmation; it cannot undo an SDK send that has started. |
 | `!nyanya gemini <prompt>` | Assess with Flash and execute with the Flash profile. |
 | `!nyanya codex <prompt>` | Assess with Flash and execute with the Luna/Codex profile. |
 | `!nyanya codex-work <prompt>` | Use Luna/Codex to propose changes; existing-file apply needs exact plan approval. |
-| `!nyanya cancel` | Cancel the current user's queued/running task. |
+| `!nyanya cancel` | Cancel the previously displayed, unchanged task selection in this conversation. |
+| `!nyanya cancel <task-id>` | Request cancellation of one owned task; uncertain effects remain held. |
+| `!nyanya dismiss <task-id>` | Stop reminders for a safe failed task while retaining its history. |
 
 Long-running task visibility:
 
 - intake returns a task ID and planned stages, and a watcher attempts to send the saved result;
 - use `tasks`, `why <task-id>`, `recovery`, and `result <task-id>` to inspect work;
-- intermediate heartbeat delivery and acknowledgment-before-result ordering are not
-  guaranteed by the normal operation path; legacy progress/delay settings do not control it;
+- intermediate heartbeat delivery and acknowledgment-before-result ordering are not guaranteed by the normal operation path; legacy progress/delay settings do not control it;
 - durable delivery retry after restart remains follow-up work.
 
 Important work policy:
 
 - work stays within the registered workspace and uses a bounded disposable snapshot;
 - new UTF-8 files may be created exclusively in task directories;
-- existing-file edits/deletes require `plan`, optional `plan-file`, then exact
-  `approve <plan-id> <plan-hash>`; approval words alone grant no authority;
-- arbitrary shell, installs, deployment, permission changes and directory moves
-  are not supported operations in the normal file-plan path;
-- external text remains untrusted; snapshot filtering and CLI sandbox options
-  are not a complete secret detector or host security boundary.
+- existing-file edits/deletes require `plan`, optional `plan-file`, then exact `approve <plan-id> <plan-hash>`; approval words alone grant no authority;
+- arbitrary shell, installs, deployment, permission changes and directory moves are not supported operations in the normal file-plan path;
+- external text remains untrusted; snapshot filtering and CLI sandbox options are not a complete secret detector or host security boundary.
 
 File upload behavior:
 
@@ -300,7 +288,7 @@ The dashboard is split into five screens:
 | Main | Current operational state | Total requests, today's requests, running queue, failures, phase confirmations. |
 | Agent Office | Execution control-plane observation | Hosts, agents, tasks, executions, approvals, 2D state zones, and authenticated five-second polling. |
 | Projects | Project and phase operation | Project creation, goal entry, phase cards, phase checks. |
-| Memory | Long-term memory review | Pending/approved memory candidates, memory graph, technology graph. |
+| Memory | Long-term memory review | Pending/approved candidates, authenticated review and scoped completed-work records; no graph UI. |
 | Stats | Historical analysis | Usage trend, request ledger, audit log. |
 
 ### Execution ledger and control API
@@ -312,11 +300,9 @@ Version `0.3.0` preserves the legacy `agent_requests` contract and adds versione
 - `runtime_sessions` and append-only `execution_events`;
 - `approvals`, `artifacts`, and fenced `writer_leases`.
 
-Normal terminal and Discord requests use `operation_service.py` and a dedicated
-worker with stored OperationSpec data. Legacy upload callbacks still use
-`task_service.py`. The dashboard is primarily for monitoring and authenticated management.
+Normal terminal and Discord requests use `operation_service.py` and a dedicated worker with stored OperationSpec data. Legacy upload callbacks still use `task_service.py`. The dashboard is primarily for monitoring and authenticated management.
 
-All `/v1/` data and control APIs, including loopback reads, require `NYANYA_DASHBOARD_CONTROL_TOKEN` or an owner-only token file. Exact Host/Origin checks also apply. Tokens stay out of URLs, HTML, logs and Git; the static shell and health endpoint remain accessible without exposing operational records.
+All `/v1/` read APIs, including local reads, and mutating control APIs require `NYANYA_DASHBOARD_CONTROL_TOKEN` or an owner-only token file. Tokens are never placed in URLs, HTML, logs, or Git. Unlock the dashboard before viewing operational data. Host validation rejects unexpected hostnames; optional exact additional hosts use `NYANYA_DASHBOARD_ALLOWED_HOSTS`. Health and static assets remain available.
 
 ```text
 GET  /v1/hosts
@@ -335,14 +321,9 @@ POST /v1/executions/{execution_id}/cancel
 POST /v1/recovery/reconcile
 ```
 
-File-by-file reviewed apply is implemented for supported POSIX UTF-8 regular files.
-Approval binds the owner, immutable plan hash and expiry; file preimages and worker
-ownership are rechecked at apply time. Interrupted effects require reconciliation.
-`POST /v1/tasks` creates a draft, while `/v1/operations` submits executable work.
-See the [P0 contract](docs/p0_execution_20260912.md) for limits and commands.
+File-by-file reviewed apply is implemented for supported POSIX UTF-8 regular files. Approval binds the owner, immutable plan hash and expiry; file preimages and worker ownership are rechecked at apply time. Interrupted effects require reconciliation. `POST /v1/tasks` creates a draft, while `/v1/operations` submits executable work. See the [P0 contract](docs/p0_execution_20260912.md) for limits and commands.
 
-Execution adapters cover managed subprocesses, tmux, Codex, and Antigravity.
-Orca is not in the current default adapter registry or product direction.
+Execution adapters retain managed subprocess, tmux, Codex and Antigravity observation/recovery plus scoped start/request-builder design primitives. Their isolated tests do not connect arbitrary command execution to normal intake. Orca is not in the current default adapter registry or product direction.
 
 Create and restore an online SQLite backup with:
 
@@ -390,26 +371,29 @@ If a phase has a `next_action`, the check result becomes `needs_confirmation` an
 
 ## Long-Term Memory
 
-The compatibility memory subsystem has two layers. Normal Discord operations do
-not yet inject these memories or previous conversation turns. The terminal REPL
-embeds a bounded in-process history; this is not durable session continuation.
+Normal terminal/Discord operations retrieve scoped ledger conversation history, screened completed-work excerpts and LLM Wiki topics. The result model can return up to three topic/summary pairs in the existing call; no extra LLM refinement runs. Relevant summaries include task/attempt citations, revisions and conflicts, and remain historical model claims. See [LLM Wiki](docs/llm_wiki.md) and [work-record boundaries](docs/security_and_reliability.md#private-completed-work-records).
+
+Conversation recall uses up to eight recent and four older lexical turns within 24 KiB after explicit reset. Terminal submits its current prompt with a separate conversation key rather than embedding in-process history. This does not resume a hidden provider conversation or collect every channel message.
+
+Current-only suppresses recall. No-store also excludes the source from later conversation recall/export and derived memory. Forget clears source-derived work/Wiki/linked legacy text, preserving original tasks, results, approvals, journals and backups. Reset starts a recall boundary without cancelling work. These controls do not securely erase provider conversations or SQLite backup pages.
+
+The compatibility candidate subsystem is separate from normal worker context. Its extraction/review checks current screened successful sources, storage refusal and forgetting. Unlinked/manual records are preserved. Optional legacy `core.build_messages` composes explicitly configured baseline templates; normal workers do not use it.
 
 | Layer | Purpose | Storage |
 |---|---|---|
-| Baseline memory | Compact operating facts loaded into the system prompt. | `prompts/agent_memory.md` |
-| Dynamic memory | Request-derived candidates that can be reviewed and approved. | SQLite `memory_items` |
+| Baseline memory | Optional public baseline prompt template. | `prompts/agent_memory.md` |
+| Work/Wiki memory | Screened successful excerpts and cited topic revisions. | SQLite `task_work_records` / `wiki_entries` |
+| Compatibility candidates | Separate request-derived candidates for manual review. | SQLite `memory_items` |
 
-Dynamic memory flow:
+Compatibility candidate flow:
 
 1. Requests with legacy connector envelopes enter the request read model.
-2. The memory worker scans completed envelopes; terminal/dashboard/Telegram
-   operations without envelopes are not included in this extraction source.
+2. The memory worker scans completed envelopes; terminal/dashboard/Telegram operations without envelopes are not included in this extraction source.
 3. Rule-based extraction creates `pending` memory candidates.
 4. Sensitive content is redacted or skipped.
-5. Optional LLM refinement can be enabled for important candidates.
+5. Keep optional LLM refinement disabled until its provider boundary is unified.
 6. The dashboard can approve or reject candidates.
-7. Compatibility retrieval helpers use approved, non-sensitive, owner-scoped
-   memories. Connecting them to normal operations remains follow-up work.
+7. Compatibility retrieval helpers use approved, non-sensitive, owner-scoped memories. Connecting them to normal operations remains follow-up work.
 
 Run the worker once:
 
@@ -480,9 +464,7 @@ nyanya doctor
 
 The npm package ships a TypeScript-authored CLI compiled to JavaScript. It does not replace Python; `nyanya setup` prepares the Python runtime and dependencies.
 
-The current install/distribution model is documented in
-[Installation and distribution](docs/installation_and_distribution.md). The
-Python runtime and TypeScript CLI remain separate layers.
+The current install/distribution model is documented in [Installation and distribution](docs/installation_and_distribution.md). The Python runtime and TypeScript CLI remain separate layers.
 
 ## Security Model
 
@@ -520,8 +502,7 @@ NYANYA_DASHBOARD_HOST=127.0.0.1
 NYANYA_DASHBOARD_PORT=8765
 ```
 
-External access and server/database/hosting setup are deferred as of 2026-09-21.
-The following choices are reference material for a later authorized task:
+Approved private access can use a loopback proxy with exact Host/Origin allowlists and existing application authentication. Public hosting/server/DB expansion remains deferred. See [private access configuration](docs/external_dashboard_access.md#tailscale-serve); keep actual instance addresses outside Git. Other network setup requires its own authorized task:
 
 1. Keep it local-only when possible.
 2. Use Tailscale Serve for private device access.
@@ -573,7 +554,7 @@ PYTHONPATH=src .venv/bin/python -m py_compile \
 - [Installation and distribution](docs/installation_and_distribution.md)
 - [Operations guide](docs/operations_guide.md)
 - [External dashboard access guide](docs/external_dashboard_access.md)
-- [User acceptance tests](docs/user_acceptance_tests_ko.md)
+- [User acceptance tests](docs/user_acceptance_tests.md)
 - [Copyright review](docs/copyright_review.md)
 - [Public and private source policy](docs/source_publication_policy.md)
 

@@ -2,7 +2,7 @@
 
 This checklist verifies core behavior without requiring a complete source review. Never put passwords, tokens, personal paths or account identifiers in test messages.
 
-This checklist covers execution control, reviewed files, exact document transfer and recovery scenarios. This is a reusable execution plan, not a record that every row passed. See the separate verification table in [development status](development_status.md) for recent direct acceptance, and use an isolated workspace registered to the real test account. Interrupt/restart services or modify test files only within an authorized operating test. Actual accounts, task IDs, paths, messages and evidence belong in private local records rather than this public checklist.
+Updated 2026-10-12: conversation, Wiki, storage refusal, forgetting and duplicate approval supplement the existing service/file/recovery/concurrency scenarios. This is a reusable execution plan, not a record that every row passed. See the separate verification table in [development status](development_status.md) for recent direct acceptance, and use an isolated workspace registered to the real test account. Interrupt/restart services or modify test files only within an authorized operating test. Actual accounts, task IDs, paths, messages and evidence belong in private local records rather than this public checklist.
 
 ## Common verdicts
 
@@ -146,7 +146,19 @@ Expected results:
 
 This verifies concurrent requests. The DAG that splits one request into multiple agents is not implemented and cannot pass from this result. Concurrent file application in the same workspace is also outside this read-only test.
 
-## TC-09 Repeated identical approval
+## TC-09 Channel conversation and reset
+
+State a synthetic preference, then ask about it using a pronoun in the same channel. In an authorized drill, test recall after bridge restart and exclusion in another channel/project. After `reset`, earlier history must not be reused automatically; a current-only request must exclude history for that request. Answer a necessary question and verify continuation; the question itself must complete successfully. Fail if past conversation expands file-read scope or approval authority.
+
+## TC-10 LLM Wiki and revision selection
+
+Process synthetic information as successful work and inspect topics/sources in an explicit owner/workspace/project/channel dashboard scope. Change the same topic to create a conflict; select a revision and check that other active versions become superseded. Automatic summaries must be presented as historical model claims. Fail if memory selection starts file application or task execution.
+
+## TC-11 Storage refusal and source forgetting
+
+Explicitly refuse memory/storage for a request with a unique synthetic marker. The answer must complete, but work/Wiki/legacy derived memory, subsequent relevant conversation and `save` exports must exclude the marker/source. Forget a separate ordinary source; inactive summaries must also clear, and repeated forgetting must be idempotent. Preserve other sources and original requests/results/approvals/journals. This does not establish full deletion from DBs, backups or provider conversations.
+
+## TC-12 Repeated identical approval
 
 Inspect an existing-file plan's ID/hash in an isolated workspace and repeat the same approval. Regardless of successful/failed/running state, there must be one apply child/journal and no repeated application from the same approval. Record changed preimages, wrong hashes and another owner as separate rejection cases.
 
@@ -163,3 +175,6 @@ Inspect an existing-file plan's ID/hash in an isolated workspace and repeat the 
 | TC-07 | Pending | | |
 | TC-08 | Pending | | |
 | TC-09 | Pending | | |
+| TC-10 | Pending | | |
+| TC-11 | Pending | | |
+| TC-12 | Pending | | |

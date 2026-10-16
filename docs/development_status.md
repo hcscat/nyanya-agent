@@ -1,129 +1,87 @@
-# 개발 현황과 남은 작업
+# Development Status and Remaining Work
 
-검토일: 2026-09-21. 작업 ID: REVIEW-20260921.
-기준: `main` / `bb8774b7b929bf565f353adf800d1797f1ce44e9`.
-목적은 4차까지 공개한 소스의 구현 범위와 현재 검증을 대조하는 것이다.
-기준 검토는 가이드 정리와 공개 문서의 패키지 목록 보완이다.
-2026-09-22의 개발/운영 환경 분리 후속 결과는 아래 별도 절에 기록한다.
+Documentation review baseline: 2026-10-16. The source version is `0.3.0`. These changes are prepared as separate review branches. Draft review publication does not deploy an operating instance or publish an npm release.
 
-## 완료 수준의 해석
 
-**4개 차수의 소스 통합·공개는 완료되었다. 첫 안정 버전의 운영 수용은 아직 완료로
-판정할 수 없다.** 차수는 커밋을 검토하기 위해 나눈 단위이며 기능 완성률의 분모가 아니다.
-제품 전체의 백분율은 산정하지 않는다. 구현, 자동 검증, 실제 운영 수용을 구분한다.
+Release-preparation follow-up: the isolated candidate includes safety-clause intake, snapshot availability/public env examples, shared API profiles, memory recall opt-out and Discord ingress claims. An earlier isolated candidate completed 1089 tests and the Node/package checks before the current document-upload change; those are historical results, not validation of this follow-up.
 
-| 차수 | 범위 / 마지막 커밋 | 확인된 개발 결과 | 남은 경계 |
-|---|---|---|---|
-| 1차 | 개인정보 경계·분석·설계 / `6fc1df3` | 공개/비공개 정책, 실행 계약과 아키텍처 문서 | 오래된 현재형 설명은 이번 검토로 갱신; 정책이 모든 실행 경로의 구현 완료를 뜻하지 않음 |
-| 2차 | 저장소·실행·승인·복구 / `7aaeb80` | schema v4, OperationSpec, 별도 worker, 병렬 claim, 파일안 승인·journal, 중단 보류 | 전달 보장, 외부 세션 지속, 단일 요청의 다중 에이전트 분해, 아래 결함 보완 |
-| 3차 | 터미널·연결 경로·대시보드 / `4542986` | 일반 terminal/Discord/API 공통 operation 경로, workspace 확인, 인증 제어 | 메모리·세션 연결, 모든 진입 경로의 통계, 중간 진행 전송과 Telegram 명령 동등성 |
-| 4차 | 설치·배포·검사·문서 / `3ea23b7` | Node CLI/Python 런타임 분리, 상태 보존·백업, 공개 파일 manifest와 CI | 실제 설치/복구 수용, 미검증 플랫폼, 별도 npm/Release/Wiki 게시 |
+The current upload implementation locally inspects supported UTF-8/BOM UTF-16/CP949 text and bounded text-only DOCX/XLSX/PPTX, then requires exact original-actor/channel/file/hash/destination confirmation when personal-information patterns are found. Credentials cannot be overridden. PDF/image/OCR, legacy Office, ordinary archives, encrypted or incompletely inspected content remain unsupported and held; no parser/OCR download or model call is added. The cap is the smaller of 8 MiB and the destination SDK guild limit, with missing metadata held. Explicit ordinary folder names are relaxed only for uploads; model-context private-path exclusions remain unchanged.
 
-4차까지 `52a1bb5..3ea23b7`은 **89개 파일, +10,394 / -991줄**, 총 5커밋이다.
-2차에 린트 설정 보정 커밋이 별도로 들어갔다. 이후 main에 통합되었고
-`74830f3`, `bb8774b`에서 설치 의존성의 Git/privacy 경계를 보완했다.
-현재 기준 `52a1bb5..bb8774b`는 **89개 파일, +10,531 / -991줄**이다.
-차수별 파일 수는 중복 파일을 포함하므로 단순 합산하지 않는다.
+Each review branch must report focused/full tests and package/build results for its exact snapshot. Historical integrated-candidate counts do not validate a separated branch. Operating installation, real Discord delivery, service restart, real model acceptance and release publication require separate verification.
 
-2026-09-21 조회에서 당시 GitHub main과 로컬 HEAD가 일치했고 CI는 성공이었다.
-문서의 커밋 ID는 2026-09-22 개인정보 이력 정리 후의 대응 ID로 갱신했다.
-당시 Actions 기록은 개인정보 정리 과정에서 비공개 백업 후 제거했으므로,
-이전 실행 링크를 현재 검증 증거로 사용하지 않는다. 최신 검증은 해당 변경의
-로컬 검사와 새 커밋의 CI 결과를 별도로 확인한다.
-Wiki 기능은 활성화되어 있으나 페이지 내용은 이번 검토에서 확인하지 않았다.
-GitHub Release 목록은 비어 있었다. npm 게시 버전은 이번에 조회하지 않았다.
+## Current implementation
 
-## 개발/운영 환경 분리 — SPLIT-20260922
-
-기존 작업 폴더는 운영 설치·사용에 유지하고, 하위 `source`를 독립된 개발 Git
-루트로 분리했다. 기존 Git 이력·브랜치·미커밋 변경과 과거 검증 worktree를 보존했으며,
-개발 Python 가상환경과 Node 의존성을 별도로 설치했다. 운영 코드와 서비스 경로는 유지한다.
-
-`scripts/dev.py`는 개발 상태를 `.dev-state`에 두고 운영 NyaNya 설정과 지정된
-인증 환경변수의 상속을 제거한다. 서비스 설치/관리 명령은 제공하지 않는다.
-개발 상태는 Git, 패키지, 배포 파일 복사에서 제외한다. 이 도구는 OS sandbox가 아니며
-외부 CLI의 사용자 홈 인증 파일 접근까지 격리하지 않는다.
-
-- 자동 검사: 기존 318개와 신규 개발 격리 9개, 총 **327개 통과**.
-- Ruff, TypeScript typecheck/build, JavaScript 구문 검사와 전체 release gate 통과.
-  패키지 164개 파일에 AGENTS·개발 상태·운영 데이터·설치 의존성은 포함되지 않았다.
-  문서 13개의 로컬 링크 317개도 대상 파일 존재를 확인했다.
-- 실제 개발 대시보드: 별도 loopback 포트에서 HTTP 200과 독립 SQLite 무결성을 확인한 뒤 종료했다.
-- 운영 대시보드: 같은 검사 중 HTTP 200을 유지했다. 운영 서비스 재시작이나 모델 요청은 하지 않았다.
-- Git/패키지의 현재 파일 검사와 과거 이력 검사는 별도다. 현재 파일이 통과해도
-  과거 커밋의 개인정보 제거를 보장하지 않으며, 이력 변경은 별도 검토·승인이 필요하다.
-
-분리는 제품 기능 배포나 Discord/복구 수용 완료를 뜻하지 않는다. 아래 REV-01–03과
-전달·문맥 기능의 미완료 상태는 유지된다. 운영 업데이트는 검증한 산출물의 별도 설치 절차로 진행한다.
-구체적인 개발 명령과 배포 경계는 [설치·배포 안내](installation_and_distribution.md#development-install)를 따른다.
-
-## 요구사항별 판정
-
-| 요구사항 | 판정 | 근거와 한계 |
+| Area | Implemented behavior | Boundaries and remaining work |
 |---|---|---|
-| Discord 연결·사용자 workspace 경계 | 구현·자동 검증 | `test_workspace_intake.py`; 실제 사용자 요청의 모델 완료는 새 수용 증거 필요 |
-| Flash 최초 판단과 모델 선택 | 구현·자동 검증 | 점수·선택 기록; 현재 설치 모델 접근 권한이나 최신 모델 여부는 재검증하지 않음 |
-| 여러 요청 병렬 처리 | 구현·자동 검증 | 기본 2개, 설정 1–4개; 같은 workspace의 apply는 조정 |
-| 한 요청을 여러 agy/Codex 에이전트에 분배 | 미구현 | 작업 분해, 의존성 DAG, 결과 병합은 별도 설계 필요 |
-| 신규 파일 생성·기존 파일 승인 | 구현·자동 검증 | POSIX UTF-8 일반 파일 한정; 정확한 plan hash/owner/만료/원본 확인 |
-| 중단 보류·상기·why/resume/reconcile | 구현·자동 검증, 보완 필요 | 자동 재실행 없음; 아래 재시도 대기 결함과 실제 운영 복구 검증 필요 |
-| 실행 상태 단일 원장 | 일반 operation 구현 | legacy envelope·memory·project 전체 이관은 미완료 |
-| 결과 보존과 재전달 | 부분 구현 | 저장 결과 조회 가능; inbox/outbox/receipt 기반 재전달은 미구현 |
-| 메모리와 대화 연속성 | 부분 구현 | 일반 Discord 요청은 이전 대화·승인 메모리를 주입하지 않음; REPL만 제한된 프로세스 내 대화 포함 |
-| 대시보드 | 로컬 관리·조회 구현 | 5초 인증 polling; Requests 통계와 memory 원본은 envelope 없는 operation을 누락 |
+| Request processing | Terminal, Discord and authenticated API → OperationService → data-only OperationSpec → atomic claim by a separate worker | Two independent requests by default, configurable concurrency of 1–4; no decomposition of one request into multiple agents |
+| Model routing | Flash assessment first; importance and impact below 4 with complexity 3–4 select Luna XHigh; importance or impact ≥4, or complexity 5, selects Sol High | Lower complexity uses Flash; `astra` is a compatible Sol alias; no automatic model discovery or switching |
+| File operations | Bounded snapshots of registered workspaces, exclusive new-file creation, immutable existing-file plans with owner/hash/expiry/preimage approval and journals | POSIX UTF-8 regular-file editing; arbitrary shell/test execution, binary editing and directory moves/deletion are not connected to normal intake |
+| Document upload | Local whole-document extraction within bounds; counts-only personal-information report and original-actor/channel/file/hash/destination-bound confirmation, TTL 300 seconds and one send attempt | Supported text and text-only OOXML only; credentials and uninspectable content held; at most 8 MiB subject to SDK guild metadata; zero patterns is not a safety guarantee and uncertain delivery is never auto-retried |
+| Duplicate approval | Approval and apply admission share one BEGIN IMMEDIATE transaction; reuse the child for the same plan/hash | Conflicting legacy children remain held rather than being deleted or selected automatically |
+| Queries, cancellation and recovery | Owner-scoped tasks/why/cancel/dismiss, conversation selection revisions, interruption holds and explicit resume/reconcile/resolve | Queries and cancellation do not create model tasks; uncertain effects are never replayed automatically |
+| Conversation continuity | Existing request/result ledgers are linked by owner, channel/thread, workspace, project and explicit reset | Eight recent turns plus four relevant older turns within 24 KiB; no idle reset; not collection of every ordinary chat message |
+| Completed-work memory | Successful task/attempt excerpts in schema v8 with current evidence checks | A 90-day search window, separate from ledger retention; no extra model call |
+| LLM Wiki | Topics, sources, revisions and conflicts in schema v9; dashboard search, selection, rejection and source forgetting | At most three notes from the same result call, recall at most five/8 KiB; historical model claims rather than verified current facts |
+| Memory controls | current-only/reset/no-store/forget checked across conversation, work memory, Wiki, related legacy candidates and export | Restricts derived-memory reuse; preserves original requests/results, approvals, journals, recovery ledgers and backups |
+| Dashboard | Authenticated project/task/attempt/memory views, common five-item pages without nested vertical scrolling, status-count execution popups, original-request/attempt-result previews, consistent typography, right-aligned phase-check badges with attention findings/time, memory-area guidance and task-based approval waits; five-second execution-event polling | Local paging of bounded loaded windows, not unlimited DB history; office is monitoring, projects do not auto-develop, legacy candidate approvals do not feed normal model context |
+| Log management | Reduced heartbeat audit, closed-month gzip, verified pruning of old housekeeping and managed log rotation | Preserve workflow/approval/delivery evidence; retain SQLite; no automatic VACUUM or encryption |
+| Installation and distribution | Python runtime / TypeScript CLI, separated operating/development state, public-file and package checks | Operating installation, Git publication and npm publication are separate; not acceptance proof for every platform |
 
-구현 근거는 [실행 경로](local_control_plane_implementation.md),
-[P0 계약](p0_execution_20260912.md), [테스트 안내](test_catalog_ko.md)를 함께 확인한다.
-기존 운영 기록의 서비스/Gateway 확인과 복구 안내 수신은 새 요청의 모델 응답 완료를
-대신하지 않는다. 2026-09-21 기준 검토에서는 서비스, 운영 DB, 실제 Discord나 모델을 호출하지 않았다.
+The [execution implementation](local_control_plane_implementation.md), [operations guide](operations_guide.md), [LLM Wiki guide](llm_wiki.md) and [security guide](security_and_reliability.md) describe actual functions, commands and limits. Orca, memory/technology graphs, replaced bridge paths and old LaunchAgent shells were removed. The scoped command coordinator, single-use approval/lease contracts and CLI request builders remain intentional isolated test components and are not connected to normal intake.
 
-## 이번에 확인한 구체적 보완점
+## Verification levels
 
-다음 항목은 수정 완료가 아니라 **수정 대기**다. 기존 테스트 통과가 이 결함을 배제하지 않는다.
-
-| ID | 현상 / 확인 수준 | 필요한 검증 |
+| Evidence | Observed result | Limit |
 |---|---|---|
-| REV-01 | 이전 시도 결과가 남아 있고 새 시도가 결과 저장 전 blocked가 되면 `OperationService.wait`가 timeout까지 기다리고 cancel을 호출할 수 있음. 실제 함수의 메모리 내 재현으로 확인 | 현재 시도 결과 여부로 판단하고, 보류 상태 대기가 취소로 바뀌지 않는 회귀 테스트 |
-| REV-02 | Codex final-message 파일의 전체 읽기에 별도 크기 상한이 없음. stdout/stderr 제한과 다른 경로이며 소스로 확인 | 작은 stream + 큰 결과 파일을 만드는 가짜 CLI로 제한 검증 |
-| REV-03 | provider snapshot에서 `AGENTS.md`, `AGENTS.override.md`가 이름 기준으로 제외되지 않음. 메모리 내 수집 재현으로 확인 | 루트/중첩 로컬 지침 제외와 제공 문맥 정책 정합성 검증 |
+| Historical full source checks | Dashboard follow-up on 2026-10-13: 961 passed, one external Starlette/AnyIO warning | Full suite execution of that working candidate; earlier 948/957-case results remain historical, not a coverage percentage |
+| Historical test inventory | 55 files, 470 test functions, 961 parameterized cases | Distinguish collected cases from coverage; see the [current file table](test_catalog.md#current-complete-test-files) |
+| Dashboard follow-up | Synthetic browser checks of all menus at four widths, natural list height, two-line previews, modal paging/detail/back/Escape; authenticated API binds results to each attempt; phase checks create no tasks/executions | Browser fixture/isolated API evidence rather than autonomous project development or new model acceptance |
+| Operating dashboard UX acceptance | Five selected source files installed, dashboard-only restart, authenticated original-request/attempt-result reads and five-item popup checks | No schema/configuration/credential change; preserved work evidence; no new provider request or public publication |
+| Operating installation | Schema v9 candidate/selected files verified; Discord, dashboard and memory worker restarted | Local installation rather than a public release; actual settings, DB and evidence remain private |
+| Direct Discord acceptance | Basic answers, channel follow-up, restart recall, reset/current-only, question/answer, new files, exact approved application and duplicate approval with one child/journal | Only the requests actually tested; not proof for every failure condition or arbitrary tool execution |
+| Direct memory/dashboard acceptance | Topic conflicts/selection/source forgetting, inactive-summary clearing, no-store exclusion from recall/export, authentication and Host/Origin rejection, ordinary reload | Other sources and ledgers preserved; not secure erasure of DB pages, backups or provider conversations |
+| Remote access | Host/Origin and authentication boundaries checked for an approved private-network HTTPS proxy in front of loopback | Actual addresses stay in private operating documentation; public hosting/Funnel deferred |
 
-소스 위치: [wait](../src/nyanya_agent/operation_service.py),
-[모델 출력](../src/nyanya_agent/model_routing.py),
-[snapshot](../src/nyanya_agent/reviewed_changes.py).
-REV-03은 Git/패키지 제외와 별개인 **모델 입력 경계**다. 실제 비공개 파일을 외부 모델에
-보내는 테스트는 하지 않았으며, 이번 검토로 실제 유출이 발생했다고 판정하지 않는다.
+Operating rollback must preserve newer rows and provenance, storage-refusal and forgetting filters. Older code being able to read v9 does not establish safe rollback. Never overwrite a DB containing newer requests with an old whole-DB snapshot. Documentation synchronization is neither a runtime code change nor a new live acceptance test.
 
-## 다음 순서
+## Current disposition of REV-01–03
 
-1. REV-01–03을 제한된 수정과 회귀 테스트로 보완한다.
-2. 등록된 테스트 workspace에서 실제 Discord 결과, 파일 승인, 두 요청 병렬 처리,
-   중단 보류·why·상기·안전한 재개를 수용 검증한다.
-3. DELIVERY-01: 메시지 중복 접수 방지, 전달 목적지, outbox 재시도, receipt와 진행 순서를 구현한다.
-4. CONTEXT-01: owner/project/session 문맥과 승인 메모리를 operation에 연결하고
-   전체 ingress의 request 통계·memory 원본을 원장 기준으로 전환한다.
-5. 단일 요청의 다중 에이전트 작업 분해, 자원 기반 스케줄링, 추가 connector는 이후 진행한다.
+| ID | Correction | Existing regression evidence |
+|---|---|---|
+| REV-01 | Wait distinguishes old saved results from the current attempt and immediately reports a held retry | `test_wait_reports_blocked_retry_when_only_prior_result_exists` in [test_workflow_dispatch.py](../tests/test_workflow_dispatch.py) |
+| REV-02 | Check size during execution and after exit; read at most 4 MB+1 through a no-follow regular-file handle; hold oversize, linked and abnormal files | Oversize output, immediately-after-exit, symlink/hardlink/FIFO and file-growth cases in [test_provider_limits.py](../tests/test_provider_limits.py) |
+| REV-03 | Exclude AGENTS variants, nested instructions and backup/report/private paths from snapshots and file plans | Synthetic collection/application rejection in [test_context_security.py](../tests/test_context_security.py) and [test_workflow_lifecycle.py](../tests/test_workflow_lifecycle.py) |
 
-외부 대시보드 접속과 서버·DB·호스팅 구성은 사용자 결정으로 보류한다.
-Wiki/Release Notes는 수용 결과와 대상 버전을 확정한 뒤 별도 게시 작업으로 진행한다.
+All three corrections have regression coverage. Real private documents were not sent to models for testing. This does not guarantee automatic detection of every sensitive document or provide an OS sandbox.
 
-## 기준 검토의 검증과 문서 인계 — 2026-09-21
+## Remaining and deferred work
 
-- 기준 소스: 28개 테스트 파일, 178개 테스트 함수, **318개 실행 케이스 통과**.
-- Ruff, TypeScript typecheck, dashboard JavaScript 구문 검사 통과.
-- 문서/manifest 변경 후 배포·패키지·공개 경계 관련 99개 회귀 케이스도 통과했다.
-  이는 318개 중 관련 부분의 재실행이며 별도 신규 테스트 수가 아니다.
-- 기준 소스의 패키지/privacy 검사 통과. 작업 중 신규 문서 링크 미포함을 검출했고
-  문서를 npm 공개 파일 목록에 명시적으로 추가했다. CLI build를 포함한 최종
-  release gate도 통과하여 패키지 링크·개인정보·비밀 패턴·버전 일치를 재검증했다.
-- 현재 Git 추적 목록에 AGENTS, node_modules, private/runtime 파일은 없었다.
-  최종 npm dry-run은 162개 항목이며 신규 공개 가이드를 포함하고 비공개 항목은 없었다.
-  이는 과거의 모든 Git 객체나 모든 비밀 패턴을 완전히 검사했다는 뜻은 아니다.
-- dependency 취약점 재감사, live 모델·Discord 수용, 운영 재시작, DB migration,
-  외부 접속 설정, commit/push/publish는 이번 범위에 포함하지 않았다.
-- 공개 문서는 재사용 가능한 동작·제한·검증만 기록한다. AGENTS와 에이전트별
-  실행 기록·토큰 계측 여부·상세 조사 자료는 로컬 비공개 자료로 유지한다.
+| Item | Missing capability | Status |
+|---|---|---|
+| DELIVERY-01 | Inbox deduplication, durable destinations, outbox/receipts and recovery when recording fails after a successful send | Separate development required; current result/send claims are not restart-safe delivery |
+| Requests statistics | Include terminal/API/some connector requests without legacy envelopes | Partially incomplete; `request_read_model` is based on legacy `agent_requests` |
+| Telegram parity | Common owner/conversation boundaries and natural-language control classification | Compatibility retained; separate review required |
+| Provider sessions | Exact-ID ownership, safe resume/reset and monthly reuse/close/delete | Unimplemented/deferred; do not arbitrarily reuse or delete hidden history/DBs |
+| Platform/failure acceptance | Repeated installation/restore, actual concurrency, interrupted recovery and delivery-failure testing | Additional scope requires the next authorized task |
+| Multi-agent/DAG/resource and cost scheduling | Decomposition, dependencies, merge and resource allocation for one request | Architecture expansion; recommendation only |
+| Automatic model switching/self-improvement/deployment | Model discovery/change and automatic source modification/installation | Deferred by the operator |
+| External DB/encryption/public hosting | PostgreSQL/Supabase, DB selection/installers, encryption and public hosting | Deferred by the operator; retain SQLite+gzip |
+| GitHub Wiki/Release Notes/npm publication | External publication after version/tag/change selection | Separate from LLM Wiki and outside this task |
 
-기준 검토의 문서 변경은 데이터 형식이나 운영 상태를 바꾸지 않는다. 문서 검토만 되돌릴
-때는 해당 문서와 package manifest 차이를 검토하며 기존 로컬 변경이나 운영 데이터를 건드리지 않는다.
-후속 폴더 분리의 복구에는 보존된 Git 메타데이터·worktree 경로·개발 전용 파일의
-복원을 함께 검토해야 하며, 실행 중인 운영 DB를 이전 백업으로 덮어쓰지 않는다.
+Further development waits for the operator's next scope and priority decision. Do not put completed conversation continuity, Wiki or operating installation back on the unfinished list.
+
+## Development timeline
+
+| Stage | Main changes | How to interpret the evidence |
+|---|---|---|
+| 2026-08–09 design/stabilization | Local Control Plane direction, ledgers, tasks/attempts, approval and recovery | [August diagnosis](architecture_diagnostic_20260826.md) and [CORE-STAB-01](core_stabilization_20260910.md) are historical |
+| Four integration batches | Batch 1 privacy/design; batch 2 storage/execution/approval/recovery; batch 3 interfaces/dashboard; batch 4 installation/checks/docs | Then 89 files, +10,394/-991 lines and five commits including a lint correction; not the latest diff or completion percentage |
+| 2026-09 environment/publication separation | Operating root/development checkout, separate state/dependencies and independent repository after history cleaning | Original/operating evidence is local-only; old remote checks do not prove current remote state |
+| 2026-09–10 control/security/efficiency | Cancellation misclassification, repeated reminders, output/upload, authentication and audit/log fixes | Current operations/security guides take precedence |
+| 2026-10-07–11 conversations and simplification | Channel conversations/work memory, old paths/graphs removed, isolated contracts preserved and duplicate approval fixed | Reuse v7/v8 relations and ledgers; old idle/terminal-history descriptions no longer apply |
+| 2026-10-11–12 Wiki/live acceptance | v9, topics/sources/conflicts/forgetting/no-store, installation and Discord/dashboard acceptance | Current status/verification table and Wiki guide take precedence |
+| 2026-10-12 documentation | Common docs/READMEs synchronized, current/historical/deferred distinctions, paragraph-based line breaks and English/Korean editions | No runtime code or release-version change |
+| 2026-10-13 dashboard UX | Status-count popups, readable original requests/results, natural list heights and consistent phase/memory text | Read-only attempt context; no schema or model workflow expansion |
+| 2026-10-12 dashboard lists | Shared five-item pages, responsive full-width panels, phase-check findings and current approval-wait visibility | Static UI changes and isolated tests; no new DB schema, autonomous workflow or public release |
+
+Dates identify the baseline of a record. Update current contracts under stable document names and preserve detailed operating evidence privately. Read old counts, commits and conclusions as facts about their original point in time.

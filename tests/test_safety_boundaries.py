@@ -61,37 +61,6 @@ def test_model_context_does_not_collect_process_or_directory_inventory(monkeypat
     assert "hello" in core.format_cli_conversation({}, [{"role": "user", "content": "hello"}])
 
 
-def approved_command(tmp_path):
-    db = tmp_path / "approval.db"
-    task = ledger.create_task(title="bound command", db_path=db)
-    scope = command_scope(command=["test", "inspect"], cwd=tmp_path, adapter_type="subprocess", write_resource_key="workspace")
-    approval = ledger.request_approval(task_id=task["id"], action="workspace.write", requested_by="planner",
-                                      metadata={"scope_hash": scope, "authorized_actor": "operator"}, db_path=db)
-    ledger.decide_approval(approval["id"], decision="approved", decided_by="operator", db_path=db)
-    return db, task, scope, approval
-
-
-def test_approval_checks_scope_actor_expiry_and_single_use(tmp_path):
-    db, task, scope, approval = approved_command(tmp_path)
-    check_approval(db, approval["id"], task["id"], scope)
-    with pytest.raises(PermissionError):
-        check_approval(db, approval["id"], task["id"], "changed-plan")
-    with pytest.raises(PermissionError):
-        check_approval(db, approval["id"], "wrong-task", scope)
-    execution = ledger.create_execution(task_id=task["id"], adapter_type="test", db_path=db)
-    check_approval(db, approval["id"], task["id"], scope, execution_id=execution["id"])
-    with pytest.raises(PermissionError):
-        check_approval(db, approval["id"], task["id"], scope)
-
-
-def test_expired_approved_command_is_rejected(tmp_path):
-    db, task, scope, approval = approved_command(tmp_path)
-    with ledger.legacy.connect(db) as conn:
-        conn.execute("UPDATE approvals SET expires_at = ?", ((datetime.now(UTC) - timedelta(hours=1)).isoformat(),))
-    with pytest.raises(PermissionError):
-        check_approval(db, approval["id"], task["id"], scope)
-
-
 def test_approval_wrong_decider_and_expiry_persist(tmp_path):
     db = tmp_path / "expiry.db"
     task = ledger.create_task(title="review", db_path=db)
@@ -140,3 +109,32 @@ def test_memory_is_not_globally_promoted_or_retrieved(tmp_path):
     dashboard_store.update_memory(created["memory_ids"][0], status="approved", db_path=db)
     assert dashboard_store.search_approved_memories("테스트", owner_key="discord-user:one", db_path=db)
     assert not dashboard_store.search_approved_memories("테스트", owner_key="discord-user:two", db_path=db)
+
+
+def approved_command(tmp_path):
+    db = tmp_path / "approval.db"
+    task = ledger.create_task(title="bound command", db_path=db)
+    scope = command_scope(command=["test", "inspect"], cwd=tmp_path, adapter_type="subprocess", write_resource_key="workspace")
+    approval = ledger.request_approval(task_id=task["id"], action="workspace.write", requested_by="planner",
+                                      metadata={"scope_hash": scope, "authorized_actor": "operator"}, db_path=db)
+    ledger.decide_approval(approval["id"], decision="approved", decided_by="operator", db_path=db)
+    return db, task, scope, approval
+
+def test_approval_checks_scope_actor_expiry_and_single_use(tmp_path):
+    db, task, scope, approval = approved_command(tmp_path)
+    check_approval(db, approval["id"], task["id"], scope)
+    with pytest.raises(PermissionError):
+        check_approval(db, approval["id"], task["id"], "changed-plan")
+    with pytest.raises(PermissionError):
+        check_approval(db, approval["id"], "wrong-task", scope)
+    execution = ledger.create_execution(task_id=task["id"], adapter_type="test", db_path=db)
+    check_approval(db, approval["id"], task["id"], scope, execution_id=execution["id"])
+    with pytest.raises(PermissionError):
+        check_approval(db, approval["id"], task["id"], scope)
+
+def test_expired_approved_command_is_rejected(tmp_path):
+    db, task, scope, approval = approved_command(tmp_path)
+    with ledger.legacy.connect(db) as conn:
+        conn.execute("UPDATE approvals SET expires_at = ?", ((datetime.now(UTC) - timedelta(hours=1)).isoformat(),))
+    with pytest.raises(PermissionError):
+        check_approval(db, approval["id"], task["id"], scope)

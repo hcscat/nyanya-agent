@@ -1,90 +1,53 @@
 # NyaNya Agent Architecture and Roadmap
 
-Reviewed 2026-09-21 against source commit `bb8774b`. See
-[development status](development_status.md) for the four-batch review and
-[P0 contracts](p0_execution_20260912.md) for detailed execution limits.
+Current source review: 2026-10-12. See [development status](development_status.md), [normal execution](local_control_plane_implementation.md) and [P0 contracts](p0_execution_20260912.md).
 
 ## Product boundary
 
-NyaNya Agent is a single-operator, local-first Python **Local Control Plane**.
-Terminal and Discord are the primary request interfaces. The dashboard is a
-lower-priority local monitoring and authenticated management surface.
-Codex, Antigravity, tmux and model runtimes remain independent systems. Orca is
-excluded from the product direction. Telegram remains compatibility code.
+NyaNya is a single-operator, local-first Local Control Plane. Terminal and Discord are primary interfaces; the dashboard manages projects, work, attempts and memory. Workspace/approval boundaries, durable state, conversational continuity and cited memory add value around external model CLIs.
+
+Python owns policy, operations, providers, connectors, SQLite and FastAPI. TypeScript owns npm setup, diagnostics and service wrappers. SQLite remains the accepted database. Codex/Antigravity authentication and lifecycles are independent; a working directory is not a sandbox.
 
 ## Component ownership
 
 | Component | Responsibility |
 |---|---|
-| Python runtime | Workspace policy, operations, file plans, model calls, memory and dashboard API |
-| TypeScript CLI | Installation, configuration, diagnostics, backup and service management |
-| SQLite | Authoritative operation/task/execution state, approvals, results, events and apply journal |
-| OperationService | Validate intake, supervise an on-demand worker and watch saved results |
-| Dedicated operation worker | Claim serialized operations and execute a bounded thread pool |
-| Discord bridge | Authenticated intake, workspace ownership, commands and result/file delivery |
-| Dashboard | Local FastAPI/static UI, authenticated operations API and event polling |
-| Compatibility services | Upload callbacks, legacy request/project records and memory extraction |
+| OperationService / control_intents | Owner/workspace intake, local controls, worker supervision and result observation |
+| OperationSpec / operation_store / execution_store | Data-only requests, task/attempt transactions, claims, events and recovery |
+| operation_worker / model_routing | Concurrency, Flash assessment, selected model, snapshot and scoped context |
+| reviewed_changes | Immutable plans, exclusive creation, owner/hash/expiry/preimage approval and journal |
+| conversation_store | Original turn relations, channel/thread scope, order, reset, recall and export |
+| work_memory / wiki_store | Successful evidence, topics/revisions/conflicts, bounded recall and forgetting |
+| Discord / dashboard | Authenticated intake, control and work/memory inspection; best-effort delivery / five-second polling |
+| CLI / manager | Install/update, separate state, configuration, diagnostics, backup and services |
+| Compatibility components | Envelopes/candidates/uploads and isolated adapter/approval/lease contracts |
 
 ## Normal request lifecycle
 
-1. Resolve the registered workspace and authenticated owner.
-2. Persist a validated request OperationSpec and task before model execution.
-3. A dedicated worker atomically claims work; concurrency defaults to two.
-4. Flash assesses importance, impact and complexity; the selected Flash/Luna/Astra
-   profile returns a summary and optional file plan from a bounded snapshot.
-5. Create new files exclusively in a task directory. Existing-file modification
-   or deletion waits for exact owner/plan/hash/expiry-bound approval.
-6. Apply with ownership, workspace and file preimage checks, a workspace lock
-   and a journal. Commit task/result/event state atomically.
-7. Attempt connector delivery; retain results independently of delivery success.
-   Interrupted work stays held for explicit review, resume or reconciliation.
+1. Resolve owner/workspace. Task queries/cancellation use the local control path.
+2. Save OperationSpec/task and bind a scoped conversation relation.
+3. Atomically claim work; default concurrency two, configurable one to four. Same-generation turns execute in order.
+4. Select current safe files before adding screened history. The result model may receive relevant cited work/Wiki.
+5. Flash scores importance/impact/complexity. Low complexity uses Flash; low importance/impact with complexity 3–4 uses Luna XHigh; importance/impact ≥4 or complexity 5 uses Sol High. `astra` aliases Sol.
+6. Return an answer/question or immutable plan. Create new files exclusively; existing edits/deletes wait for exact approval.
+7. Recheck current claim/workspace/owner/preimage and journal apply. Repeated approval reuses its child.
+8. Save outcome and successful memory in the fenced transaction. Delivery remains a separate fact; uncertain effects stay held.
 
-Parallelism currently means independent operations, not decomposition of one
-request into collaborating agents. A failed worker is not automatically replaced
-to replay old work. Detailed limits are in the P0 contract.
+## Implemented boundaries
 
-## Implemented baseline and boundaries
+- Schema v9 reuses the ledger: v7 conversation relations, v8 work records and v9 topics do not create a second transcript/backend.
+- Conversation recall: eight recent plus four older lexical turns within 24 KiB after explicit reset. Wiki recall: five summaries/8 KiB within the whole input bound.
+- Up to three topics use the existing result call. Summaries are historical model claims, not current verified facts or permission.
+- Reset/current-only/no-store/forget have different effects; original request/result/approval/effect evidence remains preserved.
+- Supported POSIX UTF-8 file changes are reviewed. Arbitrary commands/tests, binary edits and directory mutations are not normal intake capabilities.
+- Monthly gzip retention prunes verified housekeeping, preserving workflow/approval/delivery evidence.
+- Orca, replaced bridge paths, old launch shells and graphs are removed. Intentional low-level contracts remain isolated.
+- Source tests, installed state, live acceptance and publication are separate evidence.
 
-- Schema v4 and normal terminal/Discord/authenticated API operations use the
-  serializable worker path. Legacy upload callbacks remain separate.
-- Reviewed UTF-8 regular-file creation/modification/deletion is implemented on
-  supported POSIX systems. Binary edits, directory moves/deletion and Windows
-  file apply are outside the supported contract.
-- Model routing records scores and selection. It is not resource-aware scheduling
-  and does not establish that a configured model is available in every install.
-- Dashboard updates use authenticated polling every five seconds. The SSE API
-  remains available, but the current browser does not use it.
-- Logical project/session tables, legacy memory extraction and owner-scoped
-  retrieval helpers exist. Normal Discord operations do not inject prior
-  conversation or approved memory; the terminal REPL embeds bounded in-process
-  history. Durable context integration remains unfinished.
-- Installation, backup/restore, packaging/privacy checks and CI exist. Automated
-  checks are separate from live Discord and operational acceptance.
+## Remaining and deferred work
 
-## Next priorities
+Durable destinations/outbox/receipts and inbox deduplication remain the delivery gap. All-ingress Requests statistics and Telegram parity need integration. Provider-session ownership/resume/monthly deletion is unimplemented; hidden history cannot bypass reset/current-only.
 
-1. Complete live Discord acceptance for a fresh result, approved file change,
-   held restart recovery and independent concurrent requests.
-2. DELIVERY-01: durable inbox deduplication, delivery destinations, outbox retry
-   and receipts; handle send-success/receipt-write failure explicitly.
-3. CONTEXT-01: explicit project/session selection, request-relevant snapshot
-   selection and owner/project-scoped memory in the normal operation path.
-4. Complete legacy memory/project read-model migration with upgrade/restore
-   evidence before removing compatibility storage.
-5. Design bounded single-request decomposition only after delivery/context
-   contracts are reliable. Add resource/latency/cost scheduling when measured.
+Single-request decomposition, resource scheduling, semantic/full-channel recall, automatic model changes, self-modification/deployment and additional connectors would expand the architecture and remain recommendations. PostgreSQL/Supabase, encryption and public hosting are deferred. Approved private access uses loopback, exact Host/Origin allowlists and existing authentication; actual instance values stay private. See [remote access](external_dashboard_access.md).
 
-## Deferred work
-
-External dashboard access and its server/database/hosting setup are deferred by
-the operator as of 2026-09-21. The [access guide](external_dashboard_access.md)
-is reference material, not a deployment instruction for the current phase.
-Remote hosts, credential/host enrollment, broader connectors and npm publishing
-remain separate work. Wiki and Release Notes publication also remain separate.
-
-## Non-goals
-
-- unrestricted autonomous writes or public unauthenticated controls;
-- credential synchronization or shared SQLite files between hosts;
-- open-ended bot-to-bot conversations;
-- replacing independent terminal, VPN or model runtimes.
+GitHub Wiki/Release Notes and npm publication are separate release work. LLM Wiki is product memory, not a GitHub documentation Wiki.

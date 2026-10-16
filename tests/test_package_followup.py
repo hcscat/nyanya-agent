@@ -116,7 +116,7 @@ def test_public_distribution_has_build_helper_and_resolvable_documentation(tmp_p
     paths = {path.relative_to(target).as_posix() for path in target.rglob("*") if path.is_file()}
     assert CHECKS["package_errors"](target, paths) == []
     assert "scripts/mark_dist_executable.js" in paths
-    assert "docs/test_catalog_ko.md" in paths
+    assert "docs/test_catalog.md" in paths
     assert "docs/llm_wiki.md" in paths
     assert "tests/conftest.py" in paths
     manifest = json.loads((target / "package.json").read_text())
