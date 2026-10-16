@@ -137,10 +137,28 @@
 
         <section id="memoryView" class="view" data-view-panel="memory" hidden>
           <section class="panel">
+            <div class="panel-heading compact">
+              <div>
+                <p class="eyebrow">LLM Wiki</p>
+                <h2>주제별 기억과 근거</h2>
+                <p class="meta">성공한 작업에서 자동 정리한 주제별 요약입니다. 승인 없이 대화에 참고하며, 필요한 기억만 검토하세요. 파일 변경 승인과는 별개입니다.</p>
+              </div>
+              <select id="wikiScope" aria-label="Wiki의 사용자·작업공간·프로젝트·채널">
+                <option value="">채널 기억 범위를 선택하세요</option>
+              </select>
+            </div>
+            <div class="topbar-actions">
+              <input id="wikiQuery" type="search" maxlength="2048" placeholder="주제나 기억 검색" aria-label="Wiki 검색어">
+              <button id="wikiSearchBtn" class="button secondary" type="button">조회</button>
+            </div>
+            <div id="wikiList" class="memory-list" aria-label="주제별 기억"><p class="empty">채널 기억 범위를 선택하세요.</p></div>
+          </section>
+          <section class="panel">
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">Long-term Memory</p>
-                <h2>기억 후보와 마인드맵</h2>
+                <h2>수동 기억 후보 검토</h2>
+                <p class="meta">아래 기억 목록의 후보 수입니다. 후보 추출은 검토할 기록을 만들며, 후보 승인은 일반 대화의 자동 Wiki 기억을 바꾸지 않습니다.</p>
               </div>
               <div class="topbar-actions">
                 <button id="extractMemoryBtn" class="button" type="button">요청 이력에서 후보 추출</button>
@@ -149,37 +167,29 @@
             <div id="memorySummary" class="memory-summary"></div>
           </section>
 
-          <div class="memory-grid">
-            <section class="panel">
-              <div class="panel-heading compact">
-                <div>
-                  <p class="eyebrow">Mind Map</p>
-                  <h2>기억 토큰 그래프</h2>
-                </div>
+          <section class="panel">
+            <div class="panel-heading compact">
+              <div>
+                <p class="eyebrow">Candidates</p>
+                <h2>기억 목록</h2>
+                <p class="meta">조회한 최대 120개 후보입니다. 승인·거부는 이 후보의 검토 상태만 변경합니다. 일반 대화의 자동 Wiki 기억과 별개이며, 필요한 후보만 검토하면 됩니다.</p>
               </div>
-              <div id="memoryGraph" class="memory-graph"></div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-heading compact">
-                <div>
-                  <p class="eyebrow">Tech Stack</p>
-                  <h2>관심사 기술스택 그래프</h2>
-                </div>
+            </div>
+            <div id="memoryList" class="memory-list" aria-label="수동 기억 후보"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-heading compact">
+              <div>
+                <p class="eyebrow">Completed Work</p>
+                <h2>작업 기억</h2>
+                <p class="meta">성공한 작업의 짧은 기록입니다. 모델 답변과 파일 적용 근거를 구분합니다. 현재 파일 상태를 보장하지 않습니다.</p>
               </div>
-              <div id="techStackGraph" class="memory-graph"></div>
-            </section>
-
-            <aside class="panel">
-              <div class="panel-heading compact">
-                <div>
-                  <p class="eyebrow">Candidates</p>
-                  <h2>기억 목록</h2>
-                </div>
-              </div>
-              <div id="memoryList" class="memory-list"></div>
-            </aside>
-          </div>
+              <select id="workRecordScope" aria-label="작업 기억의 사용자·작업공간·프로젝트">
+                <option value="">조회 범위를 선택하세요</option>
+              </select>
+            </div>
+            <div id="workRecordList" class="memory-list" aria-label="작업 기억"><p class="empty">조회 범위를 선택하세요.</p></div>
+          </section>
         </section>
 
         <section id="statsView" class="view" data-view-panel="stats" hidden>
@@ -221,7 +231,6 @@
       </main>
     </div>
 
-    <script src="https://unpkg.com/cytoscape@3/dist/cytoscape.min.js"></script>
     <script src="/static/app.js"></script>
   </body>
 </html>

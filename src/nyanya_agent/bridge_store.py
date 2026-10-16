@@ -10,6 +10,7 @@ import os
 import pathlib
 import threading
 import time
+import secrets
 from typing import Any, Callable
 
 from nyanya_agent import core as nyanya
@@ -38,12 +39,9 @@ class NyaNyaTask:
 class NyaNyaConversationStore:
     """Conversation context with a durable SQLite task queue."""
 
-    def __init__(self, config: dict[str, Any], max_messages: int | None = None) -> None:
+    def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
-        self.max_messages = max_messages or int(os.getenv("NYANYA_BRIDGE_MAX_MESSAGES", 24))
         self.task_queue_max = int(os.getenv("NYANYA_TASK_QUEUE_MAX", DEFAULT_TASK_QUEUE_MAX))
-        self._messages_by_key: dict[str, list[dict[str, str]]] = {}
-        self._lock = threading.Lock()
         self._workspace_lock = threading.Lock()
         self.durable_tasks = DurableTaskService(status_callback=self._durable_status)
         from nyanya_agent.operation_service import OperationService
@@ -72,8 +70,9 @@ class NyaNyaConversationStore:
             print(f"NyaNya dashboard update failed: {type(exc).__name__}: {exc}", flush=True)
 
     def reset(self, key: str, *, owner_key: str | None = None) -> None:
-        with self._lock:
-            self._messages_by_key[key] = nyanya.build_messages(self.config)
+        from nyanya_agent import conversation_store
+        owner = owner_key or key
+        conversation_store.reset(self.operations.path, owner, key, self.execution_workspace(owner))
 
     def answer(self, key: str, prompt: str) -> str:
         control = self.operations.control(prompt, key)
@@ -104,11 +103,8 @@ class NyaNyaConversationStore:
             print(f"NyaNya dashboard event failed: {type(exc).__name__}: {exc}", flush=True)
 
     def save(self, key: str, *, owner_key: str | None = None) -> pathlib.Path | None:
-        with self._lock:
-            messages = self._messages_by_key.get(key)
-            if not messages:
-                messages = nyanya.build_messages(self.config)
-            return nyanya.save_session(self.config, messages)
+        owner = owner_key or key
+        return save_conversation(self.config, self.operations.path, owner, key, self.execution_workspace(owner))
 
     def status_text(self) -> str:
         status = visible_config(self.config)
@@ -425,3 +421,32 @@ def preview_text(text: str, limit: int = 96) -> str:
     return normalized[: limit - 1].rstrip() + "…"
 
 
+def save_conversation(config, path, owner, key, workspace):
+    """Shared screened, bounded and no-follow private export for all entry points."""
+    if not config.get("save_transcripts", True):
+        return None
+    from nyanya_agent import conversation_store
+    content = conversation_store.snapshot(path, owner, key, workspace)
+    sessions = pathlib.Path(config.get("sessions_dir", "sessions"))
+    if not sessions.is_absolute():
+        sessions = nyanya.STATE_ROOT / sessions
+    if os.name != "posix":
+        raise ValueError("Private conversation exports require no-follow file operations")
+    sessions = pathlib.Path(os.path.abspath(sessions))
+    folder = os.open(sessions.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in sessions.parts[1:]:
+            try:
+                os.mkdir(part, mode=0o700, dir_fd=folder)
+            except FileExistsError:
+                pass
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=folder)
+            os.close(folder)
+            folder = child
+        name = f"nyanya-conversation-{secrets.token_hex(12)}.json"
+        fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=folder)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(content)
+        return sessions / name
+    finally:
+        os.close(folder)

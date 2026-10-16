@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from nyanya_agent import execution_store as ledger, database as db
 from nyanya_agent.operation_spec import OperationSpec
-from nyanya_agent import work_queue
+from nyanya_agent import work_queue, conversation_store
 
 
 def now():
@@ -86,6 +86,13 @@ def _submit_conn(conn, spec, owner, generation, *, root, source_request_id=None,
             if previous["requested_by"] != owner:
                 raise PermissionError("Intake belongs to another owner")
             if conn.execute("SELECT 1 FROM task_operations WHERE task_id=?", (prior["id"],)).fetchone():
+                if conversation_key is not None and conn.execute(
+                    "SELECT 1 FROM conversation_turns WHERE task_id=?", (prior["id"],)
+                ).fetchone():
+                    conversation_store.bind_conn(
+                        conn, task_id=prior["id"], owner=owner,
+                        conversation_key=conversation_key, workspace=str(root)
+                    )
                 return ledger._parse_record(
                     dict(conn.execute("SELECT * FROM agent_tasks WHERE id=?", (prior["id"],)).fetchone())
                 )
@@ -139,6 +146,10 @@ def _submit_conn(conn, spec, owner, generation, *, root, source_request_id=None,
         "INSERT INTO task_operations(task_id,spec_json,worker_generation,parent_task_id) VALUES (?,?,?,?)",
         (task_id, spec.dumps(), generation, parent_task_id),
     )
+    if conversation_key is not None and spec.kind == "request":
+        conversation_store.bind_conn(
+            conn, task_id=task_id, owner=owner, conversation_key=conversation_key, workspace=str(root)
+        )
     ledger.append_event_conn(
         conn,
         task_id=task_id,
@@ -346,6 +357,8 @@ def claim(path, generation, slots=2):
             (generation,),
         ).fetchall()
         for row in rows:
+            if conversation_store.has_earlier_work_conn(conn, row["id"]):
+                continue
             spec = OperationSpec.loads(row["spec_json"])
             # Requests can read concurrently. Applying changes waits for readers/writers of the same workspace.
             active = conn.execute(

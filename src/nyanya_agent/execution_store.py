@@ -298,13 +298,89 @@ CREATE INDEX IF NOT EXISTS idx_control_selection_scope
   WHERE event_type='control.selection';
 """
 
-
-
-
-
 MIGRATION_6 = r"""
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_id
   ON audit_logs(created_at DESC, id DESC);
+"""
+
+MIGRATION_7 = r"""
+CREATE TABLE conversation_sessions (
+  id TEXT PRIMARY KEY,
+  owner_key TEXT NOT NULL,
+  conversation_hash TEXT NOT NULL,
+  workspace_root TEXT NOT NULL,
+  generation INTEGER NOT NULL DEFAULT 1,
+  next_sequence INTEGER NOT NULL DEFAULT 1,
+  pending_task_id TEXT REFERENCES agent_tasks(id),
+  pending_execution_id TEXT REFERENCES executions(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(owner_key, conversation_hash, workspace_root)
+);
+CREATE TABLE conversation_turns (
+  task_id TEXT PRIMARY KEY REFERENCES agent_tasks(id),
+  session_id TEXT NOT NULL REFERENCES conversation_sessions(id),
+  generation INTEGER NOT NULL,
+  sequence INTEGER NOT NULL,
+  related_task_id TEXT REFERENCES agent_tasks(id),
+  reply_kind TEXT NOT NULL DEFAULT 'answer' CHECK(reply_kind IN ('answer','question')),
+  completed_execution_id TEXT REFERENCES executions(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(session_id, generation, sequence)
+);
+CREATE INDEX idx_conversation_turns_scope
+  ON conversation_turns(session_id, generation, sequence DESC);
+"""
+
+MIGRATION_8 = r"""
+ALTER TABLE conversation_sessions ADD COLUMN memory_reset_generation INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE task_work_records (
+  execution_id TEXT PRIMARY KEY REFERENCES task_results(execution_id),
+  task_id TEXT NOT NULL REFERENCES agent_tasks(id),
+  source_task_id TEXT NOT NULL REFERENCES agent_tasks(id),
+  owner_key TEXT NOT NULL,
+  workspace_root TEXT NOT NULL,
+  project_id TEXT REFERENCES execution_projects(id),
+  version INTEGER NOT NULL DEFAULT 1 CHECK(version=1),
+  reply_kind TEXT NOT NULL CHECK(reply_kind IN ('answer','question')),
+  provenance_kind TEXT NOT NULL CHECK(provenance_kind IN ('model_result','reviewed_apply')),
+  request_summary TEXT NOT NULL DEFAULT '',
+  result_summary TEXT NOT NULL DEFAULT '',
+  text_status TEXT NOT NULL,
+  evidence_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'retained' CHECK(status IN ('retained','forgotten')),
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+CREATE INDEX idx_task_work_records_scope
+  ON task_work_records(owner_key,workspace_root,project_id,created_at DESC);
+CREATE INDEX idx_task_work_records_source ON task_work_records(source_task_id);
+"""
+
+MIGRATION_9 = r"""
+CREATE TABLE wiki_entries (
+  id TEXT PRIMARY KEY,
+  source_execution_id TEXT NOT NULL REFERENCES task_work_records(execution_id),
+  owner_key TEXT NOT NULL,
+  workspace_root TEXT NOT NULL,
+  project_id TEXT REFERENCES execution_projects(id),
+  session_id TEXT NOT NULL REFERENCES conversation_sessions(id),
+  generation INTEGER NOT NULL,
+  topic_key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  content TEXT NOT NULL,
+  provenance_kind TEXT NOT NULL CHECK(provenance_kind IN ('model_result','reviewed_apply')),
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK(status IN ('pending','approved','rejected','superseded','forgotten')),
+  revision INTEGER NOT NULL,
+  review_version INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(source_execution_id, topic_key)
+);
+CREATE INDEX idx_wiki_entries_scope
+  ON wiki_entries(owner_key, workspace_root, project_id, session_id, topic_key, revision DESC);
 """
 
 MIGRATIONS = (
@@ -314,6 +390,9 @@ MIGRATIONS = (
     (4, "serializable-operations-and-reviewed-apply", MIGRATION_4),
     (5, "workflow-event-read-indexes", MIGRATION_5),
     (6, "audit-log-read-index", MIGRATION_6),
+    (7, "durable-conversation-state", MIGRATION_7),
+    (8, "bounded-task-work-records", MIGRATION_8),
+    (9, "scoped-cited-wiki", MIGRATION_9),
 )
 
 _MIGRATION_THREAD_LOCK = threading.RLock()

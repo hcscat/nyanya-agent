@@ -33,6 +33,20 @@ Local AI instructions (including AGENTS variants), backup and report paths are e
 
 An explicitly named full relative or in-workspace absolute file path is checked before bounded directory discovery. A named folder scopes discovery to that folder; the aggregate 200-directory/4,000-name limit remains. Exact files still obey the 80-file/50 KB context limit, no-follow ancestor checks, private/dependency exclusions, UTF-8 regular-file checks and content screening. Unsafe explicit references do not fall back to reading unrelated overview files. For a nested target in a large workspace, name its full relative path rather than only its basename.
 
+## Ongoing Discord conversations
+
+Ordinary requests receive a short acknowledgement followed by a natural reply. The worker's JSON fields are internal transport data, not a required human answer template. A necessary clarification question completes successfully; it does not become a failed or unfinished task merely because the operator has not answered.
+
+Context is scoped to the authenticated owner, Discord channel/thread and registered workspace. It references existing task prompts and results rather than copying them into another transcript. Idle time no longer resets the channel session. Up to eight recent turns and four earlier turns matching words in the current request are included, within 24 KiB, after sensitive-content screening. Earlier idle generations remain searchable after the last explicit reset; other owners, channels, workspaces and projects are excluded. This is bounded lexical recall, not perfect semantic recall. The separate [LLM Wiki](llm_wiki.md) adds cited topic summaries using the existing result-model call; neither feature adds a DB backend. Oversized or unsafe turns are omitted. Turns in one context generation execute in order; independent conversations may execute concurrently. Explicitly resuming an older turn cannot overlap another running turn in that generation.
+
+History is untrusted context for interpreting follow-up messages. Its saved response, outcome and delivery evidence describe an earlier attempt; the separate current task status describes the live ledger. Prior messages never authorize a new file change, cancel work, change model settings or expand the current file-read scope. A follow-up that needs a file must identify the file or folder again. Approval remains authenticated and bound to the reviewed plan hash; a conversational assent such as "go ahead" does not apply an existing-file modification automatically.
+
+`reset` starts a new conversation context generation without cancelling tasks, revoking plans or deleting history. `save` creates a bounded, screened private conversation export under the configured local session directory. It does not export credentials, provider configuration or a full unlimited transcript. Current-only suppresses history for this request; no-store also excludes its source from later recall/export and derived memory. Source forgetting clears the same source's work/Wiki/linked legacy summaries while preserving original requests/results/approvals/effects/backups. Reset changes the recall boundary and is not task cancellation or secure erasure.
+
+The dashboard Memory view supports topic search, conflict/revision selection, summary rejection and source forgetting. These are memory controls, not file approval; automatic summaries remain historical model claims. The optional legacy LLM refinement stays disabled.
+
+These features provide text dialogue, not voice input, unrestricted shell execution or autonomous self-modification. File proposals and reviewed application remain the supported effect boundary.
+
 ## Operation model routing
 
 The current source requests Gemini Flash for initial assessment and low-complexity execution. With importance and impact both below 4, complexity 3–4 selects `luna` (`gpt-6-luna`, `xhigh`). Importance or impact at least 4, or complexity 5, selects `sol` (`gpt-6.1-sol`, `high`). The serialized legacy profile `astra` remains accepted and explicitly aliases that Sol configuration; it does not invoke Astra. Explicit profiles also retain initial Flash assessment.
@@ -362,3 +376,21 @@ The TypeScript state backup command uses SQLite online backup and rejects unsafe
 ## Inspected document upload
 
 Explicit file transfer performs bounded local document inspection before Discord transmission. Personal-information patterns require exact one-use owner/hash/destination confirmation; authentication material is blocked. PDF/image and other uninspectable content remain held. See [the upload contract](security_and_reliability.md#upload-file-boundary).
+
+## Memory review controls
+
+Legacy candidate **승인** patches only `memory_items.status` to `approved`; **거부** changes it to `rejected`. Changed status is audited and the candidate's text/source history remains stored. A rejected candidate is excluded from the legacy approved-memory search, but rejection is not source forgetting or secure erasure. Those legacy search/format functions are not called by normal operation-model context, so candidate approval alone does not alter an ordinary Discord response. The **요청 이력에서 후보 추출** button runs bounded, rule-based extraction of eligible successful requests, without an extra model call. Review only useful candidates; there is no requirement to approve every row.
+
+Automatic LLM Wiki summaries are eligible scoped historical context before manual review. **기억 버전 선택** selects a version and supersedes other pending/approved versions of that topic; **요약 거부** excludes that summary; **이 근거 기억 제외** clears and suppresses the same source's derived Wiki/work/linked legacy memory while preserving the original work ledger. Work-record **기억에서 제외** applies the same source boundary. Use review for conflicts/corrections, not as mandatory approval for all automatic memories. See [LLM Wiki](llm_wiki.md) for provenance, no-store and reset limits.
+
+## Scoped completed-work memory
+
+Successful normal operations retain screened request/result excerpts and ledger references in task_work_records. The result model may reuse relevant records from the same owner, workspace and project; this adds no LLM refinement call. The separate legacy candidate worker remains independent. This is a source capability, not proof that an operating instance has been upgraded to schema v8.
+
+Use the dashboard memory tab to select an explicit work-record scope. Forgetting one record clears its excerpts and excludes it from reuse; it does not cancel a task or erase its request, result, approvals or file effects. The authenticated work-record list/forget APIs require the same explicit scope.
+
+NYANYA_WORK_MEMORY_ENABLED=false disables new records and automatic retrieval. A request that explicitly forbids storing memory is not recorded. Current-input-only or explicit history exclusion suppresses both dialogue and completed-work context; a no-files request alone can still use conversational references. Questions are stored as questions but never retrieved as completed knowledge.
+
+Records expire from retrieval after 90 days; workflow evidence is not automatically deleted. An explicit reset excludes earlier work from that same conversation; a simple idle conversation rollover does not prevent next-day work reuse. Other scopes never become visible through a global fallback.
+
+NyaNya does not delete Antigravity CLI/app conversations. Automatic cleanup requires a supported exact-ID operation and proven NyaNya ownership after durable recording. Do not delete provider folders or infer ownership from recency. Codex invocations already use ephemeral sessions.
