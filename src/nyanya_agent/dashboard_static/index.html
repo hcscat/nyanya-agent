@@ -32,7 +32,7 @@
             <h1>NyaNya Agent 운영 대시보드</h1>
           </div>
           <div class="topbar-actions">
-            <button id="unlockControlBtn" class="button secondary" type="button">제어 잠금 해제</button>
+            <button id="unlockControlBtn" class="button secondary" type="button">대시보드 잠금 해제</button>
             <span id="streamStatus" class="connection-state offline">연결 중</span>
             <button id="refreshBtn" class="button secondary" type="button">새로고침</button>
           </div>
@@ -49,7 +49,7 @@
                   <h2>진행 중 요청</h2>
                 </div>
               </div>
-              <div id="runningList" class="stack"></div>
+              <div id="runningList" class="stack" aria-label="진행 중 요청"></div>
             </section>
 
             <aside class="panel">
@@ -57,9 +57,10 @@
                 <div>
                   <p class="eyebrow">Exceptions</p>
                   <h2>최근 실패</h2>
+                  <p class="meta">실패한 요청 이력입니다. 취소 명령의 실패도 포함하며, 취소된 작업 목록과는 다릅니다.</p>
                 </div>
               </div>
-              <div id="failureList" class="stack"></div>
+              <div id="failureList" class="stack" aria-label="최근 실패"></div>
             </aside>
           </div>
         </section>
@@ -70,8 +71,9 @@
           <section class="panel office-panel">
             <div class="panel-heading">
               <div>
-                <p class="eyebrow">Live Agent Office</p>
+                <p class="eyebrow">Execution Status</p>
                 <h2>실행 현황</h2>
+                <p id="executionWindow" class="meta">실행 시도를 상태별로 표시합니다. 조회·제어 명령을 포함한 전체 요청은 통계의 요청 이력에서 확인하세요.</p>
               </div>
             </div>
             <div id="agentOffice" class="agent-office" aria-label="에이전트 상태 구역"></div>
@@ -85,7 +87,7 @@
                   <h2>최근 실행</h2>
                 </div>
               </div>
-              <div id="executionTable" class="table-wrap"></div>
+              <div id="executionTable" class="table-wrap" aria-label="최근 실행"></div>
             </section>
 
             <aside class="panel">
@@ -93,9 +95,10 @@
                 <div>
                   <p class="eyebrow">Approvals</p>
                   <h2>승인 대기</h2>
+                  <p class="meta">파일 변경 승인 대기 작업과 별도 실행 승인 기록을 구분해 표시합니다. 기존 파일의 변경안·해시 승인은 요청 대화에서 진행하세요.</p>
                 </div>
               </div>
-              <div id="approvalList" class="stack"></div>
+              <div id="approvalList" class="stack" aria-label="승인 대기"></div>
             </aside>
           </div>
 
@@ -106,16 +109,9 @@
                 <h2>Host·Agent 상태 목록</h2>
               </div>
             </div>
-            <div id="agentStatusTable" class="table-wrap" aria-live="polite"></div>
+            <div id="agentStatusTable" class="table-wrap" aria-label="Host·Agent 상태" aria-live="polite"></div>
           </section>
 
-          <aside id="executionDrawer" class="detail-drawer" hidden aria-labelledby="executionDrawerTitle">
-            <div class="drawer-heading">
-              <h2 id="executionDrawerTitle">실행 상세</h2>
-              <button id="closeExecutionDrawer" class="icon-button" type="button" aria-label="실행 상세 닫기" title="닫기">×</button>
-            </div>
-            <div id="executionDetail" class="drawer-content"></div>
-          </aside>
         </section>
 
         <section id="projectsView" class="view" data-view-panel="projects" hidden>
@@ -124,6 +120,7 @@
               <div>
                 <p class="eyebrow">Project Phase</p>
                 <h2>프로젝트 단계</h2>
+                <p class="meta">이름·목표와 기획·설계·구현·테스트 상태를 기록합니다. 추가하거나 상태를 체크해도 자동 개발이나 테스트가 시작되지 않습니다.</p>
               </div>
               <form id="projectForm" class="inline-form">
                 <input id="projectNameInput" name="name" type="text" placeholder="프로젝트 이름" required />
@@ -131,7 +128,7 @@
                 <button class="button" type="submit">추가</button>
               </form>
             </div>
-            <div id="projectList" class="project-list"></div>
+            <div id="projectList" class="project-list" aria-label="프로젝트"></div>
           </section>
         </section>
 
@@ -205,7 +202,7 @@
                 <option value="monthly">월별</option>
               </select>
             </div>
-            <div id="usageChart" class="usage-chart"></div>
+            <div id="usageChart" class="usage-chart" aria-label="사용량 추이"></div>
           </section>
 
           <section id="requests" class="panel">
@@ -215,7 +212,7 @@
                 <h2>요청 이력</h2>
               </div>
             </div>
-            <div id="requestTable" class="table-wrap"></div>
+            <div id="requestTable" class="table-wrap" aria-label="요청 이력"></div>
           </section>
 
           <section id="audit" class="panel">
@@ -225,11 +222,19 @@
                 <h2>감사 로그</h2>
               </div>
             </div>
-            <div id="auditLog" class="audit-log"></div>
+            <div id="auditLog" class="audit-log" aria-label="감사 로그"></div>
           </section>
         </section>
       </main>
     </div>
+    <dialog id="executionDrawer" class="execution-dialog" aria-labelledby="executionDrawerTitle">
+      <div class="drawer-heading">
+        <h2 id="executionDrawerTitle">실행 상세</h2>
+        <button id="closeExecutionDrawer" class="icon-button" type="button" aria-label="실행 창 닫기" title="닫기">×</button>
+      </div>
+      <button id="backToExecutionList" class="button small secondary" type="button" hidden>목록으로</button>
+      <div id="executionDetail" class="drawer-content"></div>
+    </dialog>
 
     <script src="/static/app.js"></script>
   </body>

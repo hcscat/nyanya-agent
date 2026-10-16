@@ -348,6 +348,33 @@ def get_request(request_id: str, *, db_path: str | Path | None = None) -> dict[s
         return request
 
 
+def execution_context(
+    executions: list[dict[str, Any]], *, detail: bool = False,
+    db_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Attach request/result evidence for these exact attempts, never the latest retry."""
+    if not executions:
+        return []
+    ids = [item["id"] for item in executions]
+    placeholders = ",".join("?" for _ in ids)
+    # List payloads stay small; authenticated detail retains the original text.
+    prompt = "t.prompt" if detail else "substr(t.prompt, 1, 321)"
+    response = "r.response" if detail else "substr(r.response, 1, 401)"
+    with connect(db_path) as conn:
+        contexts = {
+            row["id"]: dict(row) for row in conn.execute(
+                f"SELECT e.id, {prompt} AS request_prompt, t.title AS request_title, "
+                f"q.source AS request_source, {response} AS response, r.outcome, "
+                "r.delivery_status, "
+                "(SELECT message FROM execution_events WHERE execution_id=e.id "
+                "AND event_type='operation.model_selected' ORDER BY seq DESC LIMIT 1) AS model_selection "
+                "FROM executions e JOIN agent_tasks t ON t.id=e.task_id "
+                "LEFT JOIN agent_requests q ON q.id=t.source_request_id "
+                "LEFT JOIN task_results r ON r.execution_id=e.id AND r.task_id=e.task_id "
+                f"WHERE e.id IN ({placeholders})", ids,
+            )
+        }
+    return [{**item, "context": contexts.get(item["id"], {})} for item in executions]
 
 
 def create_project(
