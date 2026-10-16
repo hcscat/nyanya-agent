@@ -4,8 +4,40 @@ from fastapi.testclient import TestClient
 
 from nyanya_agent import dashboard_api
 from nyanya_agent import execution_store as ledger
+from nyanya_agent import database
 
 
+def test_execution_context_is_authenticated_bounded_and_bound_to_each_attempt(tmp_path, monkeypatch):
+    db_path = tmp_path / "dashboard.db"
+    monkeypatch.setenv("NYANYA_DASHBOARD_CONTROL_TOKEN", "fixture-execution-token")
+    client = TestClient(dashboard_api.create_app(db_path), base_url="http://127.0.0.1")
+    headers = {"Authorization": "Bearer fixture-execution-token"}
+    task = ledger.create_task(title="Fixture", prompt="Original request " * 100, db_path=db_path)
+    attempts = [ledger.create_execution(task_id=task["id"], adapter_type="operation", db_path=db_path)
+                for _ in range(2)]
+    with database.connect(db_path) as conn:
+        for index, attempt in enumerate(attempts):
+            response = f"Attempt {index} response " * 100
+            conn.execute("INSERT INTO task_results VALUES (?,?,?,?,?,?,?,?)",
+                         (attempt["id"], task["id"], "succeeded", response, "unknown", "", "fixture", "fixture"))
+    route = f"/v1/executions/{attempts[0]['id']}"
+    assert client.get("/v1/executions").status_code == 401
+    assert client.get(route).status_code == 401
+    detail = client.get(route, headers=headers).json()
+    assert detail["context"]["request_prompt"] == task["prompt"]
+    assert detail["context"]["response"] == "Attempt 0 response " * 100
+    assert detail["context"]["delivery_status"] == "unknown"
+    listing = client.get("/v1/executions", headers=headers).json()
+    for item in listing:
+        assert len(item["context"]["request_prompt"]) <= 321
+        assert len(item["context"]["response"]) <= 401
+        index = next(i for i, attempt in enumerate(attempts) if attempt["id"] == item["id"])
+        assert item["context"]["response"].startswith(f"Attempt {index} response")
+    empty = ledger.create_task(title="No prompt fixture", db_path=db_path)
+    attempt = ledger.create_execution(task_id=empty["id"], adapter_type="fixture", db_path=db_path)
+    context = client.get(f"/v1/executions/{attempt['id']}", headers=headers).json()["context"]
+    assert context["request_title"] == "No prompt fixture" and context["response"] is None
+    assert client.get("/v1/executions/not-found", headers=headers).status_code == 404
 
 
 def test_execution_read_api_and_authenticated_control_actions(tmp_path, monkeypatch):
