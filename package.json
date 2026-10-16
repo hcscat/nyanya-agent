@@ -30,7 +30,7 @@
     "docs/llm_wiki.md",
     "docs/core_stabilization_20260910.md",
     "docs/p0_execution_20260912.md",
-    "docs/test_catalog_ko.md",
+    "docs/test_catalog.md",
     "docs/architecture_and_roadmap.md",
     "docs/architecture_diagnostic_20260826.md",
     "docs/copyright_review.md",
@@ -41,7 +41,8 @@
     "docs/npm_release_resumption_guide.md",
     "docs/operations_guide.md",
     "docs/source_publication_policy.md",
-    "docs/user_acceptance_tests_ko.md",
+    "docs/security_and_reliability.md",
+    "docs/user_acceptance_tests.md",
     "scripts/*.sh",
     "scripts/mark_dist_executable.js",
     "scripts/dev.py",
@@ -64,9 +65,7 @@
     "packaging/release/*.py",
     "packaging/release/*.txt",
     ".env.example",
-    "pyproject.toml",
-    "docs/security_and_reliability.md",
-    "docs/user_acceptance_tests.md"
+    "pyproject.toml"
   ],
   "engines": {
     "node": ">=18"

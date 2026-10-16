@@ -1,6 +1,6 @@
 # Copyright and Origin Review
 
-Date: 2026-06-07
+Date: 2026-06-07. Historical review of the checked files/period, not a new audit of later code. See [development status](development_status.md) for current structure.
 
 ## Scope
 
