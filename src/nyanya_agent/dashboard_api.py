@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import argparse
 from contextlib import asynccontextmanager, suppress
 import json
 import os
@@ -12,6 +13,7 @@ import platform
 import secrets
 import shutil
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,8 +27,6 @@ from nyanya_agent import execution_store as ledger
 from nyanya_agent import database as db, operation_store
 from nyanya_agent.execution_runtime import ExecutionCoordinator
 
-
-core.load_env(core.DEFAULT_ENV)
 
 STATIC_DIR = Path(__file__).resolve().parent / "dashboard_static"
 
@@ -133,7 +133,7 @@ def require_control_token(
     supplied = x_nyanya_control_token or ""
     if authorization and authorization.lower().startswith("bearer "):
         supplied = authorization[7:].strip()
-    if not supplied or not secrets.compare_digest(supplied, expected):
+    if not supplied or not secrets.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8")):
         raise HTTPException(status_code=401, detail="Invalid dashboard control token")
     return "authenticated"
 
@@ -160,6 +160,16 @@ def heartbeat_local_host(db_path: str | Path | None = None) -> dict[str, Any]:
 
 
 def create_app(db_path: str | Path | None = None) -> FastAPI:
+    core.load_env(core.DEFAULT_ENV)
+    allowed_hosts = {"127.0.0.1", "localhost", "::1"}
+    for host in os.getenv("NYANYA_DASHBOARD_ALLOWED_HOSTS", "").split(","):
+        host = host.strip().lower().rstrip(".")
+        if host:
+            if any(ord(char) <= 32 or ord(char) >= 127 or char in "/*@?#:" for char in host):
+                raise ValueError("Dashboard allowed hosts must be exact hostnames without ports")
+            allowed_hosts.add(host)
+    allowed_origins = {origin.strip() for origin in os.getenv("NYANYA_DASHBOARD_CORS_ORIGINS", "").split(",") if origin.strip()}
+
     store.init_db(db_path)
     ledger.apply_migrations(db_path)
     ledger.reconcile_legacy_requests(db_path=db_path)
@@ -195,16 +205,42 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
     )
 
     @app.middleware("http")
-    async def authenticate_remote_reads(request: Request, call_next):
-        # Do not trust forwarded headers as identity or assume a proxy makes reads local.
-        remote = not request.client or request.client.host not in {"127.0.0.1", "::1"}
-        forwarded = any(name in request.headers for name in ("forwarded", "x-forwarded-for", "x-real-ip"))
-        if request.url.path.startswith("/v1/") and (remote or forwarded):
+    async def authenticate_dashboard(request: Request, call_next):
+        # Socket locality and forwarded headers cannot establish browser trust.
+        raw_hosts = request.headers.getlist("host")
+        try:
+            host = (urlsplit("//" + raw_hosts[0])
+                    if len(raw_hosts) == 1 and not any(ord(char) <= 32 or ord(char) >= 127 for char in raw_hosts[0])
+                    else None)
+            valid = bool(host and host.hostname and host.hostname.lower().rstrip(".") in allowed_hosts
+                         and not (host.username or host.password or host.path or host.query or host.fragment))
+            if host:
+                _ = host.port
+        except ValueError:
+            valid = False
+        if not valid:
+            return JSONResponse(status_code=400, content={"detail": "Invalid dashboard Host"})
+        if request.url.path.startswith("/v1/"):
+            origins = request.headers.getlist("origin")
+            if len(origins) > 1 or (origins and not origins[0]):
+                return JSONResponse(status_code=403, content={"detail": "Invalid dashboard Origin"})
+            origin = origins[0] if origins else None
+            same_origin = f"{request.url.scheme}://{request.headers['host']}"
+            if origin and origin != same_origin and origin not in allowed_origins:
+                return JSONResponse(status_code=403, content={"detail": "Untrusted dashboard Origin"})
+            if request.method == "OPTIONS" and origin and request.headers.get("access-control-request-method"):
+                return await call_next(request)
             try:
                 require_control_token(request.headers.get("authorization"), request.headers.get("x-nyanya-control-token"))
             except HTTPException as exc:
                 return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         return await call_next(request)
+
+    @app.middleware("http")
+    async def prevent_cached_dashboard(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -692,15 +728,25 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
     return app
 
 
-app = create_app()
+def __getattr__(name):
+    # Retain the ASGI ':app' entry point without startup effects on module import.
+    if name == "app":
+        app = create_app()
+        globals()["app"] = app
+        return app
+    raise AttributeError(name)
 
 
-def main() -> int:
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description="Run the authenticated local NyaNya dashboard.")
+    parser.parse_args(argv)
+
     import uvicorn
 
+    core.load_env(core.DEFAULT_ENV)
     host = os.getenv("NYANYA_DASHBOARD_HOST", "127.0.0.1")
     port = int(os.getenv("NYANYA_DASHBOARD_PORT", "8765"))
-    uvicorn.run("nyanya_agent.dashboard_api:app", host=host, port=port, reload=False)
+    uvicorn.run("nyanya_agent.dashboard_api:create_app", host=host, port=port, reload=False, factory=True)
     return 0
 
 

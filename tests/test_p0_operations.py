@@ -472,7 +472,7 @@ def test_api_operation_submission_uses_worker_and_preserves_undelivered_result(s
 
     path, root, _ = setup
     monkeypatch.setenv("NYANYA_DASHBOARD_CONTROL_TOKEN", "fixture-control")
-    with TestClient(create_app(path), client=("127.0.0.1", 50000)) as client:
+    with TestClient(create_app(path), base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
         payload = {"prompt": "inspect", "workspace": str(root)}
         assert client.post("/v1/operations", json=payload).status_code == 401
         response = client.post("/v1/operations", json=payload, headers={"X-Nyanya-Control-Token": "fixture-control"})
@@ -579,13 +579,14 @@ def test_remote_and_forwarded_reads_require_authentication(setup, monkeypatch):
     path, _, _ = setup
     monkeypatch.setenv("NYANYA_DASHBOARD_CONTROL_TOKEN", "fixture-control")
     app = create_app(path)
-    with TestClient(app, client=("remote-client", 50000)) as client:
+    with TestClient(app, base_url="http://127.0.0.1", client=("remote-client", 50000)) as client:
         assert client.get("/health").status_code == 200
         assert client.get("/v1/tasks").status_code == 401
         assert client.get("/v1/tasks", headers={"X-Nyanya-Control-Token": "fixture-control"}).status_code == 200
-    with TestClient(create_app(path), client=("127.0.0.1", 50000)) as client:
-        assert client.get("/v1/tasks").status_code == 200
+    with TestClient(create_app(path), base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
+        assert client.get("/v1/tasks").status_code == 401
         assert client.get("/v1/tasks", headers={"X-Forwarded-For": "remote-client"}).status_code == 401
+        assert client.get("/v1/tasks", headers={"X-Nyanya-Control-Token": "fixture-control"}).status_code == 200
 
 
 def test_schema_three_backup_upgrade_and_restore_preserve_work(tmp_path, monkeypatch):

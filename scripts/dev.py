@@ -13,6 +13,7 @@ import argparse
 from dataclasses import dataclass
 import json
 import os
+import secrets
 from pathlib import Path
 import subprocess
 import sys
@@ -231,6 +232,16 @@ def run_command(
     python = _require_venv(dev_layout, command)
     if command in {"dashboard", "terminal"}:
         _ensure_runtime_state(dev_layout)
+    if command == "dashboard":
+        token_file = dev_layout.state_root / "data" / "dashboard_control.token"
+        _guard_local_path(token_file, dev_layout.project_root, "developer dashboard token")
+        try:
+            fd = os.open(token_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(secrets.token_urlsafe(32) + "\n")
     env = isolated_environment(dev_layout)
     argv = command_argv(command, python)
     runner = executor or _execute

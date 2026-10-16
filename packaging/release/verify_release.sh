@@ -49,7 +49,7 @@ while IFS= read -r pattern; do
     ""|\#*) continue ;;
   esac
   if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    tracked_matches="$(git ls-files -- "$pattern" || true)"
+    tracked_matches="$(git ls-files -- "$pattern")"
   else
     tracked_matches=""
   fi
@@ -57,7 +57,7 @@ while IFS= read -r pattern; do
     echo "$tracked_matches"
     fail "denylisted path is tracked by git: $pattern"
   else
-    ok "denylisted path is not tracked: $pattern"
+    ok "no unauthorized tracked paths match: $pattern"
   fi
 done < packaging/release/package-denylist.txt
 

@@ -15,6 +15,7 @@ def pytest_configure(config):
     os.environ.update(
         {
             "NYANYA_HOME": str(root),
+            "NYANYA_PROJECT_ROOT": str(Path(__file__).resolve().parents[1]),
             "NYANYA_ENV_FILE": str(root / "absent.env"),
             "NYANYA_DASHBOARD_DB_PATH": str(root / "test.db"),
             "NYANYA_WORKSPACE_ROOTS": str(Path(__file__).resolve().parents[1]) + "," + str(root),

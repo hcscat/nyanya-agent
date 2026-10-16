@@ -82,6 +82,10 @@ def copy_distribution(source: Path, destination: Path) -> None:
         with target.open("xb") as output, item.open("rb") as original:
             shutil.copyfileobj(original, output)
         shutil.copymode(item, target)
+    if (destination / "src/nyanya_agent/artifact_manifest.py").is_file():
+        import runpy
+        helper = runpy.run_path(str(source / "src/nyanya_agent/artifact_manifest.py"))
+        helper["write_manifest"](destination, source)
 
 
 if __name__ == "__main__":

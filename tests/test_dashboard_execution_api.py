@@ -9,7 +9,7 @@ from nyanya_agent import execution_store as ledger
 def test_execution_read_api_and_authenticated_control_actions(tmp_path, monkeypatch):
     db_path = tmp_path / "dashboard.db"
     monkeypatch.setenv("NYANYA_DASHBOARD_CONTROL_TOKEN", "test-control-token")
-    client = TestClient(dashboard_api.create_app(db_path), client=("127.0.0.1", 50000))
+    client = TestClient(dashboard_api.create_app(db_path), base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
     headers = {"Authorization": "Bearer test-control-token"}
 
     unauthenticated = client.post("/v1/tasks", json={"title": "Remote task"})
@@ -23,7 +23,7 @@ def test_execution_read_api_and_authenticated_control_actions(tmp_path, monkeypa
     assert created.status_code == 201
     task = created.json()
 
-    listed = client.get("/v1/tasks")
+    listed = client.get("/v1/tasks", headers={"Authorization": "Bearer test-control-token"})
     assert listed.status_code == 200
     assert listed.json()[0]["id"] == task["id"]
 
@@ -41,18 +41,18 @@ def test_execution_read_api_and_authenticated_control_actions(tmp_path, monkeypa
         json={"actor": "operator", "reason": "test retry"},
     )
     assert retried.status_code == 409
-    assert client.get(f"/v1/tasks/{task['id']}").json()["status"] == "cancelled"
+    assert client.get(f"/v1/tasks/{task['id']}", headers={"Authorization": "Bearer test-control-token"}).json()["status"] == "cancelled"
 
     health = client.get("/health").json()
     assert health["schema_version"] == 4
     assert health["control_auth_configured"] is True
-    assert client.get("/v1/summary").json()["execution_ledger"]["schema_version"] == 4
+    assert client.get("/v1/summary", headers={"Authorization": "Bearer test-control-token"}).json()["execution_ledger"]["schema_version"] == 4
 
 
 def test_execution_project_codex_session_and_task_filters(tmp_path, monkeypatch):
     db_path = tmp_path / "dashboard.db"
     monkeypatch.setenv("NYANYA_DASHBOARD_CONTROL_TOKEN", "test-control-token")
-    client = TestClient(dashboard_api.create_app(db_path), client=("127.0.0.1", 50000))
+    client = TestClient(dashboard_api.create_app(db_path), base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
     headers = {"X-Nyanya-Control-Token": "test-control-token"}
 
     project_response = client.post(
@@ -86,17 +86,17 @@ def test_execution_project_codex_session_and_task_filters(tmp_path, monkeypatch)
     assert task["project_id"] == project["id"]
     assert task["codex_session_id"] == session["id"]
     assert task["metadata"]["api_key"] == "[REDACTED]"
-    filtered = client.get(f"/v1/tasks?project_id={project['id']}")
+    filtered = client.get(f"/v1/tasks?project_id={project['id']}", headers={"Authorization": "Bearer test-control-token"})
     assert filtered.status_code == 200
     assert filtered.json()[0]["id"] == task["id"]
-    loaded_session = client.get(f"/v1/codex-sessions/{session['id']}")
+    loaded_session = client.get(f"/v1/codex-sessions/{session['id']}", headers={"Authorization": "Bearer test-control-token"})
     assert loaded_session.status_code == 200
 
 
 def test_approval_decision_and_cursor_event_read(tmp_path, monkeypatch):
     db_path = tmp_path / "dashboard.db"
     monkeypatch.setenv("NYANYA_DASHBOARD_CONTROL_TOKEN", "test-control-token")
-    client = TestClient(dashboard_api.create_app(db_path), client=("127.0.0.1", 50000))
+    client = TestClient(dashboard_api.create_app(db_path), base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
     task = ledger.create_task(title="Approval", db_path=db_path)
     approval = ledger.request_approval(
         task_id=task["id"],
@@ -113,8 +113,8 @@ def test_approval_decision_and_cursor_event_read(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert response.json()["status"] == "approved"
 
-    events = client.get("/v1/events").json()
+    events = client.get("/v1/events", headers={"Authorization": "Bearer test-control-token"}).json()
     assert events
     cursor = events[-2]["seq"]
-    resumed = client.get(f"/v1/events?after_seq={cursor}").json()
+    resumed = client.get(f"/v1/events?after_seq={cursor}", headers={"Authorization": "Bearer test-control-token"}).json()
     assert resumed[0]["seq"] > cursor

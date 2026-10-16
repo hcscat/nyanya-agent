@@ -308,9 +308,7 @@ Normal terminal and Discord requests use `operation_service.py` and a dedicated
 worker with stored OperationSpec data. Legacy upload callbacks still use
 `task_service.py`. The dashboard is primarily for monitoring and authenticated management.
 
-Remote/forwarded read APIs and mutating control APIs require
-`NYANYA_DASHBOARD_CONTROL_TOKEN` or an owner-only token file. Tokens are never
-placed in URLs, HTML, logs, or Git. Local loopback reads do not imply public access.
+All `/v1/` data and control APIs, including loopback reads, require `NYANYA_DASHBOARD_CONTROL_TOKEN` or an owner-only token file. Exact Host/Origin checks also apply. Tokens stay out of URLs, HTML, logs and Git; the static shell and health endpoint remain accessible without exposing operational records.
 
 ```text
 GET  /v1/hosts
