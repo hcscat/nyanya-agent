@@ -302,12 +302,18 @@ CREATE INDEX IF NOT EXISTS idx_control_selection_scope
 
 
 
+MIGRATION_6 = r"""
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_id
+  ON audit_logs(created_at DESC, id DESC);
+"""
+
 MIGRATIONS = (
     (1, "execution-ledger", MIGRATION_1),
     (2, "projects-and-codex-sessions", MIGRATION_2),
     (3, "task-claims-and-results", MIGRATION_3),
     (4, "serializable-operations-and-reviewed-apply", MIGRATION_4),
     (5, "workflow-event-read-indexes", MIGRATION_5),
+    (6, "audit-log-read-index", MIGRATION_6),
 )
 
 _MIGRATION_THREAD_LOCK = threading.RLock()
@@ -512,12 +518,24 @@ def register_host(
     db_path: str | Path | None = None,
 ) -> dict[str, Any]:
     apply_migrations(db_path)
-    timestamp = now_iso()
     host_id = host_id or new_id("host")
+    values = {
+        "role": role,
+        "platform": platform,
+        "architecture": architecture,
+        "tailscale_name": tailscale_name,
+        "status": status,
+        "capabilities_json": encode_json(capabilities or {}),
+        "metadata_json": encode_json(redact(metadata or {})),
+    }
     with legacy.connect(db_path) as conn:
-        existing = conn.execute("SELECT id FROM hosts WHERE name = ?", (name,)).fetchone()
+        # The read, update and audit decision must share the SQLite write lock.
+        conn.execute("BEGIN IMMEDIATE")
+        timestamp = now_iso()
+        existing = conn.execute("SELECT * FROM hosts WHERE name = ?", (name,)).fetchone()
         if existing:
             host_id = existing["id"]
+            changed_fields = [field.removesuffix("_json") for field, value in values.items() if existing[field] != value]
             conn.execute(
                 """
                 UPDATE hosts SET role = ?, platform = ?, architecture = ?, tailscale_name = ?, status = ?,
@@ -525,18 +543,21 @@ def register_host(
                 WHERE id = ?
                 """,
                 (
-                    role,
-                    platform,
-                    architecture,
-                    tailscale_name,
-                    status,
-                    encode_json(capabilities or {}),
-                    encode_json(redact(metadata or {})),
+                    *values.values(),
                     timestamp,
                     timestamp,
                     host_id,
                 ),
             )
+            if changed_fields:
+                legacy.log_audit(
+                    conn,
+                    actor="nyanya-agent",
+                    action="host.updated",
+                    entity_type="host",
+                    entity_id=host_id,
+                    detail={"changed_fields": changed_fields},
+                )
         else:
             conn.execute(
                 """
@@ -548,26 +569,19 @@ def register_host(
                 (
                     host_id,
                     name,
-                    role,
-                    platform,
-                    architecture,
-                    tailscale_name,
-                    status,
-                    encode_json(capabilities or {}),
-                    encode_json(redact(metadata or {})),
+                    *values.values(),
                     timestamp,
                     timestamp,
                     timestamp,
                 ),
             )
-        legacy.log_audit(
-            conn,
-            actor="nyanya-agent",
-            action="host.registered",
-            entity_type="host",
-            entity_id=host_id,
-            detail=redact({"name": name, "role": role}),
-        )
+            legacy.log_audit(
+                conn,
+                actor="nyanya-agent",
+                action="host.registered",
+                entity_type="host",
+                entity_id=host_id,
+            )
         row = dict(conn.execute("SELECT * FROM hosts WHERE id = ?", (host_id,)).fetchone())
     return _parse_record(row, ("capabilities_json", "metadata_json"))
 

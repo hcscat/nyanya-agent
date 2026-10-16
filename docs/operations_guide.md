@@ -83,7 +83,8 @@ Reason:
 
 - LaunchAgent restarts the Discord bridge and dashboard after crashes.
 - It starts automatically after login.
-- Logs go to `logs/discord.launchd.*.log` and `logs/dashboard.launchd.*.log`.
+- Newly generated service definitions use the bounded log wrapper described below.
+- Older `logs/*.launchd.*.log` files remain untouched until a reviewed deployment.
 - It avoids leaving manual terminal or tmux sessions as hidden operational state.
 
 The LaunchAgent labels are:
@@ -104,6 +105,32 @@ The dashboard is a separate local observability process. It serves
 `http://127.0.0.1:8765` by default and reads/writes `data/nyanya_dashboard.db`.
 Use `/v1/execution-projects`, `/v1/execution-projects/{id}/codex-sessions`, and
 `/v1/tasks?project_id={id}` for the authoritative project/session/task view.
+
+## Local gzip log retention
+
+SQLite remains the local task ledger. Do not add a PostgreSQL/Supabase backend, installer or DB selection until the operator explicitly reopens that work. Archive encryption is deferred. Compressed archives are private data, not safe publication material and not replacements for consistent SQLite backups.
+
+```bash
+nyanya logs status
+nyanya logs maintain
+nyanya logs maintain --apply
+# Python-only installs:
+nyanya-logs status
+```
+
+Both `status` and `maintain` default to read-only planning. Only `maintain --apply` creates archives or removes eligible verified records. Use `--state-root` and `--db-path` for an explicit installation. The CLI reads only the DB-path setting from the selected environment file; it does not initialize a missing database. The selected database must be inside the selected state root. A stale inherited DB override pointing into another installation is rejected before any maintenance.
+
+The running dashboard checks maintenance at startup and hourly. Audit archives catch up completed KST calendar months missed while the machine was off. Service archives cover only the preceding three completed months; older unarchived service segments remain raw for manual review. Set `NYANYA_LOG_MAINTENANCE_ENABLED=false` to disable this automatic job. Development and test launchers disable it by default. Authenticated `/v1/log-maintenance` shows the latest in-process summary; the CLI computes a fresh plan. The maintenance child has a five-minute deadline and receives no provider or messenger credentials.
+
+- Heartbeats update the latest host timestamp; only registration and meaningful configuration/status changes generate audits.
+- Migration 6 indexes the newest-first audit feed. Indexes and source changes need a verified deployment before they benefit an already installed instance.
+- Audit archives live under `logs/archive/audit/`, one gzip JSONL file per completed month, with a self-contained manifest, count and checksum. A verified archive is required before pruning records older than 90 days, in short batches capped at 10,000 rows per run. The initial prune allowlist is host registration/update and memory-retrieval observations. All other audit evidence remains pinned.
+- Housekeeping-only audit archives expire after 12 months only after their live rows have been pruned. Mixed/pinned-evidence archives are retained as an explicit exception. Task/request/execution events, approvals, changes and delivery records are never pruned by this job. No automatic VACUUM or DB-file replacement occurs.
+- New macOS service definitions wrap Discord, dashboard and memory-worker output into private size/day segments. Closed segments are archived by their closing month under `logs/archive/service/`. Raw segments remain for at least 30 days; verified service archives retain three completed calendar months. Active files, legacy launchd logs, unknown files, task output evidence and Codex logs are excluded. Segments roll at 4 MiB or the next write after a KST day boundary. A 128 MiB per-service raw budget stops the managed child with exit 75 rather than discarding unarchived output; `logs/<service>.last-status.json` records the bounded result. Inspect blocked archives before restarting. This is a limit on retained raw output, not a replacement for application-level debug filtering.
+
+Archives are published without overwriting an existing month and checked by decompression/readback before deletion. Corruption, late entries, unsafe paths or size bounds block the affected operation with the original evidence preserved. The audit scan is capped at 500,000 rows/128 MiB, and each monthly audit archive at 100,000 rows/64 MiB of uncompressed JSON. These are implementation safety bounds, not SQLite capacity limits. A limit error requires review rather than blind retries. Late data for an already sealed month requires inspection; do not delete an archive to bypass a conflict. Interrupted service `.pin` or `.retiring` files preserve recovery evidence and require inspection; do not treat them as disposable caches. A monthly archive may contain duplicates of recent live data during the retention overlap. Files use private permissions and are not encrypted.
+
+Automatic archival does not imply an operating deployment. Before activating new service definitions, verify code/DB compatibility, retain a consistent backup and rollback artifact, and review old launchd files separately. Rolling back code does not restore audit records already pruned; recover those from the verified archive with explicit collision checks. Do not replace the live DB with an old backup.
 
 ## Codex Separation Policy
 
