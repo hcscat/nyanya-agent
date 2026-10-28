@@ -17,6 +17,8 @@ Codex를 호출하기 전에 SQLite durable task/execution 원장에 기록된�
 
 English guide: [README.md](README.md)
 
+보안 경계·취약점 제보 안내는 [SECURITY.md](SECURITY.md), 개발·Codex 리뷰 지침은 공개 루트 `AGENTS.md`를 참고한다. 개인 로컬 지침은 Git에서 제외하며 모든 AGENTS 파일은 실행용 패키지에서 제외한다.
+
 ## P0 실행 구조 갱신 (2026-09-12)
 
 현재 완료 범위·남은 작업·검증 결과는 [개발 현황](docs/development_status.md)을 참고한다.
@@ -312,9 +314,7 @@ dashboard DB, WAL/SHM 파일, 실제 요청 로그, private export는 커밋하�
 OperationSpec을 실행한다. 업로드 callback은 호환용 `task_service.py` 경로를 유지한다.
 대시보드는 모니터링과 인증된 관리가 우선이다.
 
-원격/forwarded 읽기 API와 상태 변경 API는 `NYANYA_DASHBOARD_CONTROL_TOKEN`
-또는 owner-only token file 인증이 필요하다. token은 URL, HTML, 로그, Git에 기록하지 않는다.
-루프백 읽기 허용은 공개 접속 허용을 뜻하지 않는다.
+루프백 읽기를 포함한 모든 `/v1/` 데이터·상태 변경 API는 `NYANYA_DASHBOARD_CONTROL_TOKEN` 또는 owner-only token file 인증이 필요하다. 정확한 Host/Origin 검사도 적용한다. token은 URL, HTML, 로그, Git에 기록하지 않는다. 정적 화면과 health는 인증 없이 열리지만 운영 기록을 제공하지 않는다.
 
 주요 API:
 

@@ -1,5 +1,13 @@
 # 개발 현황과 남은 작업
 
+## Public review guidance
+
+The reviewed root `AGENTS.md` now supplies contributor instructions and three scoped code-review rules; `SECURITY.md` supplies the threat model, security invariants, finding criteria and reporting policy. The Git release check permits only the explicitly approved root guide; nested/override instructions remain blocked, and npm/source-install checks still exclude all AGENTS files. `SECURITY.md` is included as public distribution policy. These files do not enable automatic reviews, private vulnerability reporting or a security scanner, and do not establish operational deployment or a completed security scan.
+
+## Dashboard installation follow-up
+
+Normal CLI setup and the Bash/PowerShell installers now provision a private dashboard token before service admission, preserving configured credentials on reruns. Authentication and Host/Origin checks remain unchanged. [Token provisioning](installation_and_distribution.md#dashboard-token-provisioning) describes behavior and recovery. Regression coverage is in `tests/test_dashboard_token_setup.py` and the source-installer integration test; Windows CI additionally exercises the native ACL and PowerShell installer. A source fix and automated checks do not establish operational installation or live Discord acceptance.
+
 검토일: 2026-09-21. 작업 ID: REVIEW-20260921.
 기준: `main` / `bb8774b7b929bf565f353adf800d1797f1ce44e9`.
 목적은 4차까지 공개한 소스의 구현 범위와 현재 검증을 대조하는 것이다.

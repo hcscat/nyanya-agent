@@ -30,7 +30,7 @@ The line is simple:
 | Dashboard static UI | `src/nyanya_agent/dashboard_static/*` | Contains generic local dashboard HTML/CSS/JS. It must not include real request records, private channel IDs, or private user names. |
 | Config templates | `.env.example`, `.env.sample`, `config/nyanya.json`, `config/user_workspaces.example.json` | Show names, defaults, and structure without real credentials or private IDs. |
 | Packaging | `pyproject.toml`, `package.json`, `bin/*.js`, `scripts/*.sh` | Allows installation, local execution, npm wrapper use, and LaunchAgent setup. Generated local plist files are private, but reusable scripts are public. |
-| Documentation | Reviewed README and durable `docs` Markdown | Reusable architecture, setup and contracts can be public. Local operational evidence, AI instructions and generated reports stay private. |
+| Documentation | Reviewed README, `SECURITY.md` and durable `docs` Markdown | Reusable architecture, setup and security policy can be public. Local operational evidence, private AI instructions and generated reports stay private. The sanitized root `AGENTS.md` has the specific Git exception described below. |
 | Project ignore rules | `.gitignore` | A generic project-level `.gitignore` is public when it excludes common private runtime paths. Machine-only ignore rules still belong in `.git/info/exclude`. |
 
 ## Conditionally Public
@@ -41,7 +41,7 @@ The line is simple:
 | MCP integration definitions | Public interface, private credentials | Tool names, schemas, and generic client code can be public. OAuth tokens, API keys, local endpoint secrets, and account-specific server configs stay private. |
 | Skills and plugins | Public when reusable | Generic `SKILL.md`, plugin manifests, and reusable adapters can be public. Personal workflow instructions, private business logic, licensed proprietary prompts, and generated session traces stay private. |
 | App connector logic | Public adapter, private account state | Code that calls an app connector can be public. Connector tokens, refresh tokens, browser cookies, workspace IDs, and user-owned document IDs are private unless intentionally documented as examples. |
-| LaunchAgent templates | Public script, private generated file | `scripts/install_discord_launch_agent.sh` can be public. Generated plist files may contain absolute local paths and should not be committed. |
+| LaunchAgent templates | Public script, private generated file | The manager service CLI, `scripts/nyanya_ctl.sh` and `packaging/launchd` templates can be public. Generated plist files may contain absolute local paths and should not be committed. |
 | Dashboard external access guide | Public when generalized | Security recommendations, Tailscale/Cloudflare/KT router concepts, and localhost defaults are public. Real router credentials, public IPs, DNS zones, and access policies are private. |
 
 ## Private Material
@@ -124,47 +124,31 @@ Expected result: no runtime DB, logs, downloads, sessions, run files, `.env`, or
 
 ## Commit Identity And Historical Cleanup
 
-Use the GitHub-provided noreply address for both author and committer identity.
-Check the effective identities before committing; repository settings can override
-global settings, and another device needs its own verification. Changing the Git
-email setting does not remove the identity from earlier commits.
+Use the GitHub-provided noreply address for both author and committer identity. Check the effective identities before committing; repository settings can override global settings, and another device needs its own verification. Changing the Git email setting does not remove the identity from earlier commits.
 
-Historical cleanup requires explicit authorization, private backups and a separate
-rewrite clone. Inspect every branch/tag and preserve ordinary code, commit dates
-and parent relationships where possible. A privacy rewrite changes commit IDs and
-invalidates old signatures. Keep the old-to-new mapping private when it can lead
-back to sensitive objects. Prefer a fresh clone after cleanup; do not merge or push
-old clones, worktrees, backup refs or tool-only refs into the cleaned repository.
+Historical cleanup requires explicit authorization, private backups and a separate rewrite clone. Inspect every branch/tag and preserve ordinary code, commit dates and parent relationships where possible. A privacy rewrite changes commit IDs and invalidates old signatures. Keep the old-to-new mapping private when it can lead back to sensitive objects. Prefer a fresh clone after cleanup; do not merge or push old clones, worktrees, backup refs or tool-only refs into the cleaned repository.
 
-GitHub PR references, cached commits, Actions metadata/logs and release assets are
-separate disclosure surfaces. Audit them as well as Git objects. A clean branch
-scan does not prove that GitHub-only references or third-party copies are purged.
-Keep visibility private until outstanding removal and publication review are resolved.
+GitHub PR references, cached commits, Actions metadata/logs and release assets are separate disclosure surfaces. Audit them as well as Git objects. A clean branch scan does not prove that GitHub-only references or third-party copies are purged. Keep visibility private until outstanding removal and publication review are resolved.
 
 Official guidance: [Removing sensitive data](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository).
 
 ## Installed Dependency Boundary
 
-Keep `node_modules/` out of Git and release assets, including nested copies.
-Commit `package.json` and `package-lock.json`; CI recreates dependencies with
-`npm ci`. The shared `.gitignore` must provide this exclusion without relying
-on a developer's global excludes or local `.git/info/exclude`.
+Keep `node_modules/` out of Git and release assets, including nested copies. Commit `package.json` and `package-lock.json`; CI recreates dependencies with `npm ci`. The shared `.gitignore` must provide this exclusion without relying on a developer's global excludes or local `.git/info/exclude`.
 
-Ignore rules do not remove already tracked files. The release denylist must also
-reject dependency files added with `git add --force`, even when their contents
-contain no recognizable secret. Package and source-copy checks independently
-reject dependency paths selected by an overbroad manifest.
+Ignore rules do not remove already tracked files. The release denylist must also reject dependency files added with `git add --force`, even when their contents contain no recognizable secret. Package and source-copy checks independently reject dependency paths selected by an overbroad manifest.
 
-A path reported by the worktree privacy scan is not evidence that it was pushed:
-the scan includes public untracked candidates as well as tracked files. Check the
-Git index, outgoing history, and package file list separately when investigating.
+A path reported by the worktree privacy scan is not evidence that it was pushed: the scan includes public untracked candidates as well as tracked files. Check the Git index, outgoing history, and package file list separately when investigating.
 
 ## Portable AGENTS Privacy Policy
 
-Project `AGENTS.md` and `AGENTS.override.md`, including nested copies, are local
-working instructions. They must not enter staging, commits, pushes, packages or
-external publishing without the operator explicitly requesting that file for that
-specific action. General commit, push or deployment requests are not exceptions.
+All project instruction files are local-only by default. This repository's operator has explicitly approved the sanitized root `AGENTS.md` for this GitHub publication so reviewers can use its contributor and Code Review Rules sections. That is the sole Git exception: never copy private operating instructions into it or publish nested/override copies. Further publication of changed instructions still needs file-specific authorization; this approval does not authorize another file, action, runtime package or provider transfer.
+
+The release gate permits the exact repository-root `AGENTS.md` in Git while continuing to reject nested AGENTS and all overrides. It does not establish human approval or sanitize the guide automatically. Review its complete text and outgoing history before publication. npm package checks and source installers independently exclude every AGENTS file, including the public root guide. `SECURITY.md` is ordinary public policy and is included in the distribution.
+
+The shared ignore rules have no blanket root exception. Keep private working guidance local and publish reusable policy only after review. Preserve existing local content and keep any private preimage outside the public repository.
+
+Project `AGENTS.md` and `AGENTS.override.md`, including nested copies, are local working instructions. They must not enter staging, commits, pushes, packages or external publishing without the operator explicitly requesting that file for that specific action. General commit, push or deployment requests are not exceptions.
 
 Every project root `.gitignore` must contain these shared patterns:
 
@@ -173,23 +157,14 @@ AGENTS.md
 AGENTS.override.md
 ```
 
-Unlike a machine's global excludes or `.git/info/exclude`, a committed project
-`.gitignore` travels with a clone. Ignore rules do not remove already tracked files
-or old history and do not determine npm package contents. Check all three separately.
-Do not delete local instructions or rewrite history as an automatic remedy.
+Unlike a machine's global excludes or `.git/info/exclude`, a committed project `.gitignore` travels with a clone. Ignore rules do not remove already tracked files or old history and do not determine npm package contents. Check all three separately. Do not delete local instructions or rewrite history as an automatic remedy.
 
 ### Setting up another device or environment
 
-1. Obtain the project's reviewed source and confirm its `.gitignore` has the rules
-   above. This step requires the rules to have been committed and transferred first.
-2. For Codex, open the global `AGENTS.md` in the directory specified by `CODEX_HOME`;
-   when unset, use `.codex` under the current user's home directory. This convention
-   does not require a machine-specific username and applies on macOS/Linux/Windows.
-3. Merge the copyable policy below into that file, preserving other instructions.
-   For another AI tool, use its documented global instruction mechanism instead.
-4. Confirm the tool loads the policy and check both root and nested exclusions
-   with `git check-ignore AGENTS.md nested/AGENTS.md`. Audit release contents too.
-   A clone alone does not install global AI instructions or synchronize credentials.
+1. Obtain the project's reviewed source and confirm its `.gitignore` has the rules above. This step requires the rules to have been committed and transferred first.
+2. For Codex, open the global `AGENTS.md` in the directory specified by `CODEX_HOME`; when unset, use `.codex` under the current user's home directory. This convention does not require a machine-specific username and applies on macOS/Linux/Windows.
+3. Merge the copyable policy below into that file, preserving other instructions. For another AI tool, use its documented global instruction mechanism instead.
+4. Confirm the tool loads the policy and check the default root and nested rules with `git check-ignore --no-index AGENTS.md nested/AGENTS.md AGENTS.override.md nested/AGENTS.override.md`. `--no-index` also shows the matching rule for an explicitly tracked public guide; it does not untrack or protect that file. Audit staged files, outgoing history and release contents too; ignore rules cannot protect a force-added or already tracked instruction file. A clone alone does not install global AI instructions or synchronize credentials.
 
 Copyable global policy (contains no local project contents):
 
@@ -206,14 +181,11 @@ Reapply this policy through the AI tool's global instruction mechanism on each
 new device. Do not claim remote devices are configured without verification.
 ```
 
-The actual global instructions and private project instructions are not part of
-the distributed product. No remote installation or account synchronization is implied.
+The actual global instructions and private project instructions are not part of the distributed product. No remote installation or account synchronization is implied.
 
 ## Documentation Placement
 
-A file being optional for installation does not make it private. Tests, safety
-contracts and design rationale help reviewers assess code and maintain the product.
-Keep the following boundaries separate:
+A file being optional for installation does not make it private. Tests, safety contracts and design rationale help reviewers assess code and maintain the product. Keep the following boundaries separate:
 
 | Material | Preferred location | Reason |
 |---|---|---|
@@ -224,16 +196,10 @@ Keep the following boundaries separate:
 | Long-form user guide with independent editing | Optional GitHub Wiki | Convenient web editing, but code/doc version alignment needs separate discipline |
 | Local paths, identities, live deployment results, raw tokens/logs | Ignored private files | GitHub Issues, PRs and Wiki are also external disclosure channels |
 
-Keep reusable P0/core/architecture records for now; their date alone is not a
-privacy finding. The instance-specific `operational_rollout_20260913.md` stays
-local and is excluded from the package. For future work, update stable documents
-and use Issue/PR summaries instead of creating full dated snapshots each session.
-Moving existing records to GitHub is a separate external action; no migration or
-publication is performed by this policy change.
+Common nonprivate guides use the development checkout as their editing source and are mirrored byte-identically into the operating workspace. Do not separate wording merely because one copy ships publicly. Actual settings, local identities and deployment evidence remain in operating `OPERATIONS.md` / `docs/private`; inspect content before transferring a document. Public docs use English as the canonical language. Derived `<document>.ko.md` translations stay under the operating docs only and are updated with their English counterparts.
 
-GitHub capabilities reviewed against official documentation:
-[Issues](https://docs.github.com/en/issues/tracking-your-work-with-issues/learning-about-issues/about-issues),
-[Pull requests](https://docs.github.com/en/pull-requests/get-started/about-pull-requests),
-[Wikis](https://docs.github.com/en/communities/documenting-your-project-with-wikis/about-wikis),
-[Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases).
-Git exclusion semantics: [gitignore](https://git-scm.com/docs/gitignore).
+Keep each paragraph/list item on one physical line without arbitrary width wrapping, preserving hierarchy, tables, fenced code and explicit hard breaks. Update current contracts and the docs index during related work. A concise development timeline distinguishes completed, verified and deferred features; dated evidence stays historical rather than becoming a second current-state declaration.
+
+Keep reusable P0/core/architecture records for now; their date alone is not a privacy finding. The instance-specific `operational_rollout_20260913.md` stays local and is excluded from the package. For future work, update stable documents and use Issue/PR summaries instead of creating full dated snapshots each session. Moving existing records to GitHub is a separate external action; no migration or publication is performed by this policy change.
+
+GitHub capabilities reviewed against official documentation: [Issues](https://docs.github.com/en/issues/tracking-your-work-with-issues/learning-about-issues/about-issues), [Pull requests](https://docs.github.com/en/pull-requests/get-started/about-pull-requests), [Wikis](https://docs.github.com/en/communities/documenting-your-project-with-wikis/about-wikis), [Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases). Git exclusion semantics: [gitignore](https://git-scm.com/docs/gitignore).

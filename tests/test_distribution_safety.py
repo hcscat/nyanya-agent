@@ -51,6 +51,18 @@ def test_clean_source_install_without_network_or_services(tmp_path):
     assert not (install / "config/user_workspaces.json").exists()
     assert not (install / "prompts/local_system.md").exists()
     assert (state / ".env").is_file()
+    token = state / "data/dashboard_control.token"
+    before = token.read_bytes()
+    assert token.stat().st_mode & 0o777 == 0o600
+    assert before.decode().strip() not in completed.stdout + completed.stderr
+    repeated = subprocess.run(
+        ["bash", str(root / "packaging/install/install.sh"), "--source", str(root),
+         "--install-dir", str(install), "--state-dir", str(state), "--bin-dir", str(binary), "--skip-deps"],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert repeated.returncode == 0, repeated.stderr
+    assert "dashboard_token=present" in repeated.stdout
+    assert token.read_bytes() == before
     help_result = subprocess.run([str(binary / "nyanya"), "--help"], capture_output=True, text=True, timeout=10)
     assert help_result.returncode == 0
-    assert "Usage:" in help_result.stdout
+    assert "usage:" in help_result.stdout.lower()

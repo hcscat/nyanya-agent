@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import stat
 
@@ -117,6 +118,13 @@ def test_runtime_state_is_created_lazily_for_dashboard_only(tmp_path):
     assert dev.run_command("dashboard", project_root=root, executor=fake_executor) == 0
     assert (root / ".dev-state" / "data").is_dir()
     assert (root / ".dev-state" / "sessions").is_dir()
+    token = root / ".dev-state" / "data" / "dashboard_control.token"
+    previous = token.read_text()
+    assert len(previous.strip()) >= 32
+    if os.name == "posix":
+        assert token.stat().st_mode & 0o777 == 0o600
+    assert dev.run_command("dashboard", project_root=root, executor=fake_executor) == 0
+    assert token.read_text() == previous
 
 
 def test_missing_venv_fails_without_install_or_executor(tmp_path):

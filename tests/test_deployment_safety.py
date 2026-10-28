@@ -179,7 +179,7 @@ def test_dashboard_cancel_waiting_parent_prevents_approval_and_apply(operation, 
     parent = ledger.get_task(task["id"], db_path=path)
     target = task["id"] if endpoint == "tasks" else parent["current_execution_id"]
     monkeypatch.setenv("NYANYA_DASHBOARD_CONTROL_TOKEN", "fixture-control")
-    with TestClient(create_app(path), client=("127.0.0.1", 50000)) as client:
+    with TestClient(create_app(path), base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
         route = f"/v1/{endpoint}/{target}/cancel"
         assert client.post(route, json={}).status_code == 401
         response = client.post(route, json={}, headers={"X-Nyanya-Control-Token": "fixture-control"})
@@ -204,7 +204,7 @@ def test_dashboard_cancel_does_not_trust_payload_owner(operation, monkeypatch, e
         conn.execute("UPDATE agent_tasks SET requested_by='another-owner',metadata_json='{}' WHERE id=?", (task["id"],))
     monkeypatch.setenv("NYANYA_DASHBOARD_CONTROL_TOKEN", "fixture-control")
     target = task["id"] if endpoint == "tasks" else record["execution_id"]
-    client = TestClient(create_app(path), client=("127.0.0.1", 50000))
+    client = TestClient(create_app(path), base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
     response = client.post(
         f"/v1/{endpoint}/{target}/cancel", json={"actor": "another-owner"},
         headers={"X-Nyanya-Control-Token": "fixture-control"},

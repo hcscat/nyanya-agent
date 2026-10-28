@@ -6,6 +6,7 @@ import { runPythonModule } from "../runtime/python";
 import { RuntimeLayout, chmodOwnerOnly, ensureRuntimeDirectories, resolveRuntimeLayout } from "../runtime/project";
 import { createVenv, findPython, installPythonDependencies, satisfiesPython, venvExists } from "../runtime/python";
 import { confirm, interactiveAvailable } from "../runtime/prompt";
+import { runInherit } from "../runtime/process";
 
 type SetupOptions = {
   all: boolean;
@@ -70,6 +71,13 @@ export function setup(projectRoot: string, args: string[]): number {
     if (configRc !== 0) {
       return configRc;
     }
+  }
+  const tokenRc = runInherit(python!.command, [
+    path.join(layout.codeRoot, "src", "nyanya_agent", "dashboard_token.py"),
+    "--state-root", layout.stateRoot, "--env-file", layout.envPath
+  ], { cwd: layout.codeRoot });
+  if (tokenRc !== 0) {
+    return tokenRc;
   }
   const configStatusRc = printConfigStatus(projectRoot);
   if (configStatusRc !== 0) {

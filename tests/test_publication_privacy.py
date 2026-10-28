@@ -129,10 +129,17 @@ def test_fresh_git_fixture_ignores_root_and_nested_node_modules_without_global_i
 
 
 @pytest.mark.parametrize(
-    "dependency_path",
-    ("node_modules/neutral-fixture.txt", "nested/node_modules/neutral-fixture.txt"),
+    "candidate_path,allowed",
+    (
+        ("node_modules/neutral-fixture.txt", False),
+        ("nested/node_modules/neutral-fixture.txt", False),
+        ("AGENTS.md", True),
+        ("nested/AGENTS.md", False),
+        ("AGENTS.override.md", False),
+        ("nested/AGENTS.override.md", False),
+    ),
 )
-def test_release_gate_rejects_forced_staged_node_modules(tmp_path, dependency_path):
+def test_release_gate_limits_public_guide_exception(tmp_path, candidate_path, allowed):
     fixture = tmp_path / "release-fixture"
     fixture.mkdir()
     archive = subprocess.run(
@@ -145,7 +152,7 @@ def test_release_gate_rejects_forced_staged_node_modules(tmp_path, dependency_pa
     ).stdout
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as bundle:
         bundle.extractall(fixture)
-    for relative in (".gitignore", "packaging/release/package-denylist.txt"):
+    for relative in (".gitignore", "packaging/release/package-denylist.txt", "packaging/release/verify_release.sh"):
         (fixture / relative).write_text(
             (ROOT / relative).read_text(encoding="utf-8"), encoding="utf-8",
         )
@@ -153,8 +160,9 @@ def test_release_gate_rejects_forced_staged_node_modules(tmp_path, dependency_pa
     fixture_git(fixture, "init", "-q")
     (fixture / ".git" / "info" / "exclude").write_text("", encoding="utf-8")
     fixture_git(fixture, "add", "-A")
-    write_fixture(fixture, dependency_path, "neutral dependency fixture")
-    fixture_git(fixture, "add", "-f", dependency_path)
+    guide = (ROOT / "AGENTS.md").read_text(encoding="utf-8") if allowed else "neutral private fixture"
+    write_fixture(fixture, candidate_path, guide)
+    fixture_git(fixture, "add", "-f", candidate_path)
 
     env = fixture_git_env()
     isolated_home = tmp_path / "home"
@@ -179,6 +187,22 @@ def test_release_gate_rejects_forced_staged_node_modules(tmp_path, dependency_pa
         timeout=60,
     )
     output = result.stdout + result.stderr
-    assert result.returncode != 0
-    assert dependency_path in output
-    assert "denylisted path is tracked by git" in output
+    if allowed:
+        assert result.returncode == 0, output
+        assert "Release verification passed" in output
+    else:
+        assert result.returncode != 0
+        assert candidate_path in output
+        assert "denylisted path is tracked by git" in output
+
+
+def test_project_ignore_keeps_all_local_instructions_private(tmp_path):
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    (repo / '.gitignore').write_text((ROOT / '.gitignore').read_text())
+    fixture_git(repo, 'init', '-q')
+    for path in ('AGENTS.md', 'nested/AGENTS.md', 'AGENTS.override.md', 'nested/AGENTS.override.md'):
+        write_fixture(repo, path)
+    public = set(fixture_git(repo, 'ls-files', '--others', '--exclude-standard').stdout.splitlines())
+    assert public == {'.gitignore'}
+    assert CHECKS['is_private_distribution_path']('AGENTS.md')
