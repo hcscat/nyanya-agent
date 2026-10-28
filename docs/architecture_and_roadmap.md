@@ -46,7 +46,7 @@ Python owns policy, operations, providers, connectors, SQLite and FastAPI. TypeS
 
 ## Remaining and deferred work
 
-Durable destinations/outbox/receipts and inbox deduplication remain the delivery gap. All-ingress Requests statistics and Telegram parity need integration. Provider-session ownership/resume/monthly deletion is unimplemented; hidden history cannot bypass reset/current-only.
+Recorded Discord message identities already have atomic duplicate suppression. Recording-disabled mode uses a bounded process-local cache and can admit duplicates after restart, eviction or across processes. A common connector inbox, durable destinations/outbox/receipts and recovery across intake/submission or send/record crashes remain incomplete; current claims do not guarantee restart-safe or exactly-once delivery. See [delivery boundaries](security_and_reliability.md#delivery-controls-and-lifecycle). All-ingress Requests statistics and Telegram parity need integration. Provider-session ownership/resume/monthly deletion is unimplemented; hidden history cannot bypass reset/current-only.
 
 Single-request decomposition, resource scheduling, semantic/full-channel recall, automatic model changes, self-modification/deployment and additional connectors would expand the architecture and remain recommendations. PostgreSQL/Supabase, encryption and public hosting are deferred. Approved private access uses loopback, exact Host/Origin allowlists and existing authentication; actual instance values stay private. See [remote access](external_dashboard_access.md).
 

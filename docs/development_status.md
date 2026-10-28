@@ -58,7 +58,7 @@ All three corrections have regression coverage. Real private documents were not 
 
 | Item | Missing capability | Status |
 |---|---|---|
-| DELIVERY-01 | Inbox deduplication, durable destinations, outbox/receipts and recovery when recording fails after a successful send | Separate development required; current result/send claims are not restart-safe delivery |
+| DELIVERY-01 | Common connector inbox, durable destinations, outbox/receipts and recovery across intake/submission or send/record crashes | Recorded Discord message identities already have atomic duplicate suppression; recording-disabled mode uses a bounded process-local cache. Common delivery recovery remains incomplete; current result/send claims do not guarantee restart-safe or exactly-once delivery. See [delivery boundaries](security_and_reliability.md#delivery-controls-and-lifecycle). |
 | Requests statistics | Include terminal/API/some connector requests without legacy envelopes | Partially incomplete; `request_read_model` is based on legacy `agent_requests` |
 | Telegram parity | Common owner/conversation boundaries and natural-language control classification | Compatibility retained; separate review required |
 | Provider sessions | Exact-ID ownership, safe resume/reset and monthly reuse/close/delete | Unimplemented/deferred; do not arbitrarily reuse or delete hidden history/DBs |
