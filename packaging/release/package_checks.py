@@ -42,6 +42,7 @@ PRIVACY_PATTERNS = {
 }
 
 REQUIRED_ASSETS = {
+    "SECURITY.md",
     "src/nyanya_agent/execution_store.py",
     "src/nyanya_agent/task_service.py",
     "src/nyanya_agent/execution_adapters.py",
