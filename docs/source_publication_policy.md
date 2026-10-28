@@ -30,7 +30,7 @@ The line is simple:
 | Dashboard static UI | `src/nyanya_agent/dashboard_static/*` | Contains generic local dashboard HTML/CSS/JS. It must not include real request records, private channel IDs, or private user names. |
 | Config templates | `.env.example`, `.env.sample`, `config/nyanya.json`, `config/user_workspaces.example.json` | Show names, defaults, and structure without real credentials or private IDs. |
 | Packaging | `pyproject.toml`, `package.json`, `bin/*.js`, `scripts/*.sh` | Allows installation, local execution, npm wrapper use, and LaunchAgent setup. Generated local plist files are private, but reusable scripts are public. |
-| Documentation | Reviewed README and durable `docs` Markdown | Reusable architecture, setup and contracts can be public. Local operational evidence, AI instructions and generated reports stay private. |
+| Documentation | Reviewed README, `SECURITY.md` and durable `docs` Markdown | Reusable architecture, setup and security policy can be public. Local operational evidence, private AI instructions and generated reports stay private. The sanitized root `AGENTS.md` has the specific Git exception described below. |
 | Project ignore rules | `.gitignore` | A generic project-level `.gitignore` is public when it excludes common private runtime paths. Machine-only ignore rules still belong in `.git/info/exclude`. |
 
 ## Conditionally Public
@@ -142,7 +142,11 @@ A path reported by the worktree privacy scan is not evidence that it was pushed:
 
 ## Portable AGENTS Privacy Policy
 
-All project instruction files, including the repository-root `AGENTS.md`, are local-only by default. The shared ignore rules have no blanket root exception. An earlier approval for one publication action does not authorize a later action. Retain reusable contributor/security policy in ordinary shared documentation instead of automatically publishing local working instructions.
+All project instruction files are local-only by default. This repository's operator has explicitly approved the sanitized root `AGENTS.md` for this GitHub publication so reviewers can use its contributor and Code Review Rules sections. That is the sole Git exception: never copy private operating instructions into it or publish nested/override copies. Further publication of changed instructions still needs file-specific authorization; this approval does not authorize another file, action, runtime package or provider transfer.
+
+The release gate permits the exact repository-root `AGENTS.md` in Git while continuing to reject nested AGENTS and all overrides. It does not establish human approval or sanitize the guide automatically. Review its complete text and outgoing history before publication. npm package checks and source installers independently exclude every AGENTS file, including the public root guide. `SECURITY.md` is ordinary public policy and is included in the distribution.
+
+The shared ignore rules have no blanket root exception. Keep private working guidance local and publish reusable policy only after review. Preserve existing local content and keep any private preimage outside the public repository.
 
 Project `AGENTS.md` and `AGENTS.override.md`, including nested copies, are local working instructions. They must not enter staging, commits, pushes, packages or external publishing without the operator explicitly requesting that file for that specific action. General commit, push or deployment requests are not exceptions.
 
@@ -160,7 +164,7 @@ Unlike a machine's global excludes or `.git/info/exclude`, a committed project `
 1. Obtain the project's reviewed source and confirm its `.gitignore` has the rules above. This step requires the rules to have been committed and transferred first.
 2. For Codex, open the global `AGENTS.md` in the directory specified by `CODEX_HOME`; when unset, use `.codex` under the current user's home directory. This convention does not require a machine-specific username and applies on macOS/Linux/Windows.
 3. Merge the copyable policy below into that file, preserving other instructions. For another AI tool, use its documented global instruction mechanism instead.
-4. Confirm the tool loads the policy and check root and nested exclusions with `git check-ignore AGENTS.md nested/AGENTS.md AGENTS.override.md nested/AGENTS.override.md`. Audit staged files, outgoing history and release contents too; ignore rules cannot protect a force-added or already tracked instruction file. A clone alone does not install global AI instructions or synchronize credentials.
+4. Confirm the tool loads the policy and check the default root and nested rules with `git check-ignore --no-index AGENTS.md nested/AGENTS.md AGENTS.override.md nested/AGENTS.override.md`. `--no-index` also shows the matching rule for an explicitly tracked public guide; it does not untrack or protect that file. Audit staged files, outgoing history and release contents too; ignore rules cannot protect a force-added or already tracked instruction file. A clone alone does not install global AI instructions or synchronize credentials.
 
 Copyable global policy (contains no local project contents):
 
