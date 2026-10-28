@@ -1,5 +1,9 @@
 # 개발 현황과 남은 작업
 
+## PR 2 review correction
+
+The task-list classifier now accepts complete negative rerun/resume qualifiers while holding mixed-effect requests for clarification. `tests/test_workflow_dispatch.py` covers classification, unchanged tasks/approvals, owner/conversation selection fences and synthetic Discord intake without model submission. This is a source correction; live connector acceptance and operating deployment remain separate. The dated review below is historical evidence, not the current PR validation result.
+
 검토일: 2026-09-21. 작업 ID: REVIEW-20260921.
 기준: `main` / `bb8774b7b929bf565f353adf800d1797f1ce44e9`.
 목적은 4차까지 공개한 소스의 구현 범위와 현재 검증을 대조하는 것이다.

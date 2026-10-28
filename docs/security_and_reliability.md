@@ -90,6 +90,8 @@ Use the checked-in tests for collected counts. Run the full suite and release/pr
 
 Complete file/settings write prohibitions are kept in the original request while the intake classifier evaluates the remaining question. A remaining ambiguous or mutating control is held for clarification. These constraints do not authorize commands or existing-file changes.
 
+Task-list queries also accept a complete prohibition on rerunning or resuming existing work, including Korean `재실행`, `다시 실행` and `재개` variants. The entire qualifier must match the negative-only grammar; a positive action, trailing instruction or quoted constraint remains held for clarification. These queries use the owner-scoped ledger path without submitting model work, changing task/approval state or applying files. List selection still records the observed task revisions for a later explicit control request.
+
 Snapshot availability distinguishes a verified missing path from private/sensitive filtering, unreadable data, unsupported types/encoding and bounds. Availability metadata uses fixed path/status fields and shares the prompt budget. An excluded or unlisted file is not evidence of absence. Empty public env examples and credential-file references are not embedded credentials; referenced files are never opened by that exception, and credential literals and known secret values remain screened.
 
 The authenticated API and OperationSpec share `auto`, `flash`, `luna`, `sol` and `astra` profile validation. An explicit profile retains the Flash assessment step.
