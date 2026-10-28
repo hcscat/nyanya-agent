@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import argparse
 from contextlib import asynccontextmanager, suppress
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -17,7 +18,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -273,11 +274,18 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/")
-    def index() -> FileResponse:
+    def index() -> HTMLResponse:
         index_path = STATIC_DIR / "index.html"
         if not index_path.exists():
             raise HTTPException(status_code=404, detail="Dashboard static files are not installed")
-        return FileResponse(index_path)
+        html = index_path.read_text(encoding="utf-8")
+        # Release archives can share mtimes; version assets by content, not stat metadata.
+        for name in ("app.js", "styles.css"):
+            asset_path = STATIC_DIR / name
+            if asset_path.is_file():
+                version = hashlib.sha256(asset_path.read_bytes()).hexdigest()[:16]
+                html = html.replace(f'"/static/{name}"', f'"/static/{name}?v={version}"')
+        return HTMLResponse(html)
 
     @app.get("/health")
     def health() -> dict[str, Any]:
@@ -589,14 +597,15 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
         status: str | None = None,
         limit: int = Query(default=100, ge=1, le=500),
     ) -> list[dict[str, Any]]:
-        return ledger.list_executions(status=status, limit=limit, db_path=app.state.db_path)
+        executions = ledger.list_executions(status=status, limit=limit, db_path=app.state.db_path)
+        return store.execution_context(executions, db_path=app.state.db_path)
 
     @app.get("/v1/executions/{execution_id}")
     def get_execution(execution_id: str) -> dict[str, Any]:
         execution = ledger.get_execution(execution_id, db_path=app.state.db_path)
         if execution is None:
             raise HTTPException(status_code=404, detail=f"Execution not found: {execution_id}")
-        return execution
+        return store.execution_context([execution], detail=True, db_path=app.state.db_path)[0]
 
     @app.post("/v1/executions/{execution_id}/cancel", dependencies=[Depends(require_control_token)])
     def cancel_execution(execution_id: str, payload: ControlAction) -> dict[str, Any]:

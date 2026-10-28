@@ -1,15 +1,9 @@
 # nyanya-agent Operations Guide
 
-Current source review: [development status](development_status.md).
-Use the [P0 contracts](p0_execution_20260912.md) for operation commands,
-file approval and held recovery. Historical verification is not current live proof.
+Current source guide: 2026-10-13. Start with [development status](development_status.md) for completion and verification. Use the [P0 contracts](p0_execution_20260912.md) for operation commands, file approval and held recovery. Historical verification is not current live proof.
 
 
-This guide covers the local service command used to manage nyanya-agent, its
-Discord bridge, and its local dashboard. NyaNya is operated as a Local Control
-Plane: the SQLite execution ledger is the source of truth for task and execution
-status, while the dashboard is primarily a monitoring and authenticated control
-surface.
+This guide covers the local service command used to manage nyanya-agent, its Discord bridge, and its local dashboard. NyaNya is operated as a Local Control Plane: the SQLite execution ledger is the source of truth for task and execution status, while the dashboard is primarily a monitoring and authenticated control surface.
 
 ## Task queries, cancellation and reminders
 
@@ -52,6 +46,12 @@ These features provide text dialogue, not voice input, unrestricted shell execut
 The current source requests Gemini Flash for initial assessment and low-complexity execution. With importance and impact both below 4, complexity 3–4 selects `luna` (`gpt-6-luna`, `xhigh`). Importance or impact at least 4, or complexity 5, selects `sol` (`gpt-6.1-sol`, `high`). The serialized legacy profile `astra` remains accepted and explicitly aliases that Sol configuration; it does not invoke Astra. Explicit profiles also retain initial Flash assessment.
 
 These fixed source mappings do not prove installation, account access or actual model completion. Failed access stays held without substituting a model. Automatic model discovery, model updates and self-improvement remain deferred. See the [P0 model policy](p0_execution_20260912.md#model-policy) for the full contract.
+
+## Documentation and instance notes
+
+This common guide is maintained in the development checkout and mirrored into the installed docs without private values. Read an instance's private `OPERATIONS.md` for its actual paths/settings/version/rollback evidence; AI instructions explicitly point to it when an operational task needs it. Linked Markdown is not automatically loaded in every context. Public docs use English as the canonical language. Derived `<document>.ko.md` translations stay under the operating docs only and are updated with their English counterparts.
+
+A documentation-only refresh does not deploy code, migrate the DB or restart services. Older verification dates refer to their recorded candidate. Consult the current instance before runtime changes.
 
 ## Command
 
@@ -108,17 +108,9 @@ com.hcs.nyanya.discord
 com.hcs.nyanya.dashboard
 ```
 
-The Discord bridge is the primary connector controller. Normal requests use
-OperationService, which persists work and supervises a dedicated on-demand
-operation worker process with a bounded thread pool. Terminal and dashboard
-operations use the same facade. The worker is not an independent LaunchAgent;
-controller shutdown closes its liveness pipe and interrupts its work. Upload
-callbacks remain on the compatibility task service.
+The Discord bridge is the primary connector controller. Normal requests use OperationService, which persists work and supervises a dedicated on-demand operation worker process with a bounded thread pool. Terminal and dashboard operations use the same facade. The worker is not an independent LaunchAgent; controller shutdown closes its liveness pipe and interrupts its work. Upload callbacks remain on the compatibility task service.
 
-The dashboard is a separate local observability process. It serves
-`http://127.0.0.1:8765` by default and reads/writes `data/nyanya_dashboard.db`.
-Use `/v1/execution-projects`, `/v1/execution-projects/{id}/codex-sessions`, and
-`/v1/tasks?project_id={id}` for the authoritative project/session/task view.
+The dashboard is a separate local observability process. It serves `http://127.0.0.1:8765` by default and reads/writes `data/nyanya_dashboard.db`. Use `/v1/execution-projects`, `/v1/execution-projects/{id}/codex-sessions`, and `/v1/tasks?project_id={id}` for the authoritative project/session/task view.
 
 ## Local gzip log retention
 
@@ -138,7 +130,7 @@ Both `status` and `maintain` default to read-only planning. Only `maintain --app
 
 The running dashboard checks maintenance at startup and hourly. Audit archives catch up completed KST calendar months missed while the machine was off. Service archives cover only the preceding three completed months; older unarchived service segments remain raw for manual review. Set `NYANYA_LOG_MAINTENANCE_ENABLED=false` to disable this automatic job. Development and test launchers disable it by default. Authenticated `/v1/log-maintenance` shows the latest in-process summary; the CLI computes a fresh plan. The maintenance child has a five-minute deadline and receives no provider or messenger credentials.
 
-- Heartbeats update the latest host timestamp; only registration and meaningful configuration/status changes generate audits.
+- Heartbeats update the latest host timestamp; only registration and meaningful configuration/status changes generate audits. Memory audits retain changed field names and counts instead of duplicating query text or edited memory values.
 - Migration 6 indexes the newest-first audit feed. Indexes and source changes need a verified deployment before they benefit an already installed instance.
 - Audit archives live under `logs/archive/audit/`, one gzip JSONL file per completed month, with a self-contained manifest, count and checksum. A verified archive is required before pruning records older than 90 days, in short batches capped at 10,000 rows per run. The initial prune allowlist is host registration/update and memory-retrieval observations. All other audit evidence remains pinned.
 - Housekeeping-only audit archives expire after 12 months only after their live rows have been pruned. Mixed/pinned-evidence archives are retained as an explicit exception. Task/request/execution events, approvals, changes and delivery records are never pruned by this job. No automatic VACUUM or DB-file replacement occurs.
@@ -152,24 +144,11 @@ Automatic archival does not imply an operating deployment. Before activating new
 
 ### Executable readiness
 
-Management health checks and Discord delegation share `codex_cli.resolve_codex_cli`.
-Set `NYANYA_CODEX_CLI` to a verified executable path or command. When unset,
-discovery uses `codex` on the service PATH. An explicit invalid setting fails
-closed instead of silently selecting another installation. Directories,
-non-executable files, and broken symlinks are rejected. Avoid pinning the CLI to
-a desktop app's internal bundle path when an independently installed CLI is used.
+Management health checks and Discord delegation share `codex_cli.resolve_codex_cli`. Set `NYANYA_CODEX_CLI` to a verified executable path or command. When unset, discovery uses `codex` on the service PATH. An explicit invalid setting fails closed instead of silently selecting another installation. Directories, non-executable files, and broken symlinks are rejected. Avoid pinning the CLI to a desktop app's internal bundle path when an independently installed CLI is used.
 
-After changing this setting, restart the Discord bridge to reload its environment.
-Verify the selected binary with `--version`, then verify bridge reconnection and
-a read-only delegated request. A successful version check alone does not prove
-authentication, model/profile compatibility, or end-to-end task completion.
+After changing this setting, restart the Discord bridge to reload its environment. Verify the selected binary with `--version`, then verify bridge reconnection and a read-only delegated request. A successful version check alone does not prove authentication, model/profile compatibility, or end-to-end task completion.
 
-OS launch failures are reported with a sanitized errno and actionable guidance,
-not raw local executable/workspace paths. ENOENT means a missing executable,
-working directory, or interpreter; EACCES means permission denied; EPERM means
-operation not permitted; ENOEXEC means an invalid executable format. These errno
-definitions come from the OS/Python standard library, not NyaNya-specific codes.
-Permission errors must not trigger automatic privilege elevation.
+OS launch failures are reported with a sanitized errno and actionable guidance, not raw local executable/workspace paths. ENOENT means a missing executable, working directory, or interpreter; EACCES means permission denied; EPERM means operation not permitted; ENOEXEC means an invalid executable format. These errno definitions come from the OS/Python standard library, not NyaNya-specific codes. Permission errors must not trigger automatic privilege elevation.
 
 Codex must remain separate from the NyaNya Agent service lifecycle.
 
@@ -302,11 +281,7 @@ Read or change the Discord bot username:
 ./scripts/nyanya_ctl.sh bot-name NyaNya
 ```
 
-The Discord application username, server nickname, and NyaNya command prefix are
-separate settings. The command above changes the application username when the
-bot token has permission. Change the server nickname in Discord server settings,
-and configure `NYANYA_DISCORD_PREFIX` for the command prefix. Restart the bridge
-after changing runtime configuration.
+The Discord application username, server nickname, and NyaNya command prefix are separate settings. The command above changes the application username when the bot token has permission. Change the server nickname in Discord server settings, and configure `NYANYA_DISCORD_PREFIX` for the command prefix. Restart the bridge after changing runtime configuration.
 
 ## Invocation Behavior
 
@@ -350,6 +325,34 @@ NYANYA_DASHBOARD_CONFIRMATION_CHANNEL_ID=<discord_channel_id>
 
 The checker is disabled by default to avoid unsolicited Discord messages.
 
+### Menus and actions
+
+| Menu | What the current source does | Important limit |
+|---|---|---|
+| Main | Request counts, running requests and recent failures | A failed `cancel` request is a failed command, not a list of cancelled tasks; the summary loads at most eight running/eight failure records |
+| Agent office | Status counts open a five-attempt popup; recent executions show the original request and attempt result; authenticated details retain full text/events | Counts cover the newest loaded 100 attempts, not every Discord request. One request can have several attempts; controls without attempts appear in Statistics. Enabled agents are configured profiles, not live model sessions |
+| Projects | Save a name/goal and four phase records: planning, design, implementation, test | Creating a project does not generate a plan, create a work task, run code or test the project |
+| Memory | Scoped automatic Wiki summaries, manually reviewed legacy candidates and successful work excerpts | These are separate stores and review controls; neither memory review nor a remembered conversation grants file-change approval |
+| Statistics | Daily/weekly/monthly request aggregates, request history and audit records | Request statistics cover the current request read model, not every ingress or subscription usage; unavailable token fields remain empty |
+
+`renderOffice()` uses task rows with `awaiting_approval` plus separate pending approval records. It labels file-plan waits separately and avoids a duplicate record for the same waiting task. This panel only displays them. Existing-file edits/deletions still require the exact reviewed plan/hash approval through the request's authenticated control flow. Delegating work to AI does not waive that rule; exclusive new-file creation uses its separate safe path.
+
+The project **상태 체크** button calls `POST /v1/projects/{project_id}/phases/{phase_key}/check`. `check_project_phase()` records a finding and timestamp, sets `requires_confirmation` when an unfinished phase has a `next_action`, and otherwise records `ok`. Each card places the latest check badge to the right of its phase badge. Routine `ok` finding text is hidden; findings needing attention and the last check time remain visible. The stored finding is preserved. The phase label **현재 단계** denotes the recorded current phase, not a running worker. Empty summary/next-action labels mean these fields have not been recorded, not that the project has been verified complete. This is a check of saved metadata; it neither verifies source/test results nor advances a phase. A manual UI check records the Discord message text but does not send it; the separate, explicitly enabled periodic checker can send its own findings.
+
+Legacy candidate **승인** patches only `memory_items.status` to `approved`; **거부** changes it to `rejected`. Changed status is audited and the candidate's text/source history remains stored. A rejected candidate is excluded from the legacy approved-memory search, but rejection is not source forgetting or secure erasure. Those legacy search/format functions are not called by normal operation-model context, so candidate approval alone does not alter an ordinary Discord response. The **요청 이력에서 후보 추출** button runs bounded, rule-based extraction of eligible successful requests, without an extra model call. Review only useful candidates; there is no requirement to approve every row.
+
+Automatic LLM Wiki summaries are eligible scoped historical context before manual review. **기억 버전 선택** selects a version and supersedes other pending/approved versions of that topic; **요약 거부** excludes that summary; **이 근거 기억 제외** clears and suppresses the same source's derived Wiki/work/linked legacy memory while preserving the original work ledger. Work-record **기억에서 제외** applies the same source boundary. Use review for conflicts/corrections, not as mandatory approval for all automatic memories. See [LLM Wiki](llm_wiki.md) for provenance, no-store and reset limits.
+
+### Five-item list pages
+
+`renderPagedList()` is shared by running/failure lists, office status popups/executions/approvals/status/events, projects, Wiki/candidates/work records and statistics/request/audit lists. It renders at most five records per page and uses local **이전 / 다음** controls. Paging the loaded list makes no extra API/model request; opening an execution detail fetches its authenticated record. Refresh retains the selected page; shrinking results clamp it; changing a query, period or memory scope resets that list to its first page.
+
+Main and office list panels are vertically stacked at every width. All five-record lists grow naturally with their content and have no internal vertical scroll or fixed height. Tables may scroll horizontally on narrow screens. Execution popups use a native modal: the background page stops scrolling while the whole popup can scroll when needed, never a separate list inside it. Escape/close returns to the page; returning from details preserves the list page.
+
+Request previews normalize whitespace, cap the excerpt and display at most two lines without an extra model call. Short requests appear once, rather than repeating a first-word command title and the full prompt. Main failures distinguish model-processing from query/control requests and align metadata to the right. Execution lists pair each preview with that attempt's result; `/v1/executions` joins by exact execution/task IDs and bounds prompt/result excerpts to 321/401 characters. Authenticated detail returns the original prompt/result, model-selection event and separate delivery status, without substituting the task's latest retry. Typography uses 14px request/memory titles, 13px descriptions/check findings and 12px metadata; phase badges use a consistent 84×26px size and check buttons a 32px height.
+
+Pages cover the **loaded window**, not an unlimited server history: summary lists load eight each, requests 50, audit 40, candidates 120, task/execution/approval queries 100 each, and scoped Wiki/work records 20 each. The pager says how many records were loaded. Wiki search can select a different bounded window; this UI change does not add server-side history pagination or delete older records.
+
 ## Private Runtime Files
 
 These files are local-only and must not be committed:
@@ -365,7 +368,9 @@ downloads/
 run/
 ```
 
-## CORE-STAB-01 recovery behavior
+## Historical CORE-STAB-01 recovery behavior
+
+The following records the schema-v3 stage. Current schema-v9 operation recovery follows the earlier sections, P0 contracts and development status.
 
 See [the current stabilization handoff](core_stabilization_20260910.md) before upgrading. Schema v3 is applied on runtime initialization; preserve a verified pre-upgrade backup. No live upgrade was performed by the source change.
 
@@ -375,15 +380,11 @@ Interrupted work is not replayed automatically. Review external processes and si
 
 The TypeScript state backup command uses SQLite online backup and rejects unsafe destinations/symlinks. Backups are per database/file, not an atomic snapshot of all state. Legacy shell backup/restore helpers use separate path selection; inspect that path and stop writers before a restore. Never restore over a running service.
 
-## Inspected document upload
+## Hardened source acceptance
 
-Explicit file transfer performs bounded local document inspection before Discord transmission. Personal-information patterns require exact one-use owner/hash/destination confirmation; authentication material is blocked. PDF/image and other uninspectable content remain held. See [the upload contract](security_and_reliability.md#upload-file-boundary).
+See [security and reliability contracts](security_and_reliability.md) before upgrading. All dashboard data now require unlocking with the token, including local reads. Use explicit file or directory names for focused model work. Failed or interrupted message delivery is not automatically replayed. Apply schema changes only with a consistent backup and verify the installed artifact separately from source tests.
 
-## Memory review controls
-
-Legacy candidate **승인** patches only `memory_items.status` to `approved`; **거부** changes it to `rejected`. Changed status is audited and the candidate's text/source history remains stored. A rejected candidate is excluded from the legacy approved-memory search, but rejection is not source forgetting or secure erasure. Those legacy search/format functions are not called by normal operation-model context, so candidate approval alone does not alter an ordinary Discord response. The **요청 이력에서 후보 추출** button runs bounded, rule-based extraction of eligible successful requests, without an extra model call. Review only useful candidates; there is no requirement to approve every row.
-
-Automatic LLM Wiki summaries are eligible scoped historical context before manual review. **기억 버전 선택** selects a version and supersedes other pending/approved versions of that topic; **요약 거부** excludes that summary; **이 근거 기억 제외** clears and suppresses the same source's derived Wiki/work/linked legacy memory while preserving the original work ledger. Work-record **기억에서 제외** applies the same source boundary. Use review for conflicts/corrections, not as mandatory approval for all automatic memories. See [LLM Wiki](llm_wiki.md) for provenance, no-store and reset limits.
+For a `sending` or `uncertain` result, inspect `why <task-id>` or `result <task-id>`. If no resend is wanted, `ack-delivery <task-id>` acknowledges only the delivery reminder. It preserves the execution and receipt evidence, and does not claim the message arrived. Failed execution dismissal remains `dismiss <task-id>`.
 
 ## Scoped completed-work memory
 

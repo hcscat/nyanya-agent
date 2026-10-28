@@ -24,10 +24,50 @@ const state = {
   eventSource: null,
 };
 
+const LIST_PAGE_SIZE = 5;
+const listPages = new Map();
+const executionZones = { queue: "대기", work: "작업 중", review: "검토 필요", done: "완료", offline: "실패·중단" };
+let executionListZone = null;
+let executionDialogMode = null;
+let executionDetailRevision = 0;
+
+function preview(value, limit = 180) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > limit ? `${text.slice(0, limit).trimEnd()}…` : text;
+}
+
+function requestText(item) {
+  return item.prompt || item.command || "요청 내용 미기록";
+}
+
+function requestKind(item) {
+  return item.mode === "control" ? "조회·제어 요청" : "모델 처리 요청";
+}
+
+function requestPreview(text) {
+  return `<span class="request-preview">${escapeHtml(preview(text))}</span>`;
+}
+
+function executionPrompt(execution) {
+  const context = execution.context || {};
+  return context.request_prompt || context.request_title || "원요청 내용 미기록";
+}
+
+function executionProcessing(execution) {
+  const context = execution.context || {};
+  return execution.error || context.response || (context.model_selection
+    ? `${context.model_selection} · ${label(execution.status)}` : `처리 결과 미기록 · ${label(execution.status)}`);
+}
+
 const labels = {
   received: "접수",
   queued: "대기",
   running: "실행 중",
+  phase_active: "현재 단계",
+  sending: "전달 중",
+  delivered: "전달 완료",
+  acknowledged: "확인됨",
+  unknown: "확인 필요",
   completed: "완료",
   failed: "실패",
   cancelled: "취소",
@@ -55,6 +95,7 @@ const labels = {
   stale: "응답 지연",
   lost: "연결 유실",
   offline: "오프라인",
+  online: "온라인",
   approved: "승인",
   rejected: "거부",
   superseded: "이전 버전",
@@ -110,6 +151,40 @@ function fmtDuration(value) {
   if (value === null || value === undefined) return "-";
   if (value < 1000) return `${value}ms`;
   return `${(value / 1000).toFixed(1)}s`;
+}
+
+function renderPagedList(id, items, renderItems, emptyText, { compact = false } = {}) {
+  const container = $(id);
+  const pages = Math.max(1, Math.ceil(items.length / LIST_PAGE_SIZE));
+  const page = Math.min(listPages.get(id)?.page || 0, pages - 1);
+  const start = page * LIST_PAGE_SIZE;
+  const title = container.getAttribute("aria-label") || "목록";
+  const focused = container.contains(document.activeElement) ? document.activeElement?.dataset.pageStep : null;
+  listPages.set(id, { page, items, renderItems, emptyText, compact });
+  container.classList.add("paged-list");
+  container.classList.toggle("compact-list", compact);
+  container.innerHTML = `
+    <div id="${escapeHtml(id)}Page" class="page-viewport${items.length ? "" : " is-empty"}" role="region" aria-label="${escapeHtml(title)} 내용" tabindex="-1">
+      <div class="page-items">${items.length ? renderItems(items.slice(start, start + LIST_PAGE_SIZE)) : `<div class="empty">${escapeHtml(emptyText)}</div>`}</div>
+    </div>
+    ${items.length ? `<nav class="list-pagination" aria-label="${escapeHtml(title)} 페이지 이동">
+      <span class="page-status" role="status">조회한 ${items.length}건 중 ${start + 1}–${Math.min(start + LIST_PAGE_SIZE, items.length)} · ${page + 1}/${pages} 페이지</span>
+      <button class="button small secondary" type="button" data-action="list-page" data-list="${escapeHtml(id)}" data-page-step="-1" aria-controls="${escapeHtml(id)}Page" ${page === 0 ? "disabled" : ""}>이전</button>
+      <button class="button small secondary" type="button" data-action="list-page" data-list="${escapeHtml(id)}" data-page-step="1" aria-controls="${escapeHtml(id)}Page" ${page === pages - 1 ? "disabled" : ""}>다음</button>
+    </nav>` : ""}
+  `;
+  if (focused) {
+    const preferred = container.querySelector(`[data-page-step="${focused}"]`);
+    (preferred?.disabled ? container.querySelector(".list-pagination button:not(:disabled)") || container.querySelector(".page-viewport") : preferred)?.focus({ preventScroll: true });
+  }
+}
+
+function moveListPage(id, step) {
+  const list = listPages.get(id);
+  if (!list || ![-1, 1].includes(step)) return;
+  const pages = Math.max(1, Math.ceil(list.items.length / LIST_PAGE_SIZE));
+  list.page = Math.max(0, Math.min(list.page + step, pages - 1));
+  renderPagedList(id, list.items, list.renderItems, list.emptyText, { compact: list.compact });
 }
 
 async function api(path, options = {}) {
@@ -185,12 +260,12 @@ async function loadWikiScopes() {
   await loadWikiEntries();
 }
 
-
 async function loadWikiEntries() {
   const revision = ++state.wikiRevision;
   const scope = state.wikiScope;
   state.wikiEntries = [];
   if (!scope) {
+    listPages.delete("wikiList");
     $("wikiList").innerHTML = '<p class="empty">채널 기억 범위를 선택하세요.</p>';
     return;
   }
@@ -201,7 +276,7 @@ async function loadWikiEntries() {
   const entries = await api(`/v1/wiki?${query}`);
   if (state.wikiScope !== scope || state.wikiRevision !== revision) return;
   state.wikiEntries = entries;
-  $("wikiList").innerHTML = entries.length ? entries.map((entry) => `
+  renderPagedList("wikiList", entries, (page) => page.map((entry) => `
     <article class="memory-item">
       <div>
         ${badge(entry.status)} ${entry.conflict ? '<span class="status-badge amber">내용 충돌</span>' : ""}
@@ -216,9 +291,8 @@ async function loadWikiEntries() {
         <button class="button small secondary" data-action="wiki-forgotten" data-wiki="${escapeHtml(entry.id)}" type="button">이 근거 기억 제외</button>
       </div>` : ""}
     </article>
-  `).join("") : '<div class="empty">이 채널 범위에서 검색된 Wiki 기억이 없습니다.</div>';
+  `).join(""), "이 채널 범위에서 검색된 Wiki 기억이 없습니다.");
 }
-
 
 async function loadWorkRecordScopes() {
   const scopes = await api("/v1/work-records/scopes");
@@ -233,11 +307,11 @@ async function loadWorkRecordScopes() {
   await loadWorkRecords();
 }
 
-
 async function loadWorkRecords() {
   const revision = ++state.workRecordRevision;
   const scope = state.workRecordScope;
   if (!scope) {
+    listPages.delete("workRecordList");
     state.workRecords = [];
     $("workRecordList").innerHTML = '<p class="empty">조회 범위를 선택하세요.</p>';
     return;
@@ -249,7 +323,7 @@ async function loadWorkRecords() {
   const records = await api(`/v1/work-records?${query}`);
   if (state.workRecordScope !== scope || state.workRecordRevision !== revision) return;
   state.workRecords = records;
-  $("workRecordList").innerHTML = records.length ? records.map((record) => `
+  renderPagedList("workRecordList", records, (page) => page.map((record) => `
     <article class="memory-item">
       <div>
         <strong>${escapeHtml(record.request_summary || "본문 제외 기록")}</strong>
@@ -258,9 +332,8 @@ async function loadWorkRecords() {
       </div>
       <button class="button small secondary" data-action="work-record-forget" data-execution="${escapeHtml(record.execution_id)}" type="button">기억에서 제외</button>
     </article>
-  `).join("") : '<div class="empty">이 범위에 보관 중인 작업 기억이 없습니다.</div>';
+  `).join(""), "이 범위에 보관 중인 작업 기억이 없습니다.");
 }
-
 
 async function loadOperations() {
   const [hosts, agents, tasks, executions, approvals] = await Promise.all([
@@ -345,44 +418,33 @@ function renderMetrics() {
 
 function renderRunning() {
   const items = state.summary?.running || [];
-  $("runningList").innerHTML =
-    items.length === 0
-      ? `<div class="empty">진행 중 요청 없음</div>`
-      : items
+  renderPagedList("runningList", items, (page) => page
           .map(
             (item) => `
               <article class="list-item">
-                <div>
-                  ${badge(item.status)}
-                  <strong>${escapeHtml(item.command || item.mode || "request")}</strong>
-                  <p>${escapeHtml(item.result_summary || item.prompt || "처리 중")}</p>
-                  <span class="meta">${escapeHtml(item.provider)} · ${escapeHtml(item.model)} · ${fmtDate(item.created_at)}</span>
-                </div>
+                <div class="item-heading">${badge(item.status)}<span class="meta">${requestKind(item)} · ${fmtDate(item.created_at)}</span></div>
+                <strong>${requestPreview(requestText(item))}</strong>
+                <p class="result-preview">${escapeHtml(preview(item.result_summary || "요청을 처리하고 있습니다.", 240))}</p>
+                <span class="meta">${escapeHtml(item.provider || "-")} · ${escapeHtml(item.model || "-")}</span>
               </article>
             `,
           )
-          .join("");
+          .join(""), "진행 중 요청 없음");
 }
 
 function renderFailures() {
   const items = state.summary?.recent_failures || [];
-  $("failureList").innerHTML =
-    items.length === 0
-      ? `<div class="empty">최근 실패 없음</div>`
-      : items
+  renderPagedList("failureList", items, (page) => page
           .map(
             (item) => `
               <article class="list-item danger">
-                <div>
-                  ${badge(item.status)}
-                  <strong>${escapeHtml(item.command || item.mode || "request")}</strong>
-                  <p>${escapeHtml(item.error || item.result_summary || "오류 상세 없음")}</p>
-                  <span class="meta">${fmtDate(item.ended_at || item.created_at)}</span>
-                </div>
+                <div class="item-heading">${badge(item.status)}<span class="meta">${requestKind(item)} · ${fmtDate(item.ended_at || item.created_at)}</span></div>
+                <strong>${requestPreview(requestText(item))}</strong>
+                <p class="result-preview">${escapeHtml(preview(item.error || item.result_summary || "오류 상세 미기록", 240))}</p>
               </article>
             `,
           )
-          .join("");
+          .join(""), "최근 실패 없음");
 }
 
 function shortId(value) {
@@ -398,13 +460,18 @@ function officeZone(status) {
   return "offline";
 }
 
-function avatarText(item) {
-  const source = String(item.adapter_type || item.name || "NA");
-  const parts = source.split(/[-_\s]+/).filter(Boolean);
-  return parts
-    .slice(0, 2)
-    .map((part) => part.slice(0, 1).toUpperCase())
-    .join("") || "NA";
+function pendingApprovalItems() {
+  const waitingTasks = state.tasks.filter((task) => task.status === "awaiting_approval");
+  const waitingIds = new Set(waitingTasks.map((task) => task.id));
+  return [
+    ...waitingTasks.map((task) => ({
+      status: "awaiting_approval", action: "파일 변경안 검토", task_id: task.id,
+      reason: `${task.title || task.prompt || "파일 변경 요청"} · 요청 대화에서 변경안과 해시를 확인하고 승인하세요.`,
+      requested_at: task.updated_at,
+    })),
+    ...state.approvals.filter((approval) => approval.status === "pending" && !waitingIds.has(approval.task_id))
+      .map((approval) => ({ ...approval, action: `실행 승인 기록 · ${approval.action}` })),
+  ];
 }
 
 function renderOffice() {
@@ -412,12 +479,13 @@ function renderOffice() {
   const activeTaskStatuses = new Set(["queued", "running", "awaiting_approval", "blocked"]);
   const activeExecutionStatuses = new Set(["pending", "starting", "running", "awaiting_approval", "cancelling", "stale"]);
   const onlineHosts = state.hosts.filter((host) => !["offline", "stale"].includes(host.observed_status)).length;
+  const pendingApprovals = pendingApprovalItems();
   const cards = [
     ["온라인 Host", onlineHosts, "info"],
-    ["활성 Agent", state.agents.filter((agent) => agent.enabled).length, ""],
-    ["대기·진행 Task", state.tasks.filter((task) => activeTaskStatuses.has(task.status)).length, "warn"],
-    ["활성 Execution", state.executions.filter((execution) => activeExecutionStatuses.has(execution.status)).length, "warn"],
-    ["승인 대기", state.approvals.filter((approval) => approval.status === "pending").length, "danger"],
+    ["설정된 에이전트", state.agents.filter((agent) => agent.enabled).length, ""],
+    ["미완료 작업", state.tasks.filter((task) => activeTaskStatuses.has(task.status)).length, "warn"],
+    ["진행 중 실행", state.executions.filter((execution) => activeExecutionStatuses.has(execution.status)).length, "warn"],
+    ["승인 대기", pendingApprovals.length, "danger"],
   ];
   $("officeMetrics").innerHTML = cards
     .map(
@@ -430,69 +498,17 @@ function renderOffice() {
     )
     .join("");
 
-  const zones = [
-    ["queue", "대기", "Queue"],
-    ["work", "작업", "Working"],
-    ["review", "검토", "Review"],
-    ["done", "완료", "Done"],
-    ["offline", "예외", "Exception"],
-  ];
-  const grouped = Object.fromEntries(zones.map(([key]) => [key, []]));
-  state.executions.slice(0, 60).forEach((execution) => grouped[officeZone(execution.status)].push(execution));
-  $("agentOffice").innerHTML = zones
-    .map(([key, title, english]) => {
-      const items = grouped[key].slice(0, 8);
-      return `
-        <section class="office-zone" data-zone="${key}" aria-label="${escapeHtml(title)} 구역">
-          <div class="zone-heading"><h3>${escapeHtml(title)}</h3><span>${escapeHtml(english)} · ${grouped[key].length}</span></div>
-          <div class="zone-agents">
-            ${
-              items.length
-                ? items
-                    .map(
-                      (execution) => `
-                        <div class="office-agent">
-                          <button class="office-avatar" type="button" data-action="execution-detail" data-execution="${escapeHtml(execution.id)}" aria-label="${escapeHtml(execution.adapter_type)} 실행 상세" title="${escapeHtml(label(execution.status))}">${escapeHtml(avatarText(execution))}</button>
-                          <strong>${escapeHtml(execution.adapter_type)}</strong>
-                          <span>${escapeHtml(shortId(execution.id))}</span>
-                        </div>
-                      `,
-                    )
-                    .join("")
-                : `<div class="empty">-</div>`
-            }
-          </div>
-        </section>
-      `;
-    })
-    .join("");
+  $("agentOffice").innerHTML = Object.entries(executionZones).map(([key, title]) => {
+    const count = state.executions.filter((execution) => officeZone(execution.status) === key).length;
+    return `<button class="execution-count" type="button" data-action="execution-list" data-zone="${key}" aria-label="${title} 실행 ${count}건 목록 보기">
+      <span>${title}</span><strong>${count}</strong><span class="meta">목록 보기</span>
+    </button>`;
+  }).join("");
+  $("executionWindow").textContent = `최근 조회한 ${state.executions.length}건의 실행 시도입니다. 숫자를 눌러 원요청과 결과를 확인하세요. 조회·제어를 포함한 전체 요청은 통계에서 확인할 수 있습니다.`;
+  renderPagedList("executionTable", state.executions, renderExecutionRows, "실행 이력 없음");
+  if (executionDialogMode === "list") renderExecutionDialogList();
 
-  $("executionTable").innerHTML = `
-    <table>
-      <thead><tr><th>상태</th><th>Adapter</th><th>Task</th><th>Host</th><th>신뢰도</th><th>갱신</th></tr></thead>
-      <tbody>
-        ${state.executions
-          .slice(0, 30)
-          .map(
-            (execution) => `
-              <tr>
-                <td>${badge(execution.status)}</td>
-                <td><button class="link-button" type="button" data-action="execution-detail" data-execution="${escapeHtml(execution.id)}">${escapeHtml(execution.adapter_type)}</button><br><code>${escapeHtml(shortId(execution.id))}</code></td>
-                <td><code>${escapeHtml(shortId(execution.task_id))}</code></td>
-                <td>${escapeHtml(execution.host_id ? shortId(execution.host_id) : "-")}</td>
-                <td>${Math.round((execution.status_confidence || 0) * 100)}%</td>
-                <td>${fmtDate(execution.updated_at)}</td>
-              </tr>
-            `,
-          )
-          .join("")}
-      </tbody>
-    </table>
-  `;
-
-  const pendingApprovals = state.approvals.filter((approval) => approval.status === "pending");
-  $("approvalList").innerHTML = pendingApprovals.length
-    ? pendingApprovals
+  renderPagedList("approvalList", pendingApprovals, (page) => page
         .map(
           (approval) => `
             <article class="list-item">
@@ -503,8 +519,7 @@ function renderOffice() {
             </article>
           `,
         )
-        .join("")
-    : `<div class="empty">승인 대기 없음</div>`;
+        .join(""), "승인 대기 없음");
 
   const hostRows = state.hosts.map(
     (host) => `
@@ -522,37 +537,86 @@ function renderOffice() {
       </tr>
     `,
   );
-  $("agentStatusTable").innerHTML = `
+  renderPagedList("agentStatusTable", [...hostRows, ...agentRows], (page) => `
     <table>
       <thead><tr><th>종류</th><th>이름·ID</th><th>상태</th><th>역할·Adapter</th><th>마지막 확인</th></tr></thead>
-      <tbody>${[...hostRows, ...agentRows].join("")}</tbody>
+      <tbody>${page.join("")}</tbody>
     </table>
-  `;
+  `, "등록된 Host·Agent 없음");
+}
+
+function renderExecutionRows(page) {
+  return page.map((execution) => `
+    <article class="list-item execution-item">
+      <div class="item-heading">${badge(execution.status)}<span class="meta">${fmtDate(execution.started_at || execution.created_at)}</span></div>
+      <strong>${requestPreview(executionPrompt(execution))}</strong>
+      <p class="result-preview"><span class="field-label">처리</span> ${escapeHtml(preview(executionProcessing(execution), 240))}</p>
+      <div class="item-footer"><span class="meta">${escapeHtml(execution.adapter_type)} · ${escapeHtml(shortId(execution.task_id))}</span>
+        <button class="button small secondary" type="button" data-action="execution-detail" data-execution="${escapeHtml(execution.id)}">요청·결과 상세</button>
+      </div>
+    </article>`).join("");
+}
+
+function showExecutionDialog(title) {
+  $("executionDrawerTitle").textContent = title;
+  $("executionDrawer").scrollTop = 0;
+  if (!$("executionDrawer").open) {
+    document.body.classList.add("dialog-open");
+    $("executionDrawer").showModal();
+  }
+}
+
+function renderExecutionDialogList() {
+  const executions = state.executions.filter((execution) => officeZone(execution.status) === executionListZone);
+  if (!$("executionDetail").querySelector("#executionList")) {
+    $("executionDetail").innerHTML = '<div id="executionList" class="stack" aria-label="상태별 실행 목록"></div>';
+  }
+  $("backToExecutionList").hidden = true;
+  renderPagedList("executionList", executions, renderExecutionRows, "이 상태의 실행 없음");
+}
+
+function openExecutionList(zone) {
+  if (!Object.hasOwn(executionZones, zone)) return;
+  executionDetailRevision++;
+  executionListZone = zone;
+  executionDialogMode = "list";
+  listPages.delete("executionList");
+  renderExecutionDialogList();
+  showExecutionDialog(`${executionZones[zone]} 실행 목록`);
 }
 
 async function openExecutionDetail(executionId) {
+  const revision = ++executionDetailRevision;
   const execution = await api(`/v1/executions/${encodeURIComponent(executionId)}`);
-  $("executionDrawer").hidden = false;
+  if (revision !== executionDetailRevision) return;
+  if (executionDialogMode !== "list") executionListZone = null;
+  executionDialogMode = "detail";
+  const context = execution.context || {};
+  $("backToExecutionList").hidden = !executionListZone;
   $("executionDetail").innerHTML = `
-    <div class="detail-block"><strong>상태</strong><span>${badge(execution.status)}</span></div>
-    <div class="detail-block"><strong>Execution ID</strong><code>${escapeHtml(execution.id)}</code></div>
-    <div class="detail-block"><strong>Task ID</strong><code>${escapeHtml(execution.task_id)}</code></div>
-    <div class="detail-block"><strong>Adapter</strong><span>${escapeHtml(execution.adapter_type)}</span></div>
-    <div class="detail-block"><strong>작업 경로</strong><code>${escapeHtml(execution.workdir || "-")}</code></div>
-    <div class="detail-block"><strong>시작·종료</strong><span>${fmtDate(execution.started_at)}<br>${fmtDate(execution.ended_at)}</span></div>
-    <div class="detail-block"><strong>판정 신뢰도</strong><span>${Math.round((execution.status_confidence || 0) * 100)}%</span></div>
-    <div class="detail-block"><strong>오류</strong><p>${escapeHtml(execution.error || "-")}</p></div>
-    <div class="detail-block"><strong>최근 이벤트</strong>${(execution.events || [])
-      .slice(-12)
-      .reverse()
-      .map((event) => `<p><code>${escapeHtml(event.event_type)}</code> ${escapeHtml(event.message || label(event.status))}<br><span class="meta">${fmtDate(event.created_at)}</span></p>`)
-      .join("")}</div>
+    <div class="detail-block"><div class="item-heading">${badge(execution.status)}<span class="meta">${fmtDate(execution.started_at)} → ${fmtDate(execution.ended_at)}</span></div></div>
+    <div class="detail-block"><h3>원래 요청</h3><p class="original-text">${escapeHtml(executionPrompt(execution))}</p></div>
+    <div class="detail-block"><h3>이 실행의 처리 결과</h3><p class="original-text">${escapeHtml(context.response || executionProcessing(execution))}</p></div>
+    ${execution.error && execution.error !== context.response ? `<div class="detail-block"><h3>오류</h3><p>${escapeHtml(execution.error)}</p></div>` : ""}
+    <div class="detail-block"><h3>처리 정보</h3><p>${escapeHtml(context.model_selection || "모델 선택 기록 없음")}<br>전달 상태: ${escapeHtml(context.delivery_status === "pending" ? "전달 대기" : label(context.delivery_status || "미기록"))}</p><span class="meta">저장된 실행 시도의 기록이며 현재 파일 상태나 전달 성공을 대신 보장하지 않습니다.</span></div>
+    <details class="detail-block"><summary>실행 식별 정보</summary><dl class="execution-identifiers">
+      <dt>Execution ID</dt><dd><code>${escapeHtml(execution.id)}</code></dd>
+      <dt>Task ID</dt><dd><code>${escapeHtml(execution.task_id)}</code></dd>
+      <dt>실행 방식</dt><dd>${escapeHtml(execution.adapter_type)}</dd>
+      <dt>작업 경로</dt><dd><code>${escapeHtml(execution.workdir || "-")}</code></dd>
+    </dl></details>
+    <details class="detail-block"><summary>실행 이벤트</summary><div id="executionEvents" class="stack" aria-label="실행 이벤트"></div></details>
   `;
+  listPages.delete("executionEvents");
+  renderPagedList("executionEvents", (execution.events || []).slice().reverse(), (page) => page
+    .map((event) => `<p><code>${escapeHtml(event.event_type)}</code> ${escapeHtml(event.message || label(event.status))}<br><span class="meta">${fmtDate(event.created_at)}</span></p>`)
+    .join(""), "실행 이벤트 없음", { compact: true });
+  showExecutionDialog("실행 상세");
 }
 
 function renderRequests() {
-  $("requestTable").innerHTML = `
-    <table>
+  renderPagedList("requestTable", state.requests, (page) => `
+    <table class="request-table">
       <thead>
         <tr>
           <th>상태</th>
@@ -565,12 +629,12 @@ function renderRequests() {
         </tr>
       </thead>
       <tbody>
-        ${state.requests
+        ${page
           .map(
             (item) => `
               <tr>
                 <td>${badge(item.status)}</td>
-                <td><strong>${escapeHtml(item.command || "message")}</strong><br><span class="meta">${escapeHtml(item.prompt).slice(0, 180)}</span></td>
+                <td class="request-cell">${requestPreview(requestText(item))}</td>
                 <td>${escapeHtml(item.mode)}</td>
                 <td>${escapeHtml(item.provider)}<br><span class="meta">${escapeHtml(item.model || "-")}</span></td>
                 <td>${fmtDuration(item.duration_ms)}</td>
@@ -582,15 +646,12 @@ function renderRequests() {
           .join("")}
       </tbody>
     </table>
-  `;
+  `, "요청 이력 없음");
 }
 
 function renderUsage() {
   const max = Math.max(1, ...state.usage.map((item) => item.requests || 0));
-  $("usageChart").innerHTML =
-    state.usage.length === 0
-      ? `<div class="empty">사용량 데이터 없음</div>`
-      : state.usage
+  renderPagedList("usageChart", state.usage, (page) => page
           .map((item) => {
             const width = Math.max(2, Math.round(((item.requests || 0) / max) * 100));
             return `
@@ -602,14 +663,11 @@ function renderUsage() {
               </article>
             `;
           })
-          .join("");
+          .join(""), "사용량 데이터 없음");
 }
 
 function renderProjects() {
-  $("projectList").innerHTML =
-    state.projects.length === 0
-      ? `<div class="empty">프로젝트 없음</div>`
-      : state.projects
+  renderPagedList("projectList", state.projects, (page) => page
           .map(
             (project) => `
               <article class="project-card">
@@ -626,11 +684,15 @@ function renderProjects() {
                     .map(
                       (phase) => `
                         <section class="phase-card">
-                          ${badge(phase.status)}
+                          <div class="phase-status-row">
+                            ${badge(phase.status === "running" ? "phase_active" : phase.status)}
+                            ${renderPhaseCheck(project, phase, { badgeOnly: true })}
+                          </div>
                           <strong>${escapeHtml(phase.title)}</strong>
-                          <p>${escapeHtml(phase.summary || "요약 없음")}</p>
-                          <span class="meta">${escapeHtml(phase.next_action || "다음 작업 없음")}</span>
-                          <button class="button small secondary" data-action="check-phase" data-project="${escapeHtml(project.id)}" data-phase="${escapeHtml(phase.phase_key)}" type="button">체크</button>
+                          <p>${escapeHtml(phase.summary || "단계 요약을 아직 기록하지 않았습니다.")}</p>
+                          <span class="meta">${escapeHtml(phase.next_action || "다음 작업: 아직 지정하지 않음")}</span>
+                          ${renderPhaseCheck(project, phase)}
+                          <button class="button small secondary" data-action="check-phase" data-project="${escapeHtml(project.id)}" data-phase="${escapeHtml(phase.phase_key)}" type="button" title="저장된 단계 상태와 다음 작업을 확인합니다. 개발이나 테스트를 실행하지 않습니다.">상태 체크</button>
                         </section>
                       `,
                     )
@@ -639,14 +701,19 @@ function renderProjects() {
               </article>
             `,
           )
-          .join("");
+          .join(""), "프로젝트 없음");
+}
+
+function renderPhaseCheck(project, phase, { badgeOnly = false } = {}) {
+  const check = (project.checks || []).find((item) => item.phase_key === phase.phase_key);
+  if (!check) return "";
+  if (badgeOnly) return badge(check.status);
+  const finding = check.status !== "ok" && check.finding ? `<p>${escapeHtml(check.finding)}</p>` : "";
+  return `<div class="phase-check" role="status">${finding}<span class="meta">마지막 체크: ${fmtDate(check.created_at)}</span></div>`;
 }
 
 function renderAudit() {
-  $("auditLog").innerHTML =
-    state.audit.length === 0
-      ? `<div class="empty">감사 로그 없음</div>`
-      : state.audit
+  renderPagedList("auditLog", state.audit, (page) => page
           .map(
             (entry) => `
               <article class="audit-item">
@@ -656,7 +723,7 @@ function renderAudit() {
               </article>
             `,
           )
-          .join("");
+          .join(""), "감사 로그 없음");
 }
 
 function renderMemories() {
@@ -678,7 +745,7 @@ function renderMemories() {
     )
     .join("");
 
-  $("memoryList").innerHTML = state.memories.length ? state.memories
+  renderPagedList("memoryList", state.memories, (page) => page
           .map(
             (memory) => `
               <article class="memory-item ${memoryTone(memory)}">
@@ -695,13 +762,8 @@ function renderMemories() {
               </article>
             `,
           )
-          .join("") : '<div class="empty">기억 후보 없음. 필요한 경우 요청 이력에서 후보를 추출하세요.</div>';
+          .join(""), "기억 후보 없음. 필요한 경우 요청 이력에서 후보를 추출하세요.");
 }
-
-
-
-
-
 
 async function createProject(event) {
   event.preventDefault();
@@ -720,8 +782,13 @@ async function createProject(event) {
 async function handleClick(event) {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
+  if (button.dataset.action === "list-page") {
+    moveListPage(button.dataset.list, Number(button.dataset.pageStep));
+    return;
+  }
   button.disabled = true;
   try {
+    if (button.dataset.action === "execution-list") openExecutionList(button.dataset.zone);
     if (button.dataset.action === "check-phase") {
       await api(`/v1/projects/${button.dataset.project}/phases/${button.dataset.phase}/check`, { method: "POST" });
       await loadAll();
@@ -765,13 +832,14 @@ async function handleClick(event) {
 
 document.addEventListener("click", handleClick);
 $("wikiScope").addEventListener("change", () => {
+  listPages.delete("wikiList");
   state.wikiScope = state.wikiScopes[$("wikiScope").value] || null;
   loadWikiEntries().catch((error) => alert(error.message));
 });
 $("wikiSearchBtn").addEventListener("click", () => {
+  listPages.delete("wikiList");
   loadWikiEntries().catch((error) => alert(error.message));
 });
-
 qs('[data-view="main"]').addEventListener("click", () => setView("main"));
 qs('[data-view="office"]').addEventListener("click", () => setView("office"));
 qs('[data-view="projects"]').addEventListener("click", () => setView("projects"));
@@ -787,15 +855,20 @@ $("unlockControlBtn").addEventListener("click", async () => {
   try {
     await api("/v1/operations/incomplete");
     await loadAll();
-    $("unlockControlBtn").textContent = "제어 활성";
+    $("unlockControlBtn").textContent = "대시보드 연결됨";
+    connectEventStream();
     $("unlockControlBtn").disabled = true;
   } catch (error) {
     state.controlToken = previous;
     alert(error.message);
   }
 });
-$("usagePeriod").addEventListener("change", () => loadAll());
+$("usagePeriod").addEventListener("change", () => {
+  listPages.delete("usageChart");
+  loadAll();
+});
 $("workRecordScope").addEventListener("change", async (event) => {
+  listPages.delete("workRecordList");
   const value = event.target.value;
   state.workRecordScope = value === "" ? null : state.workRecordScopes[Number(value)] || null;
   try {
@@ -818,7 +891,22 @@ $("extractMemoryBtn").addEventListener("click", async () => {
 });
 
 $("closeExecutionDrawer").addEventListener("click", () => {
-  $("executionDrawer").hidden = true;
+  executionDetailRevision++;
+  $("executionDrawer").close();
+});
+
+$("executionDrawer").addEventListener("cancel", () => { executionDetailRevision++; });
+$("executionDrawer").addEventListener("close", () => {
+  executionDetailRevision++;
+  executionDialogMode = null;
+  document.body.classList.remove("dialog-open");
+});
+$("backToExecutionList").addEventListener("click", () => {
+  executionDetailRevision++;
+  executionDialogMode = "list";
+  renderExecutionDialogList();
+  $("executionDrawerTitle").textContent = `${executionZones[executionListZone]} 실행 목록`;
+  $("executionDrawer").scrollTop = 0;
 });
 
 let operationReloadTimer = null;
@@ -839,6 +927,7 @@ function scheduleOperationReload() {
 function connectEventStream() {
   // Authenticated polling also works through private proxies; no token in URLs.
   window.clearInterval(state.eventPollTimer);
+  if (!state.controlToken) return;
   state.eventPollTimer = window.setInterval(async () => {
     try {
       const events = await api(`/v1/events?after_seq=${state.eventCursor}&limit=1000`);
@@ -855,7 +944,7 @@ setView(location.hash.replace("#", ""), { updateHash: false });
 
 loadAll().catch((error) => {
   setStreamStatus(false);
-  $("streamStatus").title = "조회에 인증이 필요하면 제어 활성 버튼에서 토큰을 입력하세요.";
+  $("streamStatus").title = "대시보드 잠금 해제 버튼에서 토큰을 입력하세요.";
   console.error("Dashboard load failed", error.name);
 });
 
