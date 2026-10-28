@@ -61,6 +61,9 @@ if (-not (Test-Path $envPath) -and (Test-Path (Join-Path $InstallDir ".env.examp
     Copy-Item (Join-Path $InstallDir ".env.example") $envPath
 }
 
+python (Join-Path $InstallDir "src/nyanya_agent/dashboard_token.py") --state-root $StateDir --env-file $envPath
+if ($LASTEXITCODE -ne 0) { throw "Dashboard token provisioning failed" }
+
 python -m venv (Join-Path $StateDir ".venv")
 $pythonExe = Join-Path $StateDir ".venv\Scripts\python.exe"
 if (-not $SkipDeps) {

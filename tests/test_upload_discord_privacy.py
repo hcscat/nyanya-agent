@@ -25,6 +25,7 @@ def bridge(tmp_path, monkeypatch, scenario, *, content='Synthetic ordinary docum
     calls = []
     events = []
     results = []
+    workspace_errors = []
 
     class Channel:
         id = '100'
@@ -60,6 +61,9 @@ def bridge(tmp_path, monkeypatch, scenario, *, content='Synthetic ordinary docum
             self.operations = SimpleNamespace(path=path, handle_intent=lambda *a, **k: 'generic control')
 
         def execution_workspace(self, owner):
+            if workspace_errors:
+                from nyanya_agent.task_outcomes import OutcomeSignal
+                raise OutcomeSignal("blocked", workspace_errors[-1])
             return tmp_path
 
         def submit(self, **kwargs):
@@ -104,7 +108,7 @@ def bridge(tmp_path, monkeypatch, scenario, *, content='Synthetic ordinary docum
             match = re.search('upload-approve\\s+(\\S+)\\s+([0-9a-f]{64})', text)
             assert match, text
             return (match.group(1), match.group(2))
-        state = SimpleNamespace(request=request, execute=execute, approval=approval, sent=sent, files=files, calls=calls, results=results, target=target, channel=channel, path=path)
+        state = SimpleNamespace(request=request, execute=execute, approval=approval, sent=sent, files=files, calls=calls, results=results, target=target, channel=channel, path=path, workspace_errors=workspace_errors)
         await scenario(state)
     monkeypatch.setattr(discord_bridge, 'run_client', run)
     assert discord_bridge.main() == 0
@@ -130,6 +134,31 @@ def test_pii_requires_exact_original_requester_confirmation_once(tmp_path, monke
         assert len(s.files) == 1
         await s.request(f'upload-approve {ident} {digest}')
         assert len(s.files) == 1
+    bridge(tmp_path, monkeypatch, scenario, content='Email: fixture.person@example.invalid')
+
+
+@pytest.mark.parametrize("phase", ["inspection", "confirmation"])
+@pytest.mark.parametrize("reason", [
+    "등록된 사용자 작업공간이 없습니다. 관리자가 홈워크스페이스를 등록한 뒤 다시 요청하세요.",
+    "등록된 작업공간이 없거나 디렉터리가 아닙니다.",
+])
+def test_workspace_prerequisite_failure_is_reported_and_recorded(tmp_path, monkeypatch, phase, reason):
+    async def scenario(s):
+        if phase == "confirmation":
+            await s.request('upload reports/note.txt')
+            ident, digest = s.approval()
+        s.workspace_errors.append(reason)
+        command = f'upload-approve {ident} {digest}' if phase == "confirmation" else 'upload reports/note.txt'
+        await s.request(command)
+        assert s.sent[-1] == reason
+        assert not s.files and not s.calls
+        with db.connect(s.path) as conn:
+            row = conn.execute("SELECT status,mode FROM agent_requests ORDER BY rowid DESC LIMIT 1").fetchone()
+            assert row["status"] == "blocked"
+            assert row["mode"] == ("control" if phase == "confirmation" else "upload")
+            if phase == "confirmation":
+                assert conn.execute("SELECT status FROM approvals WHERE id=?", (ident,)).fetchone()[0] == "pending"
+
     bridge(tmp_path, monkeypatch, scenario, content='Email: fixture.person@example.invalid')
 
 @pytest.mark.parametrize('decision', ['upload-reject', 'upload-cancel'])

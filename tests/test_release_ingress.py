@@ -185,6 +185,13 @@ def run_bridge(tmp_path, monkeypatch, *, recording=True, concurrent=False, attac
     return path, calls, sent, downloads, controls
 
 
+@pytest.mark.parametrize("text", ["What is the timeout in worker.py?", "Explain how timeout works in process_runner.py"])
+def test_technical_timeout_question_reaches_model_intake(tmp_path, monkeypatch, text):
+    _path, calls, sent, _downloads, controls = run_bridge(tmp_path, monkeypatch, content=text)
+    assert len(calls) == 1 and calls[0]["prompt"] == text
+    assert sent == ["accepted task_fixture"] and not controls
+
+
 @pytest.mark.parametrize("recording", [True, False])
 @pytest.mark.parametrize("concurrent", [True, False])
 @pytest.mark.parametrize("attached", [True, False])

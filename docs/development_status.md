@@ -1,6 +1,26 @@
 # Development Status and Remaining Work
 
-Documentation review baseline: 2026-10-16. The source version is `0.3.0`. These changes are prepared as separate review branches. Draft review publication does not deploy an operating instance or publish an npm release.
+The source version is `0.3.0`. This document separates implemented contracts, historical validation and deferred work. Git review publication does not deploy an operating instance or publish an npm release.
+
+## PR 2 review correction
+
+The task-list classifier now accepts complete negative rerun/resume qualifiers while holding mixed-effect requests for clarification. `tests/test_workflow_dispatch.py` covers classification, unchanged tasks/approvals, owner/conversation selection fences and synthetic Discord intake without model submission. This is a source correction; live connector acceptance and operating deployment remain separate. The dated review below is historical evidence, not the current PR validation result.
+
+Ordinary Codex review identified four additional corrections: destination-scoped automatic reminders/receipts, preserved Discord task-list aliases and admin checks, bounded agent-limit detection that leaves technical timeout questions as work, and safe blocked outcomes for unavailable upload workspaces. Focused regressions cover periodic and completion notices, parent/child origin inheritance, cross-channel/connector/owner separation, alias permissions, model intake and upload confirmation without effects. These are source contracts and synthetic test evidence, not an installed-service security certification.
+
+A follow-up review also identified that generic “all/remove” wording could cancel an unrelated saved task selection. Cancellation now requires a complete task/previous-list target; file targets, mixed clauses and interrogative shortcuts cannot mutate the selection. Regression tests retain a valid queued selection before the non-task request and verify unchanged tasks/approvals through the service and authenticated API.
+
+## Public review guidance
+
+The reviewed root `AGENTS.md` now supplies contributor instructions and three scoped code-review rules; `SECURITY.md` supplies the threat model, security invariants, finding criteria and reporting policy. The Git release check permits only the explicitly approved root guide; nested/override instructions remain blocked, and npm/source-install checks still exclude all AGENTS files. `SECURITY.md` is included as public distribution policy. These files do not enable automatic reviews, private vulnerability reporting or a security scanner, and do not establish operational deployment or a completed security scan.
+
+## Dashboard installation follow-up
+
+Normal CLI setup and the Bash/PowerShell installers now provision a private dashboard token before service admission, preserving configured credentials on reruns. Authentication and Host/Origin checks remain unchanged. [Token provisioning](installation_and_distribution.md#dashboard-token-provisioning) describes behavior and recovery. Regression coverage is in `tests/test_dashboard_token_setup.py` and the source-installer integration test; Windows CI additionally exercises the native ACL and PowerShell installer. A source fix and automated checks do not establish operational installation or live Discord acceptance.
+
+## Managed service-log correction
+
+Raw log accounting skips a closed segment retired concurrently after enumeration. Missing current streams and unsafe-file failures still fail closed. Deterministic startup and runtime budget-rescan regressions preserve the wrapped service output and exit status. Source/CI evidence remains separate from operating acceptance.
 
 
 Release-preparation follow-up: the isolated candidate includes safety-clause intake, snapshot availability/public env examples, shared API profiles, memory recall opt-out and Discord ingress claims. An earlier isolated candidate completed 1089 tests and the Node/package checks before the current document-upload change; those are historical results, not validation of this follow-up.

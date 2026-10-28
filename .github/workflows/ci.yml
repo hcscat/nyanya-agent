@@ -9,6 +9,26 @@ permissions:
   contents: read
 
 jobs:
+  windows-token-setup:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies and build CLI
+        run: |
+          python -m pip install -e ".[bots,dashboard,dev]"
+          npm ci
+          npm run build
+      - name: Verify Windows setup, installer and private token ACL
+        env:
+          PYTHONPATH: src
+        run: python -m pytest -q tests/test_dashboard_token_setup.py
   test:
     runs-on: macos-15
     timeout-minutes: 20
@@ -30,8 +50,10 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade "pip>=26.2"
-          python -m pip install -e ".[bots,dashboard,dev,security]"
+          python -m venv "$RUNNER_TEMP/nyanya-ci-venv"
+          "$RUNNER_TEMP/nyanya-ci-venv/bin/python" -m pip install --upgrade "pip>=26.2"
+          "$RUNNER_TEMP/nyanya-ci-venv/bin/python" -m pip install -e ".[bots,dashboard,dev,security]"
+          echo "$RUNNER_TEMP/nyanya-ci-venv/bin" >> "$GITHUB_PATH"
 
       - name: Build and type-check CLI
         run: npm run build && npm run check

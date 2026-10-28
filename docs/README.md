@@ -25,11 +25,12 @@ Use stable names for current contracts, such as `development_status.md` and `ope
 | Implementation | [Local Control Plane implementation](local_control_plane_implementation.md) | Current flow, constraints and remaining integration |
 | Policy | [`prompts/policy.md`](../prompts/policy.md) | Common operating, safety, connector and privacy policy |
 | Policy supplements | [`prompts/policy_technical.md`](../prompts/policy_technical.md), [`prompts/policy_governance.md`](../prompts/policy_governance.md) | Enforcement and review rules |
-| Development/distribution | [Installation and distribution](installation_and_distribution.md) | npm/Python packaging, setup, development and releases |
+| Development/distribution | [Installation and distribution](installation_and_distribution.md) | npm/Python packaging, private dashboard token provisioning, setup, development and releases |
 | npm release proposal | [npm release resumption guide](npm_release_resumption_guide.md) | Deferred OIDC/staging, verification and rollback |
 | Operations | [Operations guide](operations_guide.md) | Dashboard count popups, request/result previews, natural-height five-item pages, service lifecycle, recovery and gzip retention |
 | Remote access | [External dashboard access](external_dashboard_access.md) | Authentication/unlock, local and private-network access |
 | Security/reliability | [Hardening behavior and limits](security_and_reliability.md) | Context, auth, delivery, resource and integrity boundaries |
+| Security review and reporting | [Security policy](../SECURITY.md) | Threat model, security invariants, finding criteria and responsible reporting; root `AGENTS.md` holds contributor/code-review instructions |
 | Publication privacy | [Public/private source policy](source_publication_policy.md) | Publication and secret handling |
 | Origin review | [Copyright review](copyright_review.md) | Historical origin/product-identity review |
 | Acceptance | [User acceptance tests](user_acceptance_tests.md) | Service, files, recovery, conversation and memory scenarios |

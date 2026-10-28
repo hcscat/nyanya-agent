@@ -14,6 +14,8 @@ NyaNya Agent는 작업공간을 원격으로 요청·관리하기 위한 Python 
 
 English guide: [README.md](README.md)
 
+보안 경계·취약점 제보 안내는 [SECURITY.md](SECURITY.md), 개발·Codex 리뷰 지침은 공개 루트 `AGENTS.md`를 참고한다. 개인 로컬 지침은 Git에서 제외하며 모든 AGENTS 파일은 실행용 패키지에서 제외한다.
+
 ## 현재 실행 구조와 기억
 
 현재 완료 범위·남은 작업·검증 결과는 [개발 현황](docs/development_status.md)을 참고한다.
