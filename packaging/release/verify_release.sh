@@ -53,6 +53,11 @@ while IFS= read -r pattern; do
   else
     tracked_matches=""
   fi
+  # Only the reviewed root guide is authorized for GitHub. All instruction
+  # files remain forbidden in npm/source installs by their separate checks.
+  if [ "$pattern" = "AGENTS.md" ] || [ "$pattern" = "**/AGENTS.md" ]; then
+    tracked_matches="$(printf '%s\n' "$tracked_matches" | sed '/^AGENTS\.md$/d')"
+  fi
   if [ -n "$tracked_matches" ]; then
     echo "$tracked_matches"
     fail "denylisted path is tracked by git: $pattern"

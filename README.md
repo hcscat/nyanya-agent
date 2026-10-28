@@ -19,6 +19,8 @@ Korean guide: [README.KO.md](README.KO.md)
 
 Current completion, limitations and verification: [development status](docs/development_status.md).
 
+Security boundaries and vulnerability reporting: [SECURITY.md](SECURITY.md). Repository contributors and Codex reviewers use the public root `AGENTS.md`; private local instructions remain excluded from Git and all AGENTS files remain excluded from runtime packages.
+
 For a workspace with separate installed and development copies, run Git and
 development checks from the `source` checkout. See
 [development isolation](docs/installation_and_distribution.md#separate-an-operational-workspace-from-development).

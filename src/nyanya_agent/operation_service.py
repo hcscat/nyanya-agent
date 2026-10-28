@@ -158,7 +158,10 @@ class OperationService:
                 execution_id = state["execution_id"]
                 if state["delivery_status"] != "pending":
                     return
-                notice = workflow_notifications.prepare(self.path, owner, exclude=task_id) if state["outcome"] == "succeeded" else None
+                notice = workflow_notifications.prepare(
+                    self.path, owner, exclude=task_id,
+                    source=state.get("request_source") or "", channel_id=state.get("request_channel_id") or "",
+                ) if state["outcome"] == "succeeded" else None
                 if not store.claim_delivery(self.path, task_id, owner, execution_id, attempt):
                     return
                 try:

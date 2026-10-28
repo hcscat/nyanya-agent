@@ -433,8 +433,11 @@ def delivery_state(path, task_id, owner):
     with db.connect(path) as conn:
         row = conn.execute(
             "SELECT t.status,t.current_execution_id,o.attempts,r.execution_id,r.outcome,"
-            "r.response,r.delivery_status FROM agent_tasks t "
+            "r.response,r.delivery_status,q.source AS request_source,q.channel_id AS request_channel_id "
+            "FROM agent_tasks t "
             "JOIN task_operations o ON o.task_id=t.id "
+            "LEFT JOIN agent_tasks p ON p.id=o.parent_task_id "
+            "LEFT JOIN agent_requests q ON q.id=COALESCE(t.source_request_id,p.source_request_id) "
             "LEFT JOIN task_results r ON r.execution_id=t.current_execution_id "
             "WHERE t.id=? AND t.requested_by=?", (task_id, owner),
         ).fetchone()
@@ -836,7 +839,7 @@ def recovery_inventory(path, owner=None, exclude=None):
     with db.connect(path) as conn:
         rows = conn.execute(
             "SELECT t.*,COALESCE(t.source_request_id,p.source_request_id) AS delivery_request_id,"
-            "r.delivery_status,o.hold_reason,"
+            "r.delivery_status,o.hold_reason,q.source AS request_source,q.channel_id AS request_channel_id,"
             "COALESCE(o.diagnosis,json_extract(t.metadata_json,'$.legacy_upgrade_hold.reason')) AS diagnosis,"
             "CASE WHEN o.task_id IS NULL THEN (SELECT COUNT(*) FROM executions history WHERE history.task_id=t.id) "
             "ELSE o.attempts END AS attempts,o.assessment_json,"
@@ -849,6 +852,7 @@ def recovery_inventory(path, owner=None, exclude=None):
             "THEN 1 ELSE 0 END AS live_claim "
             "FROM agent_tasks t LEFT JOIN task_operations o ON o.task_id=t.id "
             "LEFT JOIN agent_tasks p ON p.id=o.parent_task_id "
+            "LEFT JOIN agent_requests q ON q.id=COALESCE(t.source_request_id,p.source_request_id) "
             "LEFT JOIN operation_workers w ON w.id=o.worker_generation "
             "LEFT JOIN task_claims c ON c.task_id=t.id AND c.execution_id=t.current_execution_id "
             "AND c.owner_key=COALESCE(json_extract(t.metadata_json,'$.owner_key'),t.requested_by) "
