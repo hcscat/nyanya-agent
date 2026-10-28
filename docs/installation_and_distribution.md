@@ -44,6 +44,14 @@ Validation is part of setup and every configuration change. A diagnostic command
 
 Secrets must be entered locally, masked in output, written with owner-only permissions, and excluded from package and Git contents.
 
+### Dashboard token provisioning
+
+`nyanya setup` (including `--all` and `--skip-deps`) and both alternate installers provision the dashboard token before starting services. They use the same dependency-free Python helper, so token creation does not depend on a completed runtime dependency installation. Unless configured otherwise, the file is `data/dashboard_control.token` under the state directory. New tokens use 32 random bytes, POSIX mode `0600`, or a protected owner-only Windows ACL; Windows storage must support persistent ACLs. The token value is never printed.
+
+Setup preserves an existing valid token file and honors `NYANYA_DASHBOARD_CONTROL_TOKEN` or a custom `NYANYA_DASHBOARD_CONTROL_TOKEN_FILE`, including values in the selected environment file. Process environment settings take precedence. An empty/invalid existing file, linked path, or unsafe POSIX file permissions stop setup without replacing the credential. Inspect and repair the configured file locally, then rerun setup; do not delete a working credential to retry installation. Setup does not automatically rotate credentials.
+
+Use the existing token locally in the dashboard unlock prompt; see [external dashboard access](external_dashboard_access.md#unlocking-and-empty-views). A missing token returns `503`; once provisioned, requests without a valid token return `401`, and authenticated operational reads can succeed. Host/Origin validation remains required. Never paste the token into an issue, PR, URL, screenshot, or shared log.
+
 Workspace access requires explicit registration. Trusted roots are also explicit: an unset or empty `NYANYA_TRUSTED_WORKSPACE_ROOTS` trusts no directories, including the application checkout. Trust cannot authorize access outside allowed workspace roots or bypass approval. Register only the intended task workspace before use.
 
 ## Updates and removal
@@ -113,7 +121,7 @@ The launcher clears inherited NyaNya settings, selects the checkout's independen
 
 Service/setup/manager commands are not exposed by this launcher. Do not run operational service installation or management commands from a development checkout: legacy service scripts may use production labels. The launcher is an isolation convenience, not an OS sandbox or a substitute for account/provider authorization. It preserves the user's home directory; external model CLIs may still use their own stored authentication when deliberately invoked by a development request. Direct commands outside it may inherit unrelated environment settings.
 
-Only reviewed public code, tests, templates and documentation enter Git. Keep development state, dependencies, local instruction files and operational backups out of Git and packages. Root and nested AGENTS instruction files have no blanket Git exception; each specific file and publication action requires explicit operator authorization, and instruction files remain excluded from installed packages. Private runtime credentials must not be copied into development. Tests use synthetic data, and package/privacy checks run from the Git checkout.
+Only reviewed public code, tests, templates and documentation enter Git. Keep development state, dependencies, local instruction files and operational backups out of Git and packages. The sanitized repository-root `AGENTS.md` is explicitly approved for GitHub review guidance; nested/override instructions remain local. Further instruction-file publication requires file-specific authorization. All AGENTS files remain excluded from npm packages and source-install copies. `SECURITY.md` is public policy included in the distribution, not a runtime authorization mechanism. Private runtime credentials must not be copied into development. Tests use synthetic data, and package/privacy checks run from the Git checkout.
 
 For an existing workspace migration, back up Git metadata (including linked worktree indexes), uncommitted changes, configuration and a consistent SQLite snapshot. Copy public candidates with hash verification, relocate Git metadata, repair linked worktree paths and test independent dependencies before archiving development-only files from the operational root. Keep the operational code, virtual environment and service paths unchanged where possible. Moving a Git repository does not deploy new code or require replaying interrupted work.
 

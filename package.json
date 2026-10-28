@@ -53,6 +53,7 @@
     "tsconfig.json",
     "README.md",
     "README.KO.md",
+    "SECURITY.md",
     "LICENSE",
     "packaging/README.md",
     "packaging/install/*.sh",

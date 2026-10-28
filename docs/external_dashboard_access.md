@@ -40,6 +40,8 @@ The static page opens without a control token, but its operational data requests
 
 Use the dashboard unlock button and enter the dashboard control token, which is separate from the Discord bot token. On the host, the application first uses `NYANYA_DASHBOARD_CONTROL_TOKEN`; otherwise it reads `NYANYA_DASHBOARD_CONTROL_TOKEN_FILE` or the state directory's `data/dashboard_control.token`. Retrieve the value locally and keep it out of shared documentation, messages, URLs and logs.
 
+Normal `nyanya setup` and both alternate installers create a private token file when no explicit token or existing file is present, preserving existing credentials on reruns. If an older installation returns `503` because no token was configured, rerun `nyanya setup --non-interactive` on the host, then unlock locally. Missing/unsafe token storage fails closed; setup does not overwrite an invalid existing file. Repair its contents/permissions locally before retrying. See [token provisioning](installation_and_distribution.md#dashboard-token-provisioning).
+
 The token exists only in the current page's memory. A new device, tab or page reload requires unlocking again. Unauthenticated data APIs returning `401` is expected; valid authenticated reads should return `200`. If views remain empty after unlocking, inspect failed `/v1/` responses in the browser Network panel without sharing authorization headers.
 
 ## Tailscale Serve

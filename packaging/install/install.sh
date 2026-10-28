@@ -168,6 +168,8 @@ if [ ! -f "$STATE_DIR/.env" ] && [ -f "$INSTALL_DIR/.env.example" ]; then
   chmod 0600 "$STATE_DIR/.env"
 fi
 
+python3 "$INSTALL_DIR/src/nyanya_agent/dashboard_token.py" --state-root "$STATE_DIR" --env-file "$STATE_DIR/.env"
+
 python3 -m venv "$STATE_DIR/.venv"
 if [ "$SKIP_DEPS" -eq 0 ]; then
   "$STATE_DIR/.venv/bin/python" -m pip install --upgrade pip
