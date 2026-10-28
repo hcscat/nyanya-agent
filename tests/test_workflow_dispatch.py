@@ -23,6 +23,22 @@ NO_REEXECUTION_QUERIES = (
     "남은 작업 목록을 알려줘, 이전 작업은 재개/삭제/재실행하지 말아줘.",
     "미완료 작업 목록만 보여줘 기존 작업은 취소 및 재개 또는 다시 실행하지 말아주세요!",
 )
+NON_LEDGER_CANCEL_REQUESTS = (
+    "이 폴더의 파일을 모두 제거해줘",
+    "파일을 전부 제거해줘.",
+    "전체 파일을 제거해줘.",
+    "남은 임시파일을 모두 제거해줘.",
+    "프로젝트 작업 파일을 모두 제거해줘.",
+    "기존 작업 파일을 모두 제거해줘.",
+    "이전 목록의 파일을 모두 제거해줘.",
+    "전체 목록을 모두 제거해줘.",
+    "이전 목록 모두 취소하고 파일을 제거해줘.",
+    "파일을 제거하고 이전 목록 모두 취소해줘.",
+    "모두 취소해줘.",
+    "전부 제거해줘.",
+    "취소?", "cancel?", "이전 목록 모두 취소?", "미완료 모두 취소？",
+    "미완료 작업을 취소하지 않고 파일을 모두 제거해줘.",
+)
 FILE_SAFETY_REQUEST = (
     "등록된 작업공간 안의 synthetic-live-check/note.txt 새 파일 하나를 만들어줘. "
     "파일 내용은 정확히 첫 줄 SyntheticWikiCheck, 둘째 줄 retry=3으로 하고 마지막에 줄바꿈을 넣어줘. "
@@ -157,19 +173,59 @@ def test_list_selection_is_durable_and_rejects_new_tasks(tmp_path):
     service.close()
 
 
-def test_confirmed_selection_dismisses_only_seen_owner_tasks(tmp_path):
+@pytest.mark.parametrize("command", [
+    "이전 목록 모두 취소", "미완료 작업들을 모두 취소해줘.", "남은 작업 전부 종결해라!",
+    "방금 목록을 모두 취소해주세요", "현재 작업 목록을 전부 제거해줘",
+    "미완료 작업들은 하지 않겠다 취소/제거 해라",
+])
+def test_confirmed_selection_dismisses_only_seen_owner_tasks(tmp_path, command):
     path = tmp_path / "ledger.db"
     service = OperationService(path)
     owner = "discord-user:a"
     _insert_task(path, "task_first", owner)
     _insert_task(path, "task_other", "discord-user:b")
     service.handle_intent("작업목록", owner, conversation_key="channel:a")
-    result = service.handle_intent("이전 목록 모두 취소", owner, conversation_key="channel:a")
+    result = service.handle_intent(command, owner, conversation_key="channel:a")
     assert "task_first" in result and "task_other" not in result
     assert "task_first" not in service.handle_intent("작업목록", owner, conversation_key="channel:a")
     assert _status(path, "task_first") == "failed"
     with pytest.raises(PermissionError):
         service.handle_intent("cancel task_other", owner, conversation_key="channel:a")
+    service.close()
+
+
+@pytest.mark.parametrize("text", NON_LEDGER_CANCEL_REQUESTS)
+def test_nonledger_or_mixed_target_cannot_cancel_saved_selection(tmp_path, monkeypatch, text):
+    path = tmp_path / "ledger.db"
+    service = OperationService(path)
+    owner = "discord-user:a"
+    _insert_task(path, "task_unrelated", owner, "queued")
+    service.handle_intent("작업목록", owner, conversation_key="channel:a")
+    with db.connect(path) as conn:
+        before = [tuple(row) for row in conn.execute("SELECT * FROM agent_tasks")]
+    assert classify(text).kind in {"clarify", "work_request"}
+    service.handle_intent(text, owner, conversation_key="channel:a")
+    with db.connect(path) as conn:
+        assert [tuple(row) for row in conn.execute("SELECT * FROM agent_tasks")] == before
+        assert conn.execute("SELECT COUNT(*) FROM task_operations").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM approvals").fetchone()[0] == 0
+    service.close()
+
+
+def test_api_file_removal_cannot_cancel_previously_listed_task(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from nyanya_agent.dashboard_api import create_app
+
+    path = tmp_path / "ledger.db"
+    monkeypatch.setenv("NYANYA_DASHBOARD_CONTROL_TOKEN", "fixture-token")
+    service = OperationService(path)
+    _insert_task(path, "task_unrelated", "operator", "queued")
+    service.handle_intent("작업목록", "operator", conversation_key="operator")
+    client = TestClient(create_app(path), base_url="http://127.0.0.1")
+    response = client.post("/v1/operations", headers={"X-Nyanya-Control-Token": "fixture-token"},
+                           json={"prompt": NON_LEDGER_CANCEL_REQUESTS[0], "workspace": str(tmp_path)})
+    assert response.status_code == 201 and response.json()["kind"] == "control"
+    assert _status(path, "task_unrelated") == "queued"
     service.close()
 
 
