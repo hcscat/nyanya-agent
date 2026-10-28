@@ -208,7 +208,13 @@ def _raw_bytes(directory: Path, name: str) -> int:
         if entry.name.startswith(f"{name}.") and (
             SEGMENT_RE.fullmatch(entry.name) or entry.name in {f"{name}.stdout.current", f"{name}.stderr.current"}
         ):
-            total += _safe_file(entry).st_size
+            try:
+                total += _safe_file(entry).st_size
+            except FileNotFoundError:
+                # Maintenance can retire a closed segment after iterdir yields it.
+                # Current streams and other unsafe-file failures still fail closed.
+                if not SEGMENT_RE.fullmatch(entry.name):
+                    raise
     return total
 
 

@@ -13,16 +13,20 @@ class Notice:
     owner: str
     revision: str
     task_id: str
+    source: str = ""
+    channel_id: str = ""
 
 
-def owner_digest(owner):
-    return hashlib.sha256(owner.encode()).hexdigest()
+def owner_digest(owner, source="", channel_id=""):
+    recipient = json.dumps([owner, source, channel_id]) if source or channel_id else owner
+    return hashlib.sha256(recipient.encode()).hexdigest()
 
 
-def prepare(path, owner, exclude=None):
+def prepare(path, owner, exclude=None, *, source="", channel_id=""):
     """Read current actionable state; an unchanged delivered notice stays quiet."""
     # Candidate lifecycle, ownership and notice fields come from the same read.
-    rows = store.recovery_inventory(path, owner, exclude)
+    rows = [row for row in store.recovery_inventory(path, owner, exclude)
+            if (row.get("request_source") or "", row.get("request_channel_id") or "") == (source, channel_id)]
     issues = [row for row in rows if row.get('delivery_status') in {'sending', 'uncertain'}]
     if not rows:
         return None
@@ -31,7 +35,7 @@ def prepare(path, owner, exclude=None):
           r.get('delivery_status')) for r in rows],
         ensure_ascii=False, sort_keys=True,
     ).encode()).hexdigest()
-    recipient = owner_digest(owner)
+    recipient = owner_digest(owner, source, channel_id)
     with db.connect(path) as conn:
         previous = conn.execute(
             "SELECT metadata_json FROM execution_events WHERE event_type='workflow.notice_delivered' "
@@ -48,14 +52,14 @@ def prepare(path, owner, exclude=None):
               "재진행하지 않을 실패는 dismiss 작업ID, 실행 취소는 cancel 작업ID를 사용하세요."
             + (" 전달 여부가 불확실한 결과의 알림만 종료하려면 ack-delivery 작업ID를 사용하세요. "
                "결과 재전송이나 실행 취소는 하지 않습니다." if issues else ""))
-    return Notice(text, owner, revision, rows[0]['id'])
+    return Notice(text, owner, revision, rows[0]['id'], source, channel_id)
 
 
 def delivered(path, notice):
     """Record only after successful send; an ambiguous send may still repeat."""
     with db.connect(path) as conn:
         conn.execute('BEGIN IMMEDIATE')
-        metadata = {'recipient': owner_digest(notice.owner), 'revision': notice.revision}
+        metadata = {'recipient': owner_digest(notice.owner, notice.source, notice.channel_id), 'revision': notice.revision}
         last = conn.execute(
             "SELECT metadata_json FROM execution_events WHERE event_type='workflow.notice_delivered' "
             "AND json_extract(metadata_json,'$.recipient')=? ORDER BY seq DESC LIMIT 1",

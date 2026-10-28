@@ -512,8 +512,20 @@ def main() -> int:
                 if str(workspace) != meta["workspace"]:
                     raise SafeOperationError("Registered upload workspace changed")
                 return queue_bound_upload(workspace, meta["relative_path"], meta["relative_path"], meta["destination_id"], meta["sha256"], meta["file_identity"], approval_id=record["id"], supplied_hash=args[2])
+            except OutcomeSignal as exc:
+                return finish(exc.outcome.text, status=exc.outcome.status, mode="control")
             except (ValueError, PermissionError, OSError):
                 return finish("문서 전송 확인을 보류했습니다. 요청자·원 채널·파일·목적지·만료를 확인하고 필요하면 새 업로드를 요청하세요.", status="blocked", mode="control")
+
+        parts = text.split(maxsplit=1)
+        scope = parts[1].strip().lower() if len(parts) > 1 else ""
+        if command in TASK_STATUS_COMMANDS and scope in {"", "all", "전체", "global"}:
+            show_all = bool(scope) and store.is_owner(str(message.author.id))
+            if scope and not show_all:
+                return finish("전체 작업 목록은 관리자만 조회할 수 있습니다.", status="failed", error="owner required", mode="control")
+            return finish(store.task_status_text(None) if show_all else store.operations.handle_intent(
+                "tasks", owner_key, conversation_key=conversation_key, request_id=request_id,
+            ), mode="control")
 
         intent = classify(text)
         if intent.kind != "work_request":
@@ -528,6 +540,9 @@ def main() -> int:
                     f"제어 요청을 처리하지 못했습니다: {type(exc).__name__}. 소유자와 대상 상태를 확인하세요.",
                     status="failed", mode="control",
                 )
+
+        if command in TASK_STATUS_COMMANDS:
+            return finish("작업 목록 범위를 확인하세요. tasks 또는 tasks all을 사용하세요.", mode="control")
 
         if command in {'why', 'plan', 'approve', 'revoke', 'resume', 'reconcile', 'resolve', 'plan-file'} or (command == 'cancel' and len(text.split()) == 2):
             try:
@@ -636,15 +651,6 @@ def main() -> int:
                 ),
                 mode="control",
             )
-        if command in TASK_STATUS_COMMANDS:
-            parts = text.split(maxsplit=1)
-            scope = parts[1].strip().lower() if len(parts) > 1 else ""
-            show_all = scope in {"all", "전체", "global"} and store.is_owner(str(message.author.id))
-            if scope in {"all", "전체", "global"} and not show_all:
-                return finish("전체 작업 목록은 관리자만 조회할 수 있습니다.", status="failed", error="owner required", mode="control")
-            return finish(store.task_status_text(None) if show_all else store.operations.handle_intent(
-                "tasks", owner_key, conversation_key=conversation_key, request_id=request_id,
-            ), mode="control")
         if command in {"config", "/config"}:
             return finish(store.status_text(), mode="control")
         if command in {"gemini", "/gemini"}:
@@ -717,6 +723,8 @@ def main() -> int:
                     )
                     return finish(notice, status="blocked", mode="upload")
                 return queue_bound_upload(workspace, file_path, relative_path, destination, digest, identity)
+            except OutcomeSignal as exc:
+                return finish(exc.outcome.text, status=exc.outcome.status, mode="upload")
             except (ValueError, PermissionError, OSError) as exc:
                 reason = str(exc) if isinstance(exc, SafeOperationError) else "Secure document access or extraction failed"
                 return finish(f"문서 전송을 보류했습니다: {reason}", status="blocked", mode="upload")
@@ -752,7 +760,7 @@ def main() -> int:
             await asyncio.sleep(60)
 
     async def report_recovery() -> None:
-        groups: dict[tuple[str, str], object] = {}
+        groups: set[tuple[str, str]] = set()
         from nyanya_agent.operation_store import recovery_inventory
         for item in recovery_inventory(store.operations.path):
             source_id = item.get("delivery_request_id")
@@ -765,10 +773,11 @@ def main() -> int:
             # Keep historical recovery notices within currently permitted destinations.
             if request["channel_id"] not in allowed_channel_ids and request["user_id"] not in allowed_user_ids:
                 continue
-            notice = workflow_notifications.prepare(store.operations.path, owner)
-            if notice:
-                groups[(request["channel_id"], owner)] = notice
-        for (channel_id, _owner), notice in groups.items():
+            groups.add((request["channel_id"], owner))
+        for channel_id, owner in groups:
+            notice = workflow_notifications.prepare(store.operations.path, owner, source="discord", channel_id=channel_id)
+            if not notice:
+                continue
             try:
                 channel = client.get_channel(int(channel_id)) or await client.fetch_channel(int(channel_id))
                 await channel.send(notice.text.strip())

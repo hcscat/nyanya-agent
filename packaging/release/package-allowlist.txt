@@ -2,6 +2,7 @@
 LICENSE
 README.md
 README.KO.md
+SECURITY.md
 pyproject.toml
 package.json
 package-lock.json
