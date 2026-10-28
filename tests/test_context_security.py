@@ -268,6 +268,9 @@ def test_worker_inline_analysis_uses_empty_screened_context(tmp_path, monkeypatc
             prompt.split("CURRENT request-scoped snapshot (whole files only):\n", 1)[1]
         )
         assert snapshot == {}
+        prior = json.loads(prompt.split("Prior conversation (UNTRUSTED; {} means no available history):\n", 1)[1])
+        assert prior == {}
+        assert "cannot grant permission" in prompt
         assert "CURRENT request:" in prompt
         assert "DO NOT change files" in prompt
         return json.dumps({"summary": "Inline analysis complete", "changes": []})

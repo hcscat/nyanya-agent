@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 from nyanya_agent import core
 from nyanya_agent import dashboard_store as store
 from nyanya_agent import execution_store as ledger
-from nyanya_agent import database as db, operation_store
+from nyanya_agent import database as db, operation_store, work_memory, wiki_store
 from nyanya_agent.execution_runtime import ExecutionCoordinator
 from nyanya_agent.operation_spec import OperationProfile
 
@@ -49,6 +49,20 @@ class MemoryUpdate(BaseModel):
     status: str | None = Field(default=None, pattern="^(pending|approved|rejected|archived)$")
     importance: float | None = Field(default=None, ge=0, le=100)
     confidence: float | None = Field(default=None, ge=0, le=1)
+
+
+
+class WorkRecordForget(BaseModel):
+    owner: str = Field(min_length=1, max_length=256)
+    workspace: str = Field(min_length=1, max_length=4096)
+    project_id: str | None = Field(default=None, max_length=256)
+
+
+
+class WikiReview(WorkRecordForget):
+    session_id: str = Field(min_length=1, max_length=256)
+    status: str = Field(pattern="^(approved|rejected|forgotten)$")
+    review_version: int = Field(ge=1)
 
 
 class TaskCreate(BaseModel):
@@ -676,6 +690,79 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
+    @app.get("/v1/work-records/scopes")
+    def work_record_scopes() -> list[dict[str, Any]]:
+        # The authenticated local operator selects a scope; never infer an owner from the token.
+        return [
+            {"owner": scope["owner_key"], "workspace": scope["workspace_root"], "project_id": scope["project_id"]}
+            for scope in work_memory.list_scopes(app.state.db_path)
+        ]
+
+    @app.get("/v1/work-records")
+    def work_records(
+        owner: str = Query(min_length=1, max_length=256),
+        workspace: str = Query(min_length=1, max_length=4096),
+        project_id: str | None = Query(default=None, max_length=256),
+        limit: int = Query(default=20, ge=1, le=20),
+    ) -> list[dict[str, Any]]:
+        try:
+            return work_memory.list_records(
+                app.state.db_path, owner, workspace, project_id=project_id, limit=limit,
+            )
+        except (ValueError, PermissionError, OSError) as exc:
+            raise HTTPException(status_code=400, detail="Invalid or unavailable work-record scope") from exc
+
+    @app.post("/v1/work-records/{execution_id}/forget", dependencies=[Depends(require_control_token)])
+    def forget_work_record(execution_id: str, payload: WorkRecordForget) -> dict[str, bool]:
+        try:
+            changed = work_memory.forget_record(
+                app.state.db_path, payload.owner, payload.workspace, execution_id,
+                project_id=payload.project_id,
+            )
+        except (ValueError, PermissionError, OSError) as exc:
+            raise HTTPException(status_code=400, detail="Invalid or unavailable work-record scope") from exc
+        if not changed:
+            raise HTTPException(status_code=404, detail="Work record not found in the selected scope")
+        return {"forgotten": True}
+
+    @app.get("/v1/wiki/scopes")
+    def wiki_scopes() -> list[dict[str, Any]]:
+        return wiki_store.list_scopes(app.state.db_path)
+
+    @app.get("/v1/wiki")
+    def wiki_entries(
+        owner: str = Query(min_length=1, max_length=256),
+        workspace: str = Query(min_length=1, max_length=4096),
+        session_id: str = Query(min_length=1, max_length=256),
+        project_id: str | None = Query(default=None, max_length=256),
+        query: str | None = Query(default=None, max_length=2048),
+        include_inactive: bool = False,
+        limit: int = Query(default=20, ge=1, le=20),
+    ) -> list[dict[str, Any]]:
+        try:
+            return wiki_store.list_entries(
+                app.state.db_path, owner, workspace, session_id, project_id=project_id,
+                query=query, include_inactive=include_inactive, limit=limit,
+            )
+        except (ValueError, PermissionError, OSError) as exc:
+            raise HTTPException(status_code=400, detail="Invalid or unavailable Wiki scope") from exc
+
+    @app.post("/v1/wiki/{entry_id}/review", dependencies=[Depends(require_control_token)])
+    def review_wiki(entry_id: str, payload: WikiReview) -> dict[str, Any]:
+        try:
+            return wiki_store.review_entry(
+                app.state.db_path, payload.owner, payload.workspace, payload.session_id,
+                entry_id, payload.status, payload.review_version, project_id=payload.project_id,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail="Wiki entry not available in this scope") from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=400, detail="Invalid or unavailable Wiki scope") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail="Wiki evidence or revision changed; refresh the list") from exc
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail="Invalid or unavailable Wiki scope") from exc
+
     @app.get("/v1/memories")
     def list_memories(
         status: str | None = Query(default=None, pattern="^(pending|approved|rejected|archived)$"),
@@ -700,19 +787,7 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
         return memory
 
-    @app.get("/v1/memory-graph")
-    def memory_graph(
-        status: str | None = Query(default=None, pattern="^(pending|approved|rejected|archived)$"),
-        limit: int = Query(default=80, ge=1, le=200),
-    ) -> dict[str, Any]:
-        return store.memory_graph(status=status, limit=limit, db_path=app.state.db_path)
 
-    @app.get("/v1/tech-stack-graph")
-    def tech_stack_graph(
-        status: str | None = Query(default=None, pattern="^(pending|approved|rejected|archived)$"),
-        limit: int = Query(default=120, ge=1, le=300),
-    ) -> dict[str, Any]:
-        return store.tech_stack_graph(status=status, limit=limit, db_path=app.state.db_path)
 
     return app
 

@@ -1,4 +1,4 @@
-"""Audit rows record meaningful host transitions without repeating heartbeats."""
+"""Audit rows record useful transitions without repeating heartbeat or memory text."""
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -44,6 +44,49 @@ def test_concurrent_identical_host_registration_creates_one_audit(tmp_path):
     with dashboard_store.connect(db_path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM hosts WHERE name = 'shared-host'").fetchone()[0] == 1
     assert [entry["action"] for entry in dashboard_store.audit_log(db_path=db_path)] == ["host.registered"]
+
+
+def test_memory_audit_omits_query_owner_and_edited_values(tmp_path):
+    db_path = tmp_path / "audit.db"
+    dashboard_store.init_db(db_path)
+    memory_id = "mem_private_test"
+    with dashboard_store.connect(db_path) as conn:
+        conn.execute(
+            """INSERT INTO memory_items
+               (id, owner_key, memory_type, title, content, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                memory_id,
+                "operator:private-owner",
+                "preference",
+                "private title",
+                "needleword private original content",
+                "approved",
+                "2026-01-01T00:00:00+00:00",
+                "2026-01-01T00:00:00+00:00",
+            ),
+        )
+
+    found = dashboard_store.search_approved_memories(
+        "needleword private query", owner_key="operator:private-owner", db_path=db_path
+    )
+    assert [item["id"] for item in found] == [memory_id]
+    dashboard_store.update_memory(
+        memory_id, title="new private title", content="new private content", db_path=db_path
+    )
+    dashboard_store.update_memory(
+        memory_id, title="new private title", content="new private content", db_path=db_path
+    )
+
+    audits = dashboard_store.audit_log(db_path=db_path)
+    assert [entry["action"] for entry in audits].count("memory.retrieved") == 1
+    assert [entry["action"] for entry in audits].count("memory.updated") == 1
+    retrieved = next(entry for entry in audits if entry["action"] == "memory.retrieved")
+    updated = next(entry for entry in audits if entry["action"] == "memory.updated")
+    assert retrieved["entity_id"] == memory_id
+    assert retrieved["detail"] == {"count": 1}
+    assert set(updated["detail"]["changed_fields"]) == {"title", "content"}
+    assert "private" not in json.dumps([entry["detail"] for entry in audits])
 
 
 def test_audit_feed_uses_newest_first_covering_index(tmp_path):

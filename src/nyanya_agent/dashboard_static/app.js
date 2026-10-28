@@ -6,8 +6,14 @@ const state = {
   projects: [],
   audit: [],
   memories: [],
-  memoryGraph: { nodes: [], edges: [], stats: {} },
-  techStackGraph: { nodes: [], edges: [], stats: {} },
+  workRecordScopes: [],
+  workRecords: [],
+  workRecordScope: null,
+  workRecordRevision: 0,
+  wikiScopes: [],
+  wikiScope: null,
+  wikiEntries: [],
+  wikiRevision: 0,
   hosts: [],
   agents: [],
   tasks: [],
@@ -16,8 +22,6 @@ const state = {
   controlToken: "",
   eventCursor: 0,
   eventSource: null,
-  cy: null,
-  techCy: null,
 };
 
 const labels = {
@@ -53,6 +57,8 @@ const labels = {
   offline: "오프라인",
   approved: "승인",
   rejected: "거부",
+  superseded: "이전 버전",
+  forgotten: "기억 제외",
   preference: "사용자 선호",
   workflow: "작업 방식",
   report_style: "결과 보고",
@@ -96,7 +102,7 @@ function badge(value) {
 function fmtDate(value) {
   if (!value) return "-";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  if (Number.isNaN(date.getTime())) return escapeHtml(value);
   return date.toLocaleString("ko-KR", { hour12: false });
 }
 
@@ -120,6 +126,11 @@ async function api(path, options = {}) {
 }
 
 async function loadAll() {
+  if (!state.controlToken) {
+    setStreamStatus(false);
+    $("streamStatus").title = "대시보드 잠금 해제 버튼에서 토큰을 입력하세요.";
+    return;
+  }
   const period = $("usagePeriod")?.value || "daily";
   const [
     summary,
@@ -128,8 +139,6 @@ async function loadAll() {
     projects,
     audit,
     memories,
-    memoryGraph,
-    techStackGraph,
     hosts,
     agents,
     tasks,
@@ -142,8 +151,6 @@ async function loadAll() {
     api("/v1/projects"),
     api("/v1/audit-log?limit=40"),
     api("/v1/memories?limit=120"),
-    api("/v1/memory-graph?limit=120"),
-    api("/v1/tech-stack-graph?limit=120"),
     api("/v1/hosts"),
     api("/v1/agents"),
     api("/v1/tasks?limit=100"),
@@ -156,15 +163,104 @@ async function loadAll() {
   state.projects = await Promise.all(projects.map((project) => api(`/v1/projects/${project.id}`)));
   state.audit = audit;
   state.memories = memories;
-  state.memoryGraph = memoryGraph;
-  state.techStackGraph = techStackGraph;
   state.hosts = hosts;
   state.agents = agents;
   state.tasks = tasks;
   state.executions = executions;
   state.approvals = approvals;
   render();
+  await loadWorkRecordScopes();
+  await loadWikiScopes();
 }
+
+async function loadWikiScopes() {
+  const scopes = await api("/v1/wiki/scopes");
+  const selected = state.wikiScope && JSON.stringify(state.wikiScope);
+  state.wikiScopes = scopes;
+  state.wikiScope = scopes.find((scope) => JSON.stringify(scope) === selected) || null;
+  $("wikiScope").innerHTML = '<option value="">채널 기억 범위를 선택하세요</option>' + scopes.map((scope, index) =>
+    `<option value="${index}">${escapeHtml(scope.owner)} · ${escapeHtml(scope.workspace)} · ${escapeHtml(scope.project_id || "프로젝트 없음")} · 채널 ${escapeHtml(scope.session_id.slice(-8))}</option>`,
+  ).join("");
+  $("wikiScope").value = state.wikiScope ? String(scopes.indexOf(state.wikiScope)) : "";
+  await loadWikiEntries();
+}
+
+
+async function loadWikiEntries() {
+  const revision = ++state.wikiRevision;
+  const scope = state.wikiScope;
+  state.wikiEntries = [];
+  if (!scope) {
+    $("wikiList").innerHTML = '<p class="empty">채널 기억 범위를 선택하세요.</p>';
+    return;
+  }
+  const query = new URLSearchParams({ owner: scope.owner, workspace: scope.workspace, session_id: scope.session_id, include_inactive: "true" });
+  if (scope.project_id) query.set("project_id", scope.project_id);
+  if ($("wikiQuery").value.trim()) query.set("query", $("wikiQuery").value.trim());
+  $("wikiList").textContent = "주제별 기억을 조회 중입니다.";
+  const entries = await api(`/v1/wiki?${query}`);
+  if (state.wikiScope !== scope || state.wikiRevision !== revision) return;
+  state.wikiEntries = entries;
+  $("wikiList").innerHTML = entries.length ? entries.map((entry) => `
+    <article class="memory-item">
+      <div>
+        ${badge(entry.status)} ${entry.conflict ? '<span class="status-badge amber">내용 충돌</span>' : ""}
+        <strong>${escapeHtml(entry.title)} · 버전 ${escapeHtml(entry.revision)}</strong>
+        <p>${escapeHtml(entry.content)}</p>
+        <span class="meta">${escapeHtml(entry.provenance_kind === "reviewed_apply" ? "과거 검토 적용 근거" : "과거 모델 요약")} · ${escapeHtml(entry.status === "approved" ? "검토한 기억" : "현재 사실로 확인되지 않음")}</span>
+        <p class="meta">근거 작업 <code>${escapeHtml(entry.source_task_id)}</code> · 실행 <code>${escapeHtml(entry.source_execution_id)}</code> · ${fmtDate(entry.created_at)}</p>
+      </div>
+      ${["pending", "approved"].includes(entry.status) ? `<div class="memory-actions">
+        <button class="button small secondary" data-action="wiki-approved" data-wiki="${escapeHtml(entry.id)}" type="button">기억 버전 선택</button>
+        <button class="button small secondary" data-action="wiki-rejected" data-wiki="${escapeHtml(entry.id)}" type="button">요약 거부</button>
+        <button class="button small secondary" data-action="wiki-forgotten" data-wiki="${escapeHtml(entry.id)}" type="button">이 근거 기억 제외</button>
+      </div>` : ""}
+    </article>
+  `).join("") : '<div class="empty">이 채널 범위에서 검색된 Wiki 기억이 없습니다.</div>';
+}
+
+
+async function loadWorkRecordScopes() {
+  const scopes = await api("/v1/work-records/scopes");
+  const selected = state.workRecordScope && JSON.stringify(state.workRecordScope);
+  state.workRecordScopes = scopes;
+  state.workRecordScope = scopes.find((scope) => JSON.stringify(scope) === selected) || null;
+  const selector = $("workRecordScope");
+  selector.innerHTML = '<option value="">조회 범위를 선택하세요</option>' + scopes.map((scope, index) =>
+    `<option value="${index}">${escapeHtml(scope.owner)} · ${escapeHtml(scope.workspace)} · ${escapeHtml(scope.project_id || "프로젝트 없음")}</option>`,
+  ).join("");
+  selector.value = state.workRecordScope ? String(scopes.indexOf(state.workRecordScope)) : "";
+  await loadWorkRecords();
+}
+
+
+async function loadWorkRecords() {
+  const revision = ++state.workRecordRevision;
+  const scope = state.workRecordScope;
+  if (!scope) {
+    state.workRecords = [];
+    $("workRecordList").innerHTML = '<p class="empty">조회 범위를 선택하세요.</p>';
+    return;
+  }
+  const query = new URLSearchParams({ owner: scope.owner, workspace: scope.workspace });
+  if (scope.project_id) query.set("project_id", scope.project_id);
+  state.workRecords = [];
+  $("workRecordList").textContent = "작업 기억을 조회 중입니다.";
+  const records = await api(`/v1/work-records?${query}`);
+  if (state.workRecordScope !== scope || state.workRecordRevision !== revision) return;
+  state.workRecords = records;
+  $("workRecordList").innerHTML = records.length ? records.map((record) => `
+    <article class="memory-item">
+      <div>
+        <strong>${escapeHtml(record.request_summary || "본문 제외 기록")}</strong>
+        <p>${escapeHtml(record.result_summary || "민감도·크기 검사로 본문을 보관하지 않았습니다.")}</p>
+        <span class="meta">${escapeHtml(record.provenance_kind === "reviewed_apply" ? "검증된 적용 이력" : "모델 답변 이력")} · ${escapeHtml(record.current_task_status)} · <code>${escapeHtml(record.task_id)}</code></span>
+      </div>
+      <button class="button small secondary" data-action="work-record-forget" data-execution="${escapeHtml(record.execution_id)}" type="button">기억에서 제외</button>
+    </article>
+  `).join("") : '<div class="empty">이 범위에 보관 중인 작업 기억이 없습니다.</div>';
+}
+
 
 async function loadOperations() {
   const [hosts, agents, tasks, executions, approvals] = await Promise.all([
@@ -217,14 +313,6 @@ function setView(view, { updateHash = true } = {}) {
     history.replaceState(null, "", `#${view}`);
   }
   renderActiveView();
-  if (view === "memory") {
-    window.setTimeout(() => {
-      renderMemoryGraph();
-      renderTechStackGraph();
-      state.cy?.fit(undefined, 24);
-      state.techCy?.fit(undefined, 24);
-    }, 30);
-  }
 }
 
 function memoryTone(memory) {
@@ -573,12 +661,11 @@ function renderAudit() {
 
 function renderMemories() {
   if (!$("memorySummary")) return;
-  const stats = state.memoryGraph?.stats || {};
   const cards = [
-    ["전체 기억", stats.memories ?? state.memories.length, ""],
-    ["검토 대기", stats.pending ?? 0, "warn"],
-    ["승인", stats.approved ?? 0, "info"],
-    ["타입", stats.types ?? 0, ""],
+    ["조회한 기억", state.memories.length, ""],
+    ["검토 대기", state.memories.filter((memory) => memory.status === "pending").length, "warn"],
+    ["승인", state.memories.filter((memory) => memory.status === "approved").length, "info"],
+    ["타입", new Set(state.memories.map((memory) => memory.memory_type)).size, ""],
   ];
   $("memorySummary").innerHTML = cards
     .map(
@@ -591,10 +678,7 @@ function renderMemories() {
     )
     .join("");
 
-  $("memoryList").innerHTML =
-    state.memories.length === 0
-      ? `<div class="empty">기억 후보 없음. 요청 이력에서 후보를 추출하세요.</div>`
-      : state.memories
+  $("memoryList").innerHTML = state.memories.length ? state.memories
           .map(
             (memory) => `
               <article class="memory-item ${memoryTone(memory)}">
@@ -605,119 +689,19 @@ function renderMemories() {
                   <span class="meta">${escapeHtml(label(memory.memory_type))} · 중요도 ${Math.round(memory.importance || 0)} · 신뢰도 ${Math.round((memory.confidence || 0) * 100)}%</span>
                 </div>
                 <div class="memory-actions">
-                  <button class="button small secondary" data-action="memory-approve" data-memory="${escapeHtml(memory.id)}" type="button">승인</button>
-                  <button class="button small secondary" data-action="memory-reject" data-memory="${escapeHtml(memory.id)}" type="button">거부</button>
+                  <button class="button small secondary" data-action="memory-approve" data-memory="${escapeHtml(memory.id)}" type="button" ${memory.status === "approved" ? "disabled" : ""}>승인</button>
+                  <button class="button small secondary" data-action="memory-reject" data-memory="${escapeHtml(memory.id)}" type="button" ${memory.status === "rejected" ? "disabled" : ""}>거부</button>
                 </div>
               </article>
             `,
           )
-          .join("");
-
-  renderMemoryGraph();
-  renderTechStackGraph();
+          .join("") : '<div class="empty">기억 후보 없음. 필요한 경우 요청 이력에서 후보를 추출하세요.</div>';
 }
 
-function graphElements(graph) {
-  return [
-    ...(graph.nodes || []).map((node) => ({
-      data: {
-        id: node.id,
-        label: node.label,
-        kind: node.kind,
-        status: node.status,
-        importance: node.importance || 1,
-      },
-    })),
-    ...(graph.edges || []).map((edge, index) => ({
-      data: {
-        id: `edge-${index}`,
-        source: edge.source,
-        target: edge.target,
-        label: edge.label,
-        weight: edge.weight || 1,
-      },
-    })),
-  ];
-}
 
-function graphStyle() {
-  return [
-    {
-      selector: "node",
-      style: {
-        label: "data(label)",
-        "background-color": "#1d63c7",
-        color: "#1e2732",
-        "font-size": 11,
-        "text-valign": "bottom",
-        "text-halign": "center",
-        "text-wrap": "wrap",
-        "text-max-width": 120,
-        width: "mapData(importance, 1, 100, 24, 64)",
-        height: "mapData(importance, 1, 100, 24, 64)",
-      },
-    },
-    { selector: 'node[kind = "root"]', style: { "background-color": "#f0bd4a", width: 72, height: 72, "font-weight": 800 } },
-    { selector: 'node[kind = "type"]', style: { "background-color": "#0d748a", color: "#0d3340", "font-weight": 700 } },
-    { selector: 'node[kind = "technology"]', style: { "background-color": "#14764c", color: "#123524", "font-weight": 700 } },
-    { selector: 'node[status = "pending"]', style: { "border-color": "#9a5a08", "border-width": 3 } },
-    { selector: 'node[status = "approved"]', style: { "border-color": "#14764c", "border-width": 3 } },
-    {
-      selector: "edge",
-      style: {
-        width: "mapData(weight, 1, 10, 1, 5)",
-        "line-color": "#a8b4c2",
-        "target-arrow-color": "#a8b4c2",
-        "target-arrow-shape": "triangle",
-        "curve-style": "bezier",
-      },
-    },
-  ];
-}
 
-function renderGraph({ containerId, graph, cyKey, emptyText }) {
-  const container = $(containerId);
-  if (!container) return;
-  if (!window.cytoscape) {
-    container.innerHTML = `<div class="empty">Cytoscape.js 로드 실패. 그래프 외 목록은 계속 사용할 수 있습니다.</div>`;
-    return;
-  }
-  const elements = graphElements(graph || { nodes: [], edges: [] });
-  if (elements.length <= 1) {
-    container.innerHTML = `<div class="empty">${escapeHtml(emptyText)}</div>`;
-    return;
-  }
-  if (!state[cyKey]) {
-    state[cyKey] = cytoscape({
-      container,
-      style: graphStyle(),
-      elements,
-      layout: { name: "cose", animate: false, fit: true, padding: 24 },
-    });
-  } else {
-    state[cyKey].elements().remove();
-    state[cyKey].add(elements);
-    state[cyKey].layout({ name: "cose", animate: false, fit: true, padding: 24 }).run();
-  }
-}
 
-function renderMemoryGraph() {
-  renderGraph({
-    containerId: "memoryGraph",
-    graph: state.memoryGraph,
-    cyKey: "cy",
-    emptyText: "표시할 기억 그래프 없음",
-  });
-}
 
-function renderTechStackGraph() {
-  renderGraph({
-    containerId: "techStackGraph",
-    graph: state.techStackGraph,
-    cyKey: "techCy",
-    emptyText: "표시할 기술스택 그래프 없음",
-  });
-}
 
 async function createProject(event) {
   event.preventDefault();
@@ -752,6 +736,26 @@ async function handleClick(event) {
     if (button.dataset.action === "execution-detail") {
       await openExecutionDetail(button.dataset.execution);
     }
+    if (button.dataset.action === "work-record-forget") {
+      const scope = state.workRecordScope;
+      if (!scope) return;
+      await api(`/v1/work-records/${encodeURIComponent(button.dataset.execution)}/forget`, {
+        method: "POST", body: JSON.stringify(scope),
+      });
+      await loadWorkRecords();
+      await loadWikiEntries();
+    }
+    if (["wiki-approved", "wiki-rejected", "wiki-forgotten"].includes(button.dataset.action)) {
+      const scope = state.wikiScope;
+      const entry = state.wikiEntries.find((item) => item.id === button.dataset.wiki);
+      if (!scope || !entry) return;
+      await api(`/v1/wiki/${encodeURIComponent(entry.id)}/review`, {
+        method: "POST",
+        body: JSON.stringify({ ...scope, status: button.dataset.action.slice(5), review_version: entry.review_version }),
+      });
+      await loadWikiEntries();
+      await loadWorkRecords();
+    }
   } catch (error) {
     alert(error.message);
   } finally {
@@ -760,6 +764,14 @@ async function handleClick(event) {
 }
 
 document.addEventListener("click", handleClick);
+$("wikiScope").addEventListener("change", () => {
+  state.wikiScope = state.wikiScopes[$("wikiScope").value] || null;
+  loadWikiEntries().catch((error) => alert(error.message));
+});
+$("wikiSearchBtn").addEventListener("click", () => {
+  loadWikiEntries().catch((error) => alert(error.message));
+});
+
 qs('[data-view="main"]').addEventListener("click", () => setView("main"));
 qs('[data-view="office"]').addEventListener("click", () => setView("office"));
 qs('[data-view="projects"]').addEventListener("click", () => setView("projects"));
@@ -783,6 +795,16 @@ $("unlockControlBtn").addEventListener("click", async () => {
   }
 });
 $("usagePeriod").addEventListener("change", () => loadAll());
+$("workRecordScope").addEventListener("change", async (event) => {
+  const value = event.target.value;
+  state.workRecordScope = value === "" ? null : state.workRecordScopes[Number(value)] || null;
+  try {
+    await loadWorkRecords();
+  } catch (error) {
+    $("workRecordList").textContent = "작업 기억을 조회하지 못했습니다.";
+    alert(error.message);
+  }
+});
 $("extractMemoryBtn").addEventListener("click", async () => {
   $("extractMemoryBtn").disabled = true;
   try {

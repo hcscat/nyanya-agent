@@ -27,6 +27,7 @@
     "config/user_workspaces.example.json",
     "docs/README.md",
     "docs/development_status.md",
+    "docs/llm_wiki.md",
     "docs/core_stabilization_20260910.md",
     "docs/p0_execution_20260912.md",
     "docs/test_catalog_ko.md",

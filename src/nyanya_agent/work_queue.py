@@ -7,7 +7,7 @@ it; callbacks are intentionally not reconstructed from untrusted stored data.
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from nyanya_agent import execution_store as ledger
+from nyanya_agent import execution_store as ledger, conversation_store, work_memory
 from nyanya_agent.task_outcomes import TaskOutcome
 
 
@@ -166,6 +166,8 @@ def finish(db_path, claim_record: dict[str, Any], outcome: TaskOutcome) -> None:
                  (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
                  live_plan['decided_by'] if approved else '', timestamp if approved else None),
             )
+        conversation_store.complete_conn(conn, claim_record, outcome)
+        work_memory.complete_conn(conn, claim_record, outcome)
         ledger.append_event_conn(conn, task_id=task_id, execution_id=execution_id,
                                  event_type="task.result", status=task_status, message="Worker result committed")
 

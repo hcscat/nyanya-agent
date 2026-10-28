@@ -5,7 +5,7 @@ This document retains the low-level adapter/state design. The normal executable 
 2026-09-12 follow-up: [P0 execution contracts and verification](p0_execution_20260912.md) supersede earlier callback-only execution, general-file write-hold and legacy mirroring statements for normal terminal/Discord operations. Retain historical verification and remaining delivery/session/platform limitations; source changes are not deployment.
 
 
-> Historical baseline (2026-09-10): [CORE-STAB-01](core_stabilization_20260910.md) records the earlier schema-v3 design. This feature stage uses schema v5 with atomic reviewed-apply admission and scoped workflow/control indexes; durable conversation/work/Wiki memory is a separate follow-up. The implementation guide and development status supersede older phase descriptions below; retained adapter contracts are not normal command intake.
+> Historical baseline (2026-09-10): [CORE-STAB-01](core_stabilization_20260910.md) records the earlier schema-v3 design. Current normal operations use schema v9, scoped conversation/work/Wiki memory and atomic reviewed-apply admission. The implementation guide and development status supersede older phase descriptions below; retained adapter contracts are not normal command intake.
 
 ## Scope
 
@@ -29,7 +29,7 @@ Current normal work uses one local operation worker path. The adapter/remote-hos
 
 `schema_migrations` and SQLite `user_version` are applied before the execution API starts. A changed checksum for an already-applied migration fails startup instead of silently mutating history.
 
-`codex_sessions` is logical project/session metadata. Durable conversational recall remains a separate follow-up, distinct from hidden provider history. The registry does not prove ownership or resume/deletion of a provider conversation; such integration needs its own verified CLI and recovery contract.
+`codex_sessions` is logical project/session metadata. Normal conversational recall is now implemented in `conversation_store` from the task/result ledger, separate from hidden provider history. The registry does not prove ownership or resume/deletion of a provider conversation; such integration needs its own verified CLI and recovery contract.
 
 ## State model
 
@@ -85,7 +85,7 @@ The following routes require control authentication:
 
 When no token exists, control routes return `503`. A wrong or missing token returns `401` when control authentication is configured.
 
-All operational API clients must supply the control token in request headers. The page shell does not grant data access; the interactive unlock interface is a separate UI follow-up. Tokens must not appear in HTML, URLs or logs.
+The dashboard asks for the token when the operator unlocks data and controls. It keeps the value in JavaScript memory for the current page lifetime and does not place it in HTML, a URL, logs, `localStorage`, or `sessionStorage`.
 
 ## Event updates and SSE compatibility
 
@@ -109,7 +109,7 @@ Create an online backup:
 ./scripts/backup_state.sh
 ```
 
-Recovery sequence for a selected consistent snapshot under an authorized recovery task. After newer work, do not restore an old whole DB: preserve current rows, approvals, delivery state and effect journals during selected-file rollback. Previous-code schema readability is not a safe rollback guarantee.
+Recovery sequence for a selected consistent snapshot under an authorized recovery task. After newer work, do not restore an old whole DB: preserve current rows and provenance/no-store/forget guards during selected-file rollback. Previous-code schema readability is not a safe rollback guarantee.
 
 The sequence below concerns low-level adapter recovery. For normal operations, inspect `recovery` and `why`; explicitly `resume` safe requests or use `reconcile`/`resolve` for file plans. The legacy recovery endpoint is not a replacement for file-plan reconciliation and does not authorize replay.
 

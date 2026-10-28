@@ -102,7 +102,6 @@ def read_system_prompt(config: dict[str, Any]) -> str:
         prompt_path = PROJECT_ROOT / prompt_path
     return prompt_path.read_text(encoding="utf-8")
 
-
 def read_agent_memory(config: dict[str, Any]) -> str:
     memory_path_value = str(config.get("agent_memory_path", "")).strip()
     if not memory_path_value:
@@ -114,34 +113,19 @@ def read_agent_memory(config: dict[str, Any]) -> str:
         return ""
     return memory_path.read_text(encoding="utf-8")
 
-
 def build_system_context(config: dict[str, Any]) -> str:
+    """Compose explicit local baseline assets for optional legacy callers.
+
+    This helper does not screen context or inject it into the normal worker.
+    """
     system_prompt = read_system_prompt(config).strip()
     agent_memory = read_agent_memory(config).strip()
     if not agent_memory:
         return system_prompt
     return f"{system_prompt}\n\n# NyaNya Agent Memory\n\n{agent_memory}"
 
-
-def build_dynamic_memory_context(prompt: str, *, owner_key: str | None = None, limit: int | None = None) -> str:
-    if not parse_bool(os.getenv("NYANYA_MEMORY_RETRIEVAL_ENABLED", "true")):
-        return ""
-    if not prompt.strip():
-        return ""
-    try:
-        from nyanya_agent import dashboard_store
-
-        memories = dashboard_store.search_approved_memories(
-            prompt,
-            owner_key=owner_key,
-            limit=limit or int(os.getenv("NYANYA_MEMORY_RETRIEVAL_LIMIT", "5")),
-        )
-        return dashboard_store.format_memory_context(
-            memories,
-            char_limit=int(os.getenv("NYANYA_MEMORY_CONTEXT_MAX_CHARS", "1800")),
-        )
-    except Exception:  # noqa: BLE001 - memory retrieval must never break the main answer path.
-        return ""
+def build_messages(config: dict[str, Any]) -> list[dict[str, str]]:
+    return [{"role": "system", "content": build_system_context(config)}]
 
 
 def request_json(url: str, payload: dict[str, Any] | None, timeout: int, headers: dict[str, str] | None = None) -> Any:
@@ -484,10 +468,6 @@ def save_session(config: dict[str, Any], messages: list[dict[str, str]]) -> path
     return path
 
 
-def build_messages(config: dict[str, Any]) -> list[dict[str, str]]:
-    return [{"role": "system", "content": build_system_context(config)}]
-
-
 def run_single_prompt(config: dict[str, Any], prompt: str) -> int:
     from nyanya_agent.bridge_policy import default_codex_workdir
     from nyanya_agent.operation_service import OperationService
@@ -512,8 +492,15 @@ def run_single_prompt(config: dict[str, Any], prompt: str) -> int:
 def run_repl(config: dict[str, Any]) -> int:
     from nyanya_agent.bridge_policy import default_codex_workdir
     from nyanya_agent.operation_service import OperationService
+    from nyanya_agent import conversation_store, execution_store
     service = OperationService()
-    messages: list[dict[str, str]] = []
+    conversation_key = execution_store.new_id('terminal')
+    workspace = default_codex_workdir()
+
+    def save_history():
+        # Reuse the screened private export used by the connectors.
+        from nyanya_agent.bridge_store import save_conversation
+        return save_conversation(config, service.path, 'operator', conversation_key, workspace)
     print(f"{agent_display_name(config)} — /exit, /reset, /save, /config, /settings, /dashboard")
     print("recovery 미완료 목록 · why 작업ID 원인 · plan 변경안ID · approve 변경안ID hash")
     try:
@@ -527,11 +514,11 @@ def run_repl(config: dict[str, Any]) -> int:
             if prompt in {'/exit', '/quit'}:
                 break
             if prompt == '/reset':
-                messages.clear()
+                conversation_store.reset(service.path, 'operator', conversation_key, workspace)
                 print('대화 문맥을 초기화했습니다. 저장된 작업은 유지됩니다.')
                 continue
             if prompt == '/save':
-                target = save_session(config, messages)
+                target = save_history()
                 print(f'Saved: {target}' if target else 'Transcript saving is disabled.')
                 continue
             if prompt == '/config':
@@ -545,19 +532,18 @@ def run_repl(config: dict[str, Any]) -> int:
                 print(f"http://{os.getenv('NYANYA_DASHBOARD_HOST', '127.0.0.1')}:{os.getenv('NYANYA_DASHBOARD_PORT', '8765')}")
                 continue
             try:
-                control = service.control(prompt, 'operator')
+                control = service.control(prompt, 'operator', conversation_key=conversation_key)
                 if control is not None:
                     print(control)
                     continue
-                task = service.submit(prompt, default_codex_workdir(), 'operator')
+                task = service.submit(prompt, workspace, 'operator', conversation_key=conversation_key)
                 answer = service.wait(task['id'], 'operator')
-                messages.extend([{'role': 'user', 'content': prompt}, {'role': 'assistant', 'content': answer.text}])
                 print(answer.text)
             except (ValueError, RuntimeError, OSError) as exc:
                 print(f'작업 처리 실패: {type(exc).__name__}', file=sys.stderr)
     finally:
         service.close()
-        target = save_session(config, messages)
+        target = save_history()
         if target:
             print(f'Session saved: {target}')
     return 0

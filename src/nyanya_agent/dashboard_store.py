@@ -16,6 +16,7 @@ from typing import Any
 from uuid import uuid4
 
 from nyanya_agent import database as db
+from nyanya_agent.context_security import sensitive_content
 
 
 DEFAULT_DB_PATH = db.resolve_db_path()
@@ -345,6 +346,8 @@ def get_request(request_id: str, *, db_path: str | Path | None = None) -> dict[s
             if result:
                 request['result_summary'] = result['response']
         return request
+
+
 
 
 def create_project(
@@ -820,6 +823,85 @@ def importance_breakdown(
     }
 
 
+def _memory_source_state_conn(conn, request_id, owner_key=None):
+    """Legacy derivations respect source opt-out and exact current work provenance.
+
+    Unlinked/manual legacy memories retain their existing contract. A linked
+    operation without screened successful work evidence stays hidden, not erased.
+    Only explicit storage refusal or an exact forgotten source permits erasure.
+    """
+    from nyanya_agent import work_memory
+
+    if request_id is None:
+        return owner_key, True, False
+    source = conn.execute("SELECT * FROM request_read_model WHERE id=?", (request_id,)).fetchone()
+    if not source:
+        return None, False, False
+    task = conn.execute(
+        "SELECT t.id,t.requested_by,t.current_execution_id,t.status,o.spec_json FROM agent_tasks t "
+        "LEFT JOIN task_operations o ON o.task_id=t.id WHERE t.source_request_id=?", (request_id,),
+    ).fetchone()
+    source_owner = task["requested_by"] if task else (
+        f"{source['source']}-user:{source['user_id']}" if source["user_id"] else "operator:local"
+    )
+    if task and owner_key is not None and owner_key != source_owner:
+        return source_owner, False, False
+    prompt, result = source["prompt"] or "", source["result_summary"] or ""
+    refused = work_memory._storage_disabled(prompt)
+    if task:
+        refused = refused or bool(conn.execute(
+            "SELECT 1 FROM task_work_records WHERE source_task_id=? AND owner_key=? AND status='forgotten'",
+            (task["id"], source_owner),
+        ).fetchone())
+        if task["spec_json"]:
+            try:
+                spec = json.loads(task["spec_json"])
+                refused = refused or work_memory._storage_disabled(spec["prompt"])
+            except (KeyError, TypeError, ValueError):
+                return source_owner, False, refused
+    if refused:
+        return source_owner, False, True
+    if (len(prompt.encode()) + len(result.encode()) > work_memory.MAX_SOURCE_BYTES
+            or sensitive_content(prompt) or sensitive_content(result)):
+        return source_owner, False, False
+    if task and task["spec_json"]:
+        if task["status"] != "completed" or not conn.execute(
+            "SELECT 1 FROM task_work_records m JOIN task_results r ON r.execution_id=m.execution_id "
+            "JOIN executions e ON e.id=m.execution_id WHERE m.task_id=? AND m.source_task_id=? "
+            "AND m.execution_id=? AND m.owner_key=? AND m.workspace_root=? AND m.status='retained' "
+            "AND m.text_status='screened' AND r.task_id=m.task_id AND r.outcome='succeeded' "
+            "AND e.task_id=m.task_id AND e.status='succeeded'",
+            (task["id"], task["id"], task["current_execution_id"], source_owner, spec.get("workspace")),
+        ).fetchone():
+            return source_owner, False, False
+    return source_owner, True, False
+
+
+def _memory_visible_conn(conn, memory):
+    return (_memory_source_state_conn(conn, memory["source_request_id"], memory["owner_key"])[1]
+            and not sensitive_content(memory["title"]) and not sensitive_content(memory["content"]))
+
+
+def _clear_memory_source_conn(conn, request_id, owner_key):
+    conn.execute(
+        "UPDATE memory_items SET status='archived',title='Forgotten memory: '||id,content='',updated_at=? "
+        "WHERE source_request_id=? AND owner_key=? "
+        "AND (status<>'archived' OR title<>'Forgotten memory: '||id OR content<>'')",
+        (now_iso(), request_id, owner_key),
+    )
+
+
+def forget_memory_candidates_conn(conn, execution_id):
+    """The caller holds the scoped work/Wiki forget transaction; never touch ledgers."""
+    sources = conn.execute(
+        "SELECT DISTINCT t.source_request_id,m.owner_key FROM task_work_records m JOIN agent_tasks t "
+        "ON t.id IN (m.task_id,m.source_task_id) AND t.requested_by=m.owner_key "
+        "WHERE m.execution_id=? AND m.status='forgotten' AND t.source_request_id IS NOT NULL", (execution_id,),
+    ).fetchall()
+    for source in sources:
+        _clear_memory_source_conn(conn, source["source_request_id"], source["owner_key"])
+
+
 def create_memory_item_conn(
     conn: sqlite3.Connection,
     *,
@@ -885,6 +967,7 @@ def extract_memory_candidates_from_requests(
     created: list[str] = []
     skipped = 0
     with connect(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
         candidates = rows(
             conn,
             """
@@ -898,6 +981,12 @@ def extract_memory_candidates_from_requests(
             (limit,),
         )
         for request in candidates:
+            source_owner, allowed, refused = _memory_source_state_conn(conn, request["id"], owner_key)
+            if not allowed:
+                if refused:
+                    _clear_memory_source_conn(conn, request["id"], source_owner)
+                skipped += 1
+                continue
             prompt = redact_sensitive(request.get("prompt") or "")
             result_summary = redact_sensitive(request.get("result_summary") or "")
             if len(prompt.strip()) < 6 and not result_summary.strip():
@@ -920,7 +1009,7 @@ def extract_memory_candidates_from_requests(
                 continue
             memory_id = create_memory_item_conn(
                 conn,
-                owner_key=owner_key or (f"{request['source']}-user:{request['user_id']}" if request["user_id"] else "operator:local"),
+                owner_key=owner_key or source_owner,
                 memory_type=memory_type,
                 title=title,
                 content=content,
@@ -954,7 +1043,7 @@ def list_memories(
         params.append(owner_key)
     where = "WHERE " + " AND ".join(clauses) if clauses else ""
     with connect(db_path) as conn:
-        return rows(
+        memories = rows(
             conn,
             f"""
             SELECT *
@@ -965,6 +1054,7 @@ def list_memories(
             """,
             (*params, limit),
         )
+        return [memory for memory in memories if _memory_visible_conn(conn, memory)]
 
 
 def _fts_query(text: str, *, limit: int = 8) -> str:
@@ -1038,6 +1128,7 @@ def search_approved_memories(
                 """,
                 (*owner_keys, *params, max_limit),
             )
+        memories = [memory for memory in memories if _memory_visible_conn(conn, memory)]
         if mark_used and memories:
             timestamp = now_iso()
             ids = [memory["id"] for memory in memories]
@@ -1052,7 +1143,7 @@ def search_approved_memories(
                 action="memory.retrieved",
                 entity_type="memory_item",
                 entity_id=",".join(ids),
-                detail={"query": safe_summary(query, 200), "count": len(ids), "owner_key": owner_key or "global"},
+                detail={"count": len(ids)},
             )
     return memories
 
@@ -1102,12 +1193,24 @@ def update_memory(
     if confidence is not None:
         updates["confidence"] = max(0.0, min(1.0, confidence))
     with connect(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
         current = conn.execute("SELECT * FROM memory_items WHERE id = ?", (memory_id,)).fetchone()
-        if current is None:
+        if current is None or not _memory_visible_conn(conn, current):
             return None
+        if any(sensitive_content(str(updates.get(field, current[field]))) for field in ("title", "content")):
+            return None
+        changed_fields = [field for field, value in updates.items() if field != "updated_at" and current[field] != value]
         assignments = ", ".join(f"{field} = ?" for field in updates)
         conn.execute(f"UPDATE memory_items SET {assignments} WHERE id = ?", [*updates.values(), memory_id])
-        log_audit(conn, actor="operator", action="memory.updated", entity_type="memory_item", entity_id=memory_id, detail=updates)
+        if changed_fields:
+            log_audit(
+                conn,
+                actor="operator",
+                action="memory.updated",
+                entity_type="memory_item",
+                entity_id=memory_id,
+                detail={"changed_fields": changed_fields},
+            )
         return dict(conn.execute("SELECT * FROM memory_items WHERE id = ?", (memory_id,)).fetchone())
 
 
@@ -1130,160 +1233,3 @@ def natural_tokens(text: str, *, limit: int = 5) -> list[str]:
         if len(tokens) >= limit:
             break
     return tokens
-
-
-def compact_memory_label(memory: dict[str, Any], *, max_tokens: int = 4) -> str:
-    title = str(memory.get("title") or "")
-    content = str(memory.get("content") or "")
-    title = re.sub(r"^[^:：]{1,24}[:：]\s*", "", title).strip()
-    tokens = natural_tokens(f"{title} {content}", limit=max_tokens)
-    if tokens:
-        return " · ".join(tokens)
-    return safe_summary(title or content, 34)
-
-
-def tech_stack_hits(memories: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    hits: dict[str, dict[str, Any]] = {}
-    for memory in memories:
-        text = f"{memory.get('title', '')}\n{memory.get('content', '')}".lower()
-        for key, (category, label) in TECH_STACK_CATALOG.items():
-            if re.search(rf"(?<![a-z0-9]){re.escape(key)}(?![a-z0-9])", text):
-                entry = hits.setdefault(
-                    label,
-                    {
-                        "label": label,
-                        "category": category,
-                        "count": 0,
-                        "importance": 0.0,
-                        "memory_ids": [],
-                    },
-                )
-                entry["count"] += 1
-                entry["importance"] = max(float(entry["importance"]), float(memory.get("importance") or 0))
-                entry["memory_ids"].append(memory["id"])
-    return hits
-
-
-def memory_graph(
-    *,
-    owner_key: str | None = None,
-    status: str | None = None,
-    limit: int = 80,
-    db_path: str | Path | None = None,
-) -> dict[str, Any]:
-    memories = list_memories(status=status, owner_key=owner_key, limit=limit, db_path=db_path)
-    root_id = f"owner:{owner_key or 'all'}"
-    nodes: list[dict[str, Any]] = [
-        {"id": root_id, "label": "기억", "kind": "root", "importance": 100, "status": "root"}
-    ]
-    edges: list[dict[str, Any]] = []
-    type_counts: dict[str, int] = {}
-    for memory in memories:
-        type_counts[memory["memory_type"]] = type_counts.get(memory["memory_type"], 0) + 1
-    for memory_type, count in sorted(type_counts.items(), key=lambda item: item[0]):
-        type_id = f"type:{memory_type}"
-        nodes.append(
-            {
-                "id": type_id,
-                "label": MEMORY_TYPE_LABELS.get(memory_type, memory_type),
-                "kind": "type",
-                "count": count,
-                "importance": min(100, 45 + count * 5),
-                "status": "type",
-            }
-        )
-        edges.append({"source": root_id, "target": type_id, "label": "has_type", "weight": count})
-    for memory in memories:
-        node_id = memory["id"]
-        nodes.append(
-            {
-                "id": node_id,
-                "label": compact_memory_label(memory),
-                "full_label": memory["title"],
-                "kind": "memory",
-                "memory_type": memory["memory_type"],
-                "importance": memory["importance"],
-                "confidence": memory["confidence"],
-                "status": memory["status"],
-                "content": memory["content"],
-            }
-        )
-        edges.append(
-            {
-                "source": f"type:{memory['memory_type']}",
-                "target": node_id,
-                "label": "contains",
-                "weight": max(1.0, float(memory["importance"]) / 20.0),
-            }
-        )
-    return {
-        "nodes": nodes,
-        "edges": edges,
-        "stats": {
-            "memories": len(memories),
-            "types": len(type_counts),
-            "pending": sum(1 for memory in memories if memory["status"] == "pending"),
-            "approved": sum(1 for memory in memories if memory["status"] == "approved"),
-        },
-    }
-
-
-def tech_stack_graph(
-    *,
-    owner_key: str | None = None,
-    status: str | None = None,
-    limit: int = 120,
-    db_path: str | Path | None = None,
-) -> dict[str, Any]:
-    memories = list_memories(status=status, owner_key=owner_key, limit=limit, db_path=db_path)
-    hits = tech_stack_hits(memories)
-    root_id = "tech:root"
-    nodes: list[dict[str, Any]] = [
-        {"id": root_id, "label": "관심사 기술스택", "kind": "root", "importance": 100, "status": "root"}
-    ]
-    edges: list[dict[str, Any]] = []
-    categories = sorted({str(hit["category"]) for hit in hits.values()})
-    for category in categories:
-        category_id = f"tech-category:{category}"
-        count = sum(1 for hit in hits.values() if hit["category"] == category)
-        nodes.append(
-            {
-                "id": category_id,
-                "label": category,
-                "kind": "type",
-                "count": count,
-                "importance": min(100, 50 + count * 8),
-                "status": "type",
-            }
-        )
-        edges.append({"source": root_id, "target": category_id, "label": "category", "weight": count})
-    for label, hit in sorted(hits.items(), key=lambda item: (-int(item[1]["count"]), item[0])):
-        tech_id = f"tech:{label}"
-        nodes.append(
-            {
-                "id": tech_id,
-                "label": label,
-                "kind": "technology",
-                "count": hit["count"],
-                "importance": min(100, max(35.0, float(hit["importance"]))),
-                "status": "technology",
-                "content": f"{label}: 관련 기억 {hit['count']}개",
-            }
-        )
-        edges.append(
-            {
-                "source": f"tech-category:{hit['category']}",
-                "target": tech_id,
-                "label": "contains",
-                "weight": max(1, int(hit["count"])),
-            }
-        )
-    return {
-        "nodes": nodes,
-        "edges": edges,
-        "stats": {
-            "technologies": len(hits),
-            "categories": len(categories),
-            "memories": len(memories),
-        },
-    }

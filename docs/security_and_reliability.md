@@ -14,13 +14,29 @@ Codex final-result files have the same 4 MB limit as process output. The runner 
 
 ## Dashboard data access
 
-Dashboard execution and control APIs expose authenticated ledger evidence.
+The dashboard uses local scripts only. Memory/technology graphs and the mutable external visualization dependency were removed; project, task and request history and authenticated memory candidate review remain available.
 
 All `/v1/` routes require the dashboard token, including reads from loopback. Unexpected Host headers are rejected. Origin headers must match the request origin or an explicitly configured CORS origin. Localhost, IPv4 loopback and IPv6 loopback are accepted hosts; `NYANYA_DASHBOARD_ALLOWED_HOSTS` adds exact hostnames without ports or wildcards. This does not expose the service to other networks.
 
-The page shell and health endpoint remain available without a token. API clients must supply authentication in request headers; the page shell does not grant data access. Development dashboard startup creates a separate owner-only token under its development state directory and never prints it. Production token configuration remains separate. Tokens must not appear in URLs, logs or Git.
+The page shell and health endpoint remain available without a token. Unlock the page to read operational data; authentication stays only in page memory and request headers. Development dashboard startup creates a separate owner-only token under its development state directory and never prints it. Production token configuration remains separate. Tokens must not appear in URLs, logs or Git.
 
 Importing the dashboard module or requesting CLI help does not initialize the database or start a server. The ASGI application is created by an explicit factory; the legacy `module:app` entry point initializes lazily when explicitly accessed. Installation probes must still set an isolated working directory, code root, state root, environment-file path and database path for every subprocess.
+
+## Private completed-work records
+
+Schema v8 adds bounded successful task/attempt records inside the existing fenced result transaction. Request/result excerpts are limited to 1 KiB/2 KiB and screened before storage and again before context transfer. Saved model answers are historical conclusions, not verified tests or effects. Applied plans require matching owner, workspace, parent project and applied journal evidence.
+
+Retrieval uses exact owner/workspace/project scope with no global fallback, scans at most 64 recent records and supplies at most 8 KiB only to the result model. The current snapshot and conversation budget take priority; assessment receives no additional work records. Explicit current-input/history exclusion is respected. Questions are not reused as answers. Records expire from retrieval after 90 days; this is not automatic deletion of task evidence or a complete long-term Wiki.
+
+The authenticated operator can list a selected scope or forget a specific record. Forgetting clears private excerpts and prevents their reuse while preserving task, attempt, result, approval and effect history. NYANYA_WORK_MEMORY_ENABLED disables new record storage and automatic retrieval. No extra LLM call or legacy memory refinement is enabled. Provider session deletion requires supported exact-ID operations and proven ownership; never infer that the newest provider session is a disposable NyaNya session.
+
+## Topic memory and privacy controls
+
+Schema v9 adds cited Wiki topic revisions in the existing completion transaction. The existing result-model call returns up to three optional summaries; malformed/sensitive notes do not fail valid work. Owner/channel/workspace/project/reset and current successful source evidence are rechecked at capture, recall and authenticated review. Summaries remain historical claims, not authorization or verified current facts. See [LLM Wiki](llm_wiki.md).
+
+Current-only suppresses present recall. No-store excludes future derived memory and source transfer through recent/lexical conversation recall or private export. Source forgetting clears all same-source work/Wiki/linked legacy text, including superseded/rejected notes, while keeping original tasks/results/approvals/journals and unrelated sources. Legacy extraction/review also checks refusal, forgetting and successful screened provenance atomically. This is not erasure of SQLite pages, backups or provider conversations.
+
+Reviewed file approval and apply admission share one transaction. Exact plan/hash/child relations deduplicate repeat approvals; conflicting older children stay held. Memory selection is never a file approval. Older code reading v9 is not safe rollback proof; preserve current privacy guards and new work rows.
 
 ## Delivery, controls and lifecycle
 
@@ -64,7 +80,7 @@ After an SDK send starts, cancellation or failure can leave delivery uncertain. 
 
 The optional security tooling requires urllib3 2.8.0 or later within major version 2. Audit the actual installed dependency set, including development tools. Runtime installations should contain only required runtime extras; a source dependency change does not update an existing operating environment.
 
-Migration 5 adds scoped indexes for workflow delivery notices and control selections. The worker uses lightweight state reads, checks for eligible queued work before claiming, and separates recovery/heartbeat intervals from the short work poll. These changes reduce idle writes and history scans. Measure representative workload latency before making broader performance or throughput claims.
+Migration 5 adds scoped indexes for workflow delivery notices and control selections. The worker uses lightweight state reads, checks for eligible queued work before claiming, and separates recovery/heartbeat intervals from the short work poll. These changes reduce idle writes and history scans. Measure representative workload latency before making broader performance or throughput claims. Migration 6 adds the newest-first audit index. Repeated heartbeat updates no longer generate audit rows, and memory audits omit query text and edited values.
 
 ## Artifact and publication boundaries
 
@@ -84,6 +100,10 @@ All project `AGENTS.md` and `AGENTS.override.md` files, including root and neste
 
 - `test_apply_admission.py`: thread/process repeat approvals, single child/event and crash rollback.
 
+- `test_conversation_state.py` / `test_conversation_retention.py`: ledger scope/order, reset, late results, older lexical recall and current prompt intake.
+- `test_conversation_worker.py` / `test_conversation_dispatch.py`: natural questions, safe follow-ups, controls and screened private export.
+- `test_wiki_store.py` / `test_dashboard_wiki.py`: provenance, topic conflicts/revisions, recall limits, forgetting and authenticated review.
+- `test_work_memory.py` / `test_memory_store.py`: no-store/forget and legacy successful-source filtering.
 Use the checked-in tests for collected counts. Run the full suite and release/privacy gate for code/release changes as well as focused regressions. Documentation-only changes use structural/link/privacy/package verification; they do not require repeating runtime acceptance. Installed health, live model completion, connector delivery and restart recovery need their own evidence; they are not inferred from unit tests.
 
 ## Release-candidate boundary corrections
@@ -100,7 +120,7 @@ Discord task-list aliases, including `/tasks` and administrator-only `/tasks all
 
 Snapshot availability distinguishes a verified missing path from private/sensitive filtering, unreadable data, unsupported types/encoding and bounds. Availability metadata uses fixed path/status fields and shares the prompt budget. An excluded or unlisted file is not evidence of absence. Empty public env examples and credential-file references are not embedded credentials; referenced files are never opened by that exception, and credential literals and known secret values remain screened.
 
-The authenticated API and OperationSpec share `auto`, `flash`, `luna`, `sol` and `astra` profile validation. An explicit profile retains the Flash assessment step.
+The authenticated API and OperationSpec share `auto`, `flash`, `luna`, `sol` and `astra` profile validation. An explicit profile retains the Flash assessment step. Generic requests not to use memory disable conversation, completed-work and Wiki recall together; a request not to store a turn is a separate storage boundary, and reset remains explicit.
 
 Discord claims a recorded source/channel/user/message identity atomically before attachment downloads, task/control mutation or acknowledgement. Duplicate events do not repeat those effects. With dashboard recording disabled, no additional request row, payload or event is stored: an existing receipt is checked with a read-only connection, then a process-local cache retains at most 4096 identities. Restart, multiple bridge processes or oldest-entry eviction can admit duplicates in that mode. SQLite read-only WAL access may involve sidecar files; this is a no-additional-request-record guarantee, not a claim of zero filesystem activity. Claim failures hold execution. A crash after committing the receipt but before task submission leaves a held/orphan receipt: replay is suppressed, so inspect the ledger and submit a new explicit request if needed. Existing uncertain-delivery handling remains conservative; this is not an exactly-once network delivery guarantee.
 

@@ -117,6 +117,7 @@ def test_public_distribution_has_build_helper_and_resolvable_documentation(tmp_p
     assert CHECKS["package_errors"](target, paths) == []
     assert "scripts/mark_dist_executable.js" in paths
     assert "docs/test_catalog_ko.md" in paths
+    assert "docs/llm_wiki.md" in paths
     assert "tests/conftest.py" in paths
     manifest = json.loads((target / "package.json").read_text())
     assert not any(pattern in {"docs/", "docs/**", "docs/**/*"} for pattern in manifest["files"])
