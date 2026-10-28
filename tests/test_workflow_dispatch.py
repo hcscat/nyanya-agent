@@ -256,19 +256,24 @@ def test_wait_reports_blocked_retry_when_only_prior_result_exists(tmp_path, monk
     service.close()
 
 
-@pytest.mark.parametrize("content", [
-    "남은 작업은 무엇인가?", "!nyanya " + READ_ONLY_SAFETY_QUERY,
-    *["!nyanya " + text for text in NO_REEXECUTION_QUERIES],
+@pytest.mark.parametrize(("content", "admin", "global_scope"), [
+    ("남은 작업은 무엇인가?", False, False), ("!nyanya " + READ_ONLY_SAFETY_QUERY, False, False),
+    *[("!nyanya " + text, False, False) for text in NO_REEXECUTION_QUERIES],
+    *[("!nyanya " + alias, False, False) for alias in ("/tasks", "/task", "/queue", "/작업목록")],
+    *[("!nyanya " + alias + " all", admin, True)
+      for alias in ("tasks", "/tasks", "/task", "/queue", "/작업목록") for admin in (False, True)],
 ])
-def test_discord_query_uses_ledger_without_creating_operation(tmp_path, monkeypatch, content):
+def test_discord_query_uses_ledger_without_creating_operation(tmp_path, monkeypatch, content, admin, global_scope):
     from nyanya_agent import discord_bridge
 
     path = tmp_path / "ledger.db"
     monkeypatch.setenv("NYANYA_DASHBOARD_DB_PATH", str(path))
     monkeypatch.setenv("NYANYA_DISCORD_BOT_TOKEN", "fixture")
     monkeypatch.setenv("NYANYA_ALLOW_UNLISTED", "true")
+    monkeypatch.setenv("NYANYA_OWNER_USER_IDS", "123" if admin else "")
     service = OperationService(path)
-    _insert_task(path, "task_owned", "discord-user:123")
+    _insert_task(path, "task_owned", "discord-user:123", "queued")
+    _insert_task(path, "task_other_owner", "discord-user:987", "queued")
     service.close()
     sent = []
 
@@ -319,12 +324,37 @@ def test_discord_query_uses_ledger_without_creating_operation(tmp_path, monkeypa
 
     monkeypatch.setattr(discord_bridge, "run_client", fake_run_client)
     assert discord_bridge.main() == 0
-    assert any("task_owned" in item for item in sent)
+    assert any("task_owned" in item for item in sent) == (not global_scope or admin)
+    assert any("task_other_owner" in item for item in sent) == (global_scope and admin)
+    if global_scope and not admin:
+        assert any("관리자만" in item for item in sent)
     with db.connect(path) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM agent_tasks").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM agent_tasks").fetchone()[0] == 2
         assert conn.execute("SELECT COUNT(*) FROM task_operations").fetchone()[0] == 0
         assert conn.execute("SELECT mode FROM agent_requests").fetchone()[0] == "control"
-        assert _status(path, "task_owned") == "failed"
+        assert _status(path, "task_owned") == "queued"
+
+
+@pytest.mark.parametrize("text", [
+    "What is the timeout in worker.py?",
+    "Explain how timeout works in process_runner.py",
+    "HTTP timeout은 무엇인가?",
+    "다른 서버의 실행 제한시간은 몇 초인가?",
+    "worker.py의 타임아웃을 설명해줘.",
+    "What is the timeout for an HTTP request?",
+    "Explain how timeout works in `process_runner.py`",
+])
+def test_technical_timeout_questions_remain_work_requests(text):
+    assert classify(text).kind == "work_request"
+
+
+@pytest.mark.parametrize("text", [
+    "현재 실행 제한시간은?", "현재 실행 제한시간은 몇초로 되어있는가?",
+    "냐냐의 타임아웃은 얼마인가?", "실행 제한 시간을 알려주세요.",
+    "What is your timeout?", "What is the agent's execution time limit?",
+])
+def test_bounded_agent_timeout_questions_remain_local_controls(text):
+    assert classify(text).kind == "runtime_status"
 
 
 def test_cancel_selection_rejects_target_changed_after_list(tmp_path, monkeypatch):

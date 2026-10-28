@@ -4,6 +4,8 @@
 
 The task-list classifier now accepts complete negative rerun/resume qualifiers while holding mixed-effect requests for clarification. `tests/test_workflow_dispatch.py` covers classification, unchanged tasks/approvals, owner/conversation selection fences and synthetic Discord intake without model submission. This is a source correction; live connector acceptance and operating deployment remain separate. The dated review below is historical evidence, not the current PR validation result.
 
+Ordinary Codex review identified four additional corrections: destination-scoped automatic reminders/receipts, preserved Discord task-list aliases and admin checks, bounded agent-limit detection that leaves technical timeout questions as work, and safe blocked outcomes for unavailable upload workspaces. Focused regressions cover periodic and completion notices, parent/child origin inheritance, cross-channel/connector/owner separation, alias permissions, model intake and upload confirmation without effects. These are source contracts and synthetic test evidence, not an installed-service security certification.
+
 ## Public review guidance
 
 The reviewed root `AGENTS.md` now supplies contributor instructions and three scoped code-review rules; `SECURITY.md` supplies the threat model, security invariants, finding criteria and reporting policy. The Git release check permits only the explicitly approved root guide; nested/override instructions remain blocked, and npm/source-install checks still exclude all AGENTS files. `SECURITY.md` is included as public distribution policy. These files do not enable automatic reviews, private vulnerability reporting or a security scanner, and do not establish operational deployment or a completed security scan.

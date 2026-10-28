@@ -9,6 +9,154 @@ from nyanya_agent.task_outcomes import TaskOutcome
 from nyanya_agent import reviewed_changes as files
 
 
+def scoped_notice_task(path, *, source="discord", channel="100", owner="operator", title="fixture", status="failed"):
+    from nyanya_agent import dashboard_store
+
+    request = dashboard_store.create_agent_request(
+        source=source, channel_id=channel, user_id=owner.removeprefix("discord-user:"), prompt=title, db_path=path,
+    )
+    return ledger.create_task(title=title, status=status, requested_by=owner, source_request_id=request, db_path=path)
+
+
+def test_notice_scope_and_receipt_are_bound_to_connector_channel_and_owner(tmp_path):
+    path = tmp_path / "state.db"
+    private = scoped_notice_task(path, channel="100", title="private fixture")
+    shared = scoped_notice_task(path, channel="200", title="shared fixture")
+    other_connector = scoped_notice_task(path, source="telegram", channel="200", title="other connector")
+    other_owner = scoped_notice_task(path, channel="200", owner="other", title="other owner")
+    no_origin = ledger.create_task(title="unbound fixture", status="failed", db_path=path)
+    first = notices.prepare(path, "operator", source="discord", channel_id="100")
+    second = notices.prepare(path, "operator", source="discord", channel_id="200")
+    assert private["id"] in first.text and shared["id"] not in first.text
+    assert shared["id"] in second.text
+    assert all(task["id"] not in second.text for task in (private, other_connector, other_owner, no_origin))
+    notices.delivered(path, first)
+    assert notices.prepare(path, "operator", source="discord", channel_id="100") is None
+    assert notices.prepare(path, "operator", source="discord", channel_id="200") == second
+    notices.delivered(path, second)
+    assert notices.prepare(path, "operator", source="discord", channel_id="200") is None
+    assert private["id"] not in notices.prepare(path, "operator").text
+    assert notices.prepare(path, "operator", source="discord", channel_id="missing") is None
+
+
+def test_completion_notice_uses_original_request_destination(tmp_path, monkeypatch):
+    from nyanya_agent.operation_service import OperationService
+    from nyanya_agent import dashboard_store
+
+    path, root, completed = queued_task(tmp_path, monkeypatch)
+    private = scoped_notice_task(path, channel="100", title="private fixture")
+    shared = scoped_notice_task(path, channel="200", title="shared fixture")
+    request = dashboard_store.create_agent_request(source="discord", channel_id="200", user_id="operator", db_path=path)
+    with db.connect(path) as conn:
+        conn.execute("UPDATE agent_tasks SET source_request_id=? WHERE id=?", (request, completed["id"]))
+    record = store.claim(path, "worker")
+    store.finish(path, record, TaskOutcome("succeeded", "completed fixture"))
+    service = OperationService(path, generation="worker")
+    sent = []
+    try:
+        service.deliver(completed["id"], "operator", sent.append, 1)
+    finally:
+        service.close()
+    assert len(sent) == 1 and sent[0].startswith("completed fixture")
+    assert shared["id"] in sent[0] and private["id"] not in sent[0]
+    assert notices.prepare(path, "operator", source="discord", channel_id="100") is not None
+
+
+def test_child_notice_inherits_parent_request_destination(tmp_path, monkeypatch):
+    from nyanya_agent import dashboard_store
+
+    path, root, parent = queued_task(tmp_path, monkeypatch)
+    request = dashboard_store.create_agent_request(source="discord", channel_id="100", user_id="operator", db_path=path)
+    with db.connect(path) as conn:
+        conn.execute("UPDATE agent_tasks SET source_request_id=? WHERE id=?", (request, parent["id"]))
+    store.finish(path, store.claim(path, "worker"), TaskOutcome("succeeded", "parent completed"))
+    child = store.submit(path, OperationSpec(workspace=str(root), prompt="child fixture"),
+                         "operator", "worker", parent_task_id=parent["id"])
+    store.finish(path, store.claim(path, "worker"), TaskOutcome("failed", "child held"))
+    notice = notices.prepare(path, "operator", source="discord", channel_id="100")
+    assert child["id"] in notice.text
+    assert notices.prepare(path, "operator", source="discord", channel_id="200") is None
+    state = store.delivery_state(path, child["id"], "operator")
+    assert (state["request_source"], state["request_channel_id"]) == ("discord", "100")
+
+
+def test_periodic_discord_recovery_does_not_cross_channels(tmp_path, monkeypatch):
+    import asyncio
+    import sys
+    from types import SimpleNamespace
+    from nyanya_agent import discord_bridge
+
+    path = tmp_path / "state.db"
+    private = scoped_notice_task(path, channel="100", owner="discord-user:owner", title="private fixture")
+    shared = scoped_notice_task(path, channel="200", owner="discord-user:owner", title="shared fixture")
+    monkeypatch.setenv("NYANYA_DASHBOARD_DB_PATH", str(path))
+    monkeypatch.setenv("NYANYA_DISCORD_BOT_TOKEN", "synthetic-fixture")
+    monkeypatch.setenv("NYANYA_DISCORD_ALLOWED_CHANNEL_IDS", "100,200")
+    sent = {100: [], 200: []}
+
+    class Channel:
+        def __init__(self, ident):
+            self.id = ident
+
+        async def send(self, text):
+            sent[self.id].append(text)
+
+    class Client:
+        user = None
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def event(self, function):
+            setattr(self, function.__name__, function)
+            return function
+
+        def is_closed(self):
+            return False
+
+        def get_channel(self, ident):
+            return Channel(ident)
+
+    class Store:
+        def __init__(self, _config):
+            self.operations = SimpleNamespace(path=path)
+            self.durable_tasks = SimpleNamespace(db_path=path)
+
+        def workspace_for_owner(self, _owner):
+            return tmp_path
+
+        def close(self):
+            pass
+
+    fake = SimpleNamespace(Intents=SimpleNamespace(default=lambda: SimpleNamespace()),
+                           AllowedMentions=SimpleNamespace(none=lambda: None), Client=Client,
+                           utils=SimpleNamespace(setup_logging=lambda: None))
+    monkeypatch.setitem(sys.modules, "discord", fake)
+    monkeypatch.setattr(discord_bridge, "parse_args", lambda: SimpleNamespace(config=None, check_config=False))
+    monkeypatch.setattr(discord_bridge, "load_runtime_config", lambda _: {})
+    monkeypatch.setattr(discord_bridge, "NyaNyaConversationStore", Store)
+
+    async def run(client, _token, _store):
+        before = asyncio.all_tasks()
+        await client.on_ready()
+        background = asyncio.all_tasks() - before
+        try:
+            for _ in range(20):
+                if all(sent.values()):
+                    break
+                await asyncio.sleep(0.01)
+            assert len(sent[100]) == len(sent[200]) == 1
+            assert private["id"] in sent[100][0] and shared["id"] not in sent[100][0]
+            assert shared["id"] in sent[200][0] and private["id"] not in sent[200][0]
+        finally:
+            for task in background:
+                task.cancel()
+            await asyncio.gather(*background, return_exceptions=True)
+
+    monkeypatch.setattr(discord_bridge, "run_client", run)
+    assert discord_bridge.main() == 0
+
+
 def failed_task(tmp_path, monkeypatch):
     root = tmp_path / 'workspace'
     root.mkdir()

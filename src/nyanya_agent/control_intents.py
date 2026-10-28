@@ -13,9 +13,18 @@ _KNOWN_TASK_COMMAND = re.compile(
     re.I,
 )
 _QUOTED = re.compile(r"[\"'`“”‘’]|```|>\s")
+_QUOTED_RUNTIME = re.compile(r'''^["'`“‘].*(?:timeout|타임아웃|실행\s*제한|제한\s*시간).*["'`”’]$''', re.I)
 _NEGATED = re.compile(r"(취소|제거|삭제|종결).{0,12}(하지\s*마|안\s*할|말아|않|고민|방법|어떻게|가능|여부|생각)")
 _DOCUMENT = re.compile(r"(?:문서|파일|README|TODO|프로젝트).{0,24}(?:할\s*일|미완료|남은\s*작업)|(?:할\s*일|미완료).{0,24}(?:문서|파일|README|TODO)", re.I)
-_CONTROL_WORD = re.compile(r"미완료|남은\s*작업|작업\s*목록|작업들|취소|제거|종결|ack-delivery|실행\s*제한|제한\s*시간|타임아웃|timeout", re.I)
+_CONTROL_WORD = re.compile(r"미완료|남은\s*작업|작업\s*목록|작업들|취소|제거|종결|ack-delivery", re.I)
+_RUNTIME_STATUS_QUERY = re.compile(
+    r"(?:(?:현재|지금)\s*)?(?:(?:냐냐|nyanya|에이전트|너)(?:의)?\s*)?"
+    r"(?:실행\s*(?:제한\s*시간|시간\s*제한)|제한\s*시간|타임아웃|timeout)(?:은|이|을|를)?\s*"
+    r"(?:(?:몇\s*(?:초|분)(?:로)?|얼마|무엇|뭐)(?:인가(?:요)?|야|인지)?"
+    r"(?:\s*(?:설정)?되어\s*있(?:는가|나요|습니까))?|알려(?:줘|주세요)|확인해(?:줘|주세요))?\s*[?？.!。！]*"
+    r"|what\s+is\s+(?:your|nyanya(?:'s)?|the\s+agent(?:'s)?)\s+(?:execution\s+)?(?:timeout|time\s+limit)\s*[?？.!]*",
+    re.I,
+)
 _LIST = re.compile(r"^(?:(?:다른|현재|지금|내|나의|전체)\s*)?(?:미완료\s*)?(?:작업(?:들)?|할\s*일)(?:이|은|들)?(?:\s*(?:무엇|뭐|존재하나|있나|있어|몇\s*개|목록|리스트|보여줘|알려줘|조회|확인|남았|남아))?.*$")
 _CANCEL_VERB = re.compile(r"취소|제거|종결|하지\s*않겠|안\s*하겠|하지\s*마")
 _LIST_SCOPE = re.compile(r"미완료|남은\s*작업|이전\s*목록|위\s*목록|방금\s*목록|작업들|전부|모두|전체")
@@ -92,7 +101,7 @@ def classify(text: str) -> ControlIntent:
         return ControlIntent("clarify")
     if _DOCUMENT.search(value):
         return ControlIntent("work_request")
-    if _QUOTED.search(value) and _CONTROL_WORD.search(value):
+    if (_QUOTED.search(value) and _CONTROL_WORD.search(value)) or _QUOTED_RUNTIME.fullmatch(value):
         return ControlIntent("clarify")
     if work_value != value:
         # Reclassify the actual question; intake retains every original constraint.
@@ -105,8 +114,8 @@ def classify(text: str) -> ControlIntent:
         _LIST_SCOPE.search(value) and _CANCEL_VERB.search(value)
     ):
         return ControlIntent("work_request")
-    if re.search(r"실행\s*(?:제한|시간)|제한\s*시간|타임아웃|timeout", value, re.I):
-        return ControlIntent("runtime_status") if re.search(r"\?|？|얼마|몇|무엇|뭐|현재|지금|알려|확인", value) else ControlIntent("clarify")
+    if _RUNTIME_STATUS_QUERY.fullmatch(value):
+        return ControlIntent("runtime_status")
     if _LIST_SCOPE.search(value) and _CANCEL_VERB.search(value):
         return ControlIntent("task_cancel_selection") if re.search(r"(?:취소|제거|종결)(?:\s*(?:해|해라|해줘|해주세요|하겠습니다|할게|한다|해요))?[.!。！]*$|하지\s*않겠다", value) else ControlIntent("clarify")
     if _LIST.search(value) and re.search(r"무엇|뭐|존재|있|목록|리스트|보여|알려|조회|확인|남았|남아|몇|\?|？", value):
