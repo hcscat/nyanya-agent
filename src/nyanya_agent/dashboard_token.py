@@ -136,7 +136,7 @@ def ensure_dashboard_token(state_root: Path, env_file: Path) -> str:
         _existing_token(path)
         return "present"
     # A failed first write stays visible and held; never rotate an existing credential.
-    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
         if os.name != "nt":
             os.fchmod(stream.fileno(), 0o600)
         stream.write(secrets.token_urlsafe(32) + "\n")

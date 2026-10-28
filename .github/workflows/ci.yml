@@ -50,8 +50,10 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade "pip>=26.2"
-          python -m pip install -e ".[bots,dashboard,dev,security]"
+          python -m venv "$RUNNER_TEMP/nyanya-ci-venv"
+          "$RUNNER_TEMP/nyanya-ci-venv/bin/python" -m pip install --upgrade "pip>=26.2"
+          "$RUNNER_TEMP/nyanya-ci-venv/bin/python" -m pip install -e ".[bots,dashboard,dev,security]"
+          echo "$RUNNER_TEMP/nyanya-ci-venv/bin" >> "$GITHUB_PATH"
 
       - name: Build and type-check CLI
         run: npm run build && npm run check
