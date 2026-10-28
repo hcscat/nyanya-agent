@@ -157,6 +157,7 @@ def isolated_environment(dev_layout: DevLayout) -> dict[str, str]:
             "NYANYA_DASHBOARD_HOST": DEFAULT_DASHBOARD_HOST,
             "NYANYA_DASHBOARD_PORT": str(DEFAULT_DASHBOARD_PORT),
             "NYANYA_DASHBOARD_DB_PATH": str(dev_layout.state_root / "data" / "nyanya_dashboard.db"),
+            "NYANYA_LOG_MAINTENANCE_ENABLED": "false",
             "NYANYA_SESSIONS_DIR": str(dev_layout.state_root / "sessions"),
             "PYTHONNOUSERSITE": "1",
             "PYTHONPATH": str(dev_layout.project_root / "src"),

@@ -9,6 +9,7 @@ const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const config_1 = require("../commands/config");
 const doctor_1 = require("../commands/doctor");
+const logs_1 = require("../commands/logs");
 const service_1 = require("../commands/service");
 const setup_1 = require("../commands/setup");
 const state_1 = require("../commands/state");
@@ -25,6 +26,7 @@ Usage:
   nyanya repair
   nyanya service [status|start|stop|restart|health|repair|uninstall]
   nyanya state [show|backup|migrate]
+  nyanya logs [status|maintain] [--apply]
   nyanya paths
   nyanya update
   nyanya [agent options]
@@ -90,6 +92,9 @@ function main(argv) {
     }
     if (command === "state") {
         return (0, state_1.state)(projectRoot, rest);
+    }
+    if (command === "logs") {
+        return (0, logs_1.logs)(projectRoot, rest);
     }
     if (command === "paths") {
         return (0, config_1.printConfigStatus)(projectRoot);

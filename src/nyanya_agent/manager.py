@@ -126,12 +126,14 @@ def write_discord_plist() -> pathlib.Path:
     ensure_dirs()
     payload: dict[str, Any] = {
         "Label": LABEL,
-        "ProgramArguments": [python_executable(), "-m", "nyanya_agent.discord_bridge"],
+        "ProgramArguments": [python_executable(), "-m", "nyanya_agent.service_logs", "run", "--log-dir",
+                             str(state_root() / "logs"), "--name", "discord", "--",
+                             python_executable(), "-m", "nyanya_agent.discord_bridge"],
         "EnvironmentVariables": launch_environment(),
         "RunAtLoad": True,
         "KeepAlive": True,
-        "StandardOutPath": str(state_root() / "logs" / "discord.launchd.out.log"),
-        "StandardErrorPath": str(state_root() / "logs" / "discord.launchd.err.log"),
+        "StandardOutPath": "/dev/null",
+        "StandardErrorPath": "/dev/null",
         "WorkingDirectory": str(project_root()),
     }
     path = plist_path()
@@ -162,12 +164,14 @@ def write_dashboard_plist() -> pathlib.Path:
     ensure_dirs()
     payload: dict[str, Any] = {
         "Label": DASHBOARD_LABEL,
-        "ProgramArguments": [python_executable(), "-m", "nyanya_agent.dashboard_api"],
+        "ProgramArguments": [python_executable(), "-m", "nyanya_agent.service_logs", "run", "--log-dir",
+                             str(state_root() / "logs"), "--name", "dashboard", "--",
+                             python_executable(), "-m", "nyanya_agent.dashboard_api"],
         "EnvironmentVariables": launch_environment(),
         "RunAtLoad": True,
         "KeepAlive": True,
-        "StandardOutPath": str(state_root() / "logs" / "dashboard.launchd.out.log"),
-        "StandardErrorPath": str(state_root() / "logs" / "dashboard.launchd.err.log"),
+        "StandardOutPath": "/dev/null",
+        "StandardErrorPath": "/dev/null",
         "WorkingDirectory": str(project_root()),
     }
     path = plist_path(DASHBOARD_LABEL)
@@ -180,12 +184,14 @@ def write_memory_worker_plist() -> pathlib.Path:
     ensure_dirs()
     payload: dict[str, Any] = {
         "Label": MEMORY_WORKER_LABEL,
-        "ProgramArguments": [python_executable(), "-m", "nyanya_agent.memory_worker"],
+        "ProgramArguments": [python_executable(), "-m", "nyanya_agent.service_logs", "run", "--log-dir",
+                             str(state_root() / "logs"), "--name", "memory-worker", "--",
+                             python_executable(), "-m", "nyanya_agent.memory_worker"],
         "EnvironmentVariables": launch_environment(),
         "RunAtLoad": True,
         "KeepAlive": True,
-        "StandardOutPath": str(state_root() / "logs" / "memory-worker.launchd.out.log"),
-        "StandardErrorPath": str(state_root() / "logs" / "memory-worker.launchd.err.log"),
+        "StandardOutPath": "/dev/null",
+        "StandardErrorPath": "/dev/null",
         "WorkingDirectory": str(project_root()),
     }
     path = plist_path(MEMORY_WORKER_LABEL)

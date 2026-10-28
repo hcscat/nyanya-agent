@@ -183,18 +183,30 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
                 await asyncio.sleep(30)
 
         heartbeat_task = asyncio.create_task(heartbeat_loop())
+        maintenance_task = None
+        if os.getenv("NYANYA_LOG_MAINTENANCE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}:
+            from nyanya_agent.log_maintenance import maintenance_loop
+            maintenance_task = asyncio.create_task(maintenance_loop(
+                core.STATE_ROOT, db.resolve_db_path(db_path),
+                publish=lambda report: setattr(_app.state, "log_maintenance", report),
+            ))
         try:
             yield
         finally:
             heartbeat_task.cancel()
             with suppress(asyncio.CancelledError):
                 await heartbeat_task
+            if maintenance_task is not None:
+                maintenance_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await maintenance_task
             _app.state.operations.close()
 
     app = FastAPI(title="NyaNya Agent Dashboard", version="0.3.0", lifespan=lifespan)
     from nyanya_agent.operation_service import OperationService
     app.state.operations = OperationService(db_path)
     app.state.db_path = db_path
+    app.state.log_maintenance = {"status": "not-run"}
     app.state.execution_coordinator = ExecutionCoordinator(db_path=db_path)
 
     app.add_middleware(
@@ -263,6 +275,10 @@ def create_app(db_path: str | Path | None = None) -> FastAPI:
             "schema_version": schema["version"],
             "control_auth_configured": bool(_control_token()),
         }
+
+    @app.get("/v1/log-maintenance")
+    def log_maintenance_status() -> dict[str, Any]:
+        return app.state.log_maintenance
 
     @app.get("/v1/summary")
     def summary() -> dict[str, Any]:
