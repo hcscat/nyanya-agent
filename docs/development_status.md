@@ -1,5 +1,9 @@
 # 개발 현황과 남은 작업
 
+## Dashboard installation follow-up
+
+Normal CLI setup and the Bash/PowerShell installers now provision a private dashboard token before service admission, preserving configured credentials on reruns. Authentication and Host/Origin checks remain unchanged. [Token provisioning](installation_and_distribution.md#dashboard-token-provisioning) describes behavior and recovery. Regression coverage is in `tests/test_dashboard_token_setup.py` and the source-installer integration test; Windows CI additionally exercises the native ACL and PowerShell installer. A source fix and automated checks do not establish operational installation or live Discord acceptance.
+
 검토일: 2026-09-21. 작업 ID: REVIEW-20260921.
 기준: `main` / `bb8774b7b929bf565f353adf800d1797f1ce44e9`.
 목적은 4차까지 공개한 소스의 구현 범위와 현재 검증을 대조하는 것이다.

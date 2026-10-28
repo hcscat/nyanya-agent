@@ -17,7 +17,7 @@ HTML reports are generated only when explicitly requested and are ignored by Git
 | Implementation | [Local Control Plane implementation](local_control_plane_implementation.md) | Accepted product direction, current durable flow, limitations, and next phases |
 | Policy | [`prompts/policy.md`](../prompts/policy.md) | Universal operating, safety, connector, and privacy policy |
 | Policy supplements | [`prompts/policy_technical.md`](../prompts/policy_technical.md), [`prompts/policy_governance.md`](../prompts/policy_governance.md) | Technical enforcement and governance/review rules |
-| Development and deployment | [Installation and distribution](installation_and_distribution.md) | npm/Python installation model, packaging, update, and release rules |
+| Development and deployment | [Installation and distribution](installation_and_distribution.md) | npm/Python installation, private dashboard token provisioning, packaging, update, and release rules |
 | npm release handoff | [npm release resumption guide](npm_release_resumption_guide.md) | Deferred OIDC trusted publishing, staged approval, validation, and rollback procedure |
 | Operations | [Operations guide](operations_guide.md) | Service lifecycle, health checks, backend checks, and recovery commands |
 | Remote access | [External dashboard access](external_dashboard_access.md) | Local, LAN, private-network, and authenticated tunnel options |

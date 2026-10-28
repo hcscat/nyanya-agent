@@ -44,6 +44,14 @@ Validation is part of setup and every configuration change. A diagnostic command
 
 Secrets must be entered locally, masked in output, written with owner-only permissions, and excluded from package and Git contents.
 
+### Dashboard token provisioning
+
+`nyanya setup` (including `--all` and `--skip-deps`) and both alternate installers provision the dashboard token before starting services. They use the same dependency-free Python helper, so token creation does not depend on a completed runtime dependency installation. Unless configured otherwise, the file is `data/dashboard_control.token` under the state directory. New tokens use 32 random bytes, POSIX mode `0600`, or a protected owner-only Windows ACL; Windows storage must support persistent ACLs. The token value is never printed.
+
+Setup preserves an existing valid token file and honors `NYANYA_DASHBOARD_CONTROL_TOKEN` or a custom `NYANYA_DASHBOARD_CONTROL_TOKEN_FILE`, including values in the selected environment file. Process environment settings take precedence. An empty/invalid existing file, linked path, or unsafe POSIX file permissions stop setup without replacing the credential. Inspect and repair the configured file locally, then rerun setup; do not delete a working credential to retry installation. Setup does not automatically rotate credentials.
+
+Use the existing token locally in the dashboard unlock prompt; see [external dashboard access](external_dashboard_access.md#unlocking-and-empty-views). A missing token returns `503`; once provisioned, requests without a valid token return `401`, and authenticated operational reads can succeed. Host/Origin validation remains required. Never paste the token into an issue, PR, URL, screenshot, or shared log.
+
 Workspace access requires explicit registration. Trusted roots are also explicit: an unset or empty `NYANYA_TRUSTED_WORKSPACE_ROOTS` trusts no directories, including the application checkout. Trust cannot authorize access outside allowed workspace roots or bypass approval. Register only the intended task workspace before use.
 
 ## Updates and removal

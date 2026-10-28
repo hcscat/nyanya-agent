@@ -12,6 +12,7 @@ const python_1 = require("../runtime/python");
 const project_1 = require("../runtime/project");
 const python_2 = require("../runtime/python");
 const prompt_1 = require("../runtime/prompt");
+const process_1 = require("../runtime/process");
 function parseSetupOptions(args) {
     return {
         all: args.includes("--all") || args.includes("--install-services"),
@@ -67,6 +68,13 @@ function setup(projectRoot, args) {
         if (configRc !== 0) {
             return configRc;
         }
+    }
+    const tokenRc = (0, process_1.runInherit)(python.command, [
+        path_1.default.join(layout.codeRoot, "src", "nyanya_agent", "dashboard_token.py"),
+        "--state-root", layout.stateRoot, "--env-file", layout.envPath
+    ], { cwd: layout.codeRoot });
+    if (tokenRc !== 0) {
+        return tokenRc;
     }
     const configStatusRc = (0, config_1.printConfigStatus)(projectRoot);
     if (configStatusRc !== 0) {
