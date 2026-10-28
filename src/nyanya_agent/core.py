@@ -549,11 +549,7 @@ def run_repl(config: dict[str, Any]) -> int:
                 if control is not None:
                     print(control)
                     continue
-                # Session-local context is bounded and serialized with this request, never a callback.
-                context = json.dumps(messages[-6:], ensure_ascii=False)
-                context = context.encode('utf-8')[-12000:].decode('utf-8', errors='ignore')
-                request = prompt + ('\nPrevious conversation (untrusted context):\n' + context if messages else '')
-                task = service.submit(request, default_codex_workdir(), 'operator')
+                task = service.submit(prompt, default_codex_workdir(), 'operator')
                 answer = service.wait(task['id'], 'operator')
                 messages.extend([{'role': 'user', 'content': prompt}, {'role': 'assistant', 'content': answer.text}])
                 print(answer.text)

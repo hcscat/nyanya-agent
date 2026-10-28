@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from contextlib import contextmanager
+from contextlib import closing, contextmanager, nullcontext
 import datetime as dt
 from datetime import UTC, datetime
 import json
@@ -132,11 +132,13 @@ def create_agent_request(
     status: str = "received",
     metadata: dict[str, Any] | None = None,
     db_path: str | Path | None = None,
+    _connection: sqlite3.Connection | None = None,
 ) -> str:
-    init_db(db_path)
+    if _connection is None:
+        init_db(db_path)
     request_id = new_id("req")
     timestamp = now_iso()
-    with connect(db_path) as conn:
+    with (nullcontext(_connection) if _connection is not None else connect(db_path)) as conn:
         conn.execute(
             """
             INSERT INTO agent_requests
@@ -166,6 +168,48 @@ def create_agent_request(
         append_request_event_conn(conn, request_id, "received", "Request received", metadata or {})
         log_audit(conn, actor=source, action="request.received", entity_type="agent_request", entity_id=request_id)
     return request_id
+
+
+def _validate_message_identity(source, channel_id, user_id, message_id):
+    if not all(isinstance(value, str) and value for value in (source, channel_id, user_id, message_id)):
+        raise ValueError("Message identity must contain source, channel, user and message")
+
+
+def _message_request_id_conn(conn, *, source, channel_id, user_id, message_id):
+    row = conn.execute(
+        "SELECT id FROM agent_requests WHERE source=? AND channel_id=? AND user_id=? "
+        "AND json_extract(metadata_json,'$.message_id')=? ORDER BY rowid LIMIT 1",
+        (source, channel_id, user_id, message_id),
+    ).fetchone()
+    return row[0] if row is not None else None
+
+
+def find_agent_request_by_message(*, source, channel_id, user_id, message_id, db_path=None):
+    """Read an existing receipt without creating state or a recording-disabled row."""
+    _validate_message_identity(source, channel_id, user_id, message_id)
+    path = resolve_db_path(db_path)
+    if not path.exists():
+        return None
+    with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=10)) as conn:
+        return _message_request_id_conn(conn, source=source, channel_id=channel_id,
+                                        user_id=user_id, message_id=message_id)
+
+
+def claim_agent_request(*, source, channel_id, user_id, message_id, db_path=None, **request):
+    """Atomically claim recorded ingress before any attachment or task side effect."""
+    _validate_message_identity(source, channel_id, user_id, message_id)
+    metadata = dict(request.pop("metadata", None) or {})
+    metadata["message_id"] = message_id
+    init_db(db_path)
+    with connect(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        prior = _message_request_id_conn(conn, source=source, channel_id=channel_id,
+                                        user_id=user_id, message_id=message_id)
+        if prior is not None:
+            return prior, False
+        request_id = create_agent_request(source=source, channel_id=channel_id, user_id=user_id,
+                                          metadata=metadata, db_path=db_path, _connection=conn, **request)
+        return request_id, True
 
 
 def append_request_event_conn(

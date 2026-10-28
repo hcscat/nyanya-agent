@@ -22,6 +22,7 @@ HTML reports are generated only when explicitly requested and are ignored by Git
 | Operations | [Operations guide](operations_guide.md) | Service lifecycle, health checks, backend checks, and recovery commands |
 | Remote access | [External dashboard access](external_dashboard_access.md) | Local, LAN, private-network, and authenticated tunnel options |
 | Security | [Public and private source policy](source_publication_policy.md) | Publication boundaries and secret handling |
+| Runtime safety | [Security and reliability contracts](security_and_reliability.md) | Scoped controls, provider context, execution identity and document-transfer boundaries |
 | Security review and reporting | [Security policy](../SECURITY.md) | Threat model, security invariants, finding criteria and responsible reporting; root `AGENTS.md` holds contributor/code-review instructions |
 | Origin review | [Copyright review](copyright_review.md) | Source-origin and project-identity review |
 | Acceptance tests | [User acceptance tests](user_acceptance_tests_ko.md) | Original five scenarios plus reviewed file apply, held recovery and parallel requests |

@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import threading
 import time
+from itertools import product
 
 import pytest
 
@@ -78,7 +79,9 @@ def test_dead_worker_queue_is_held_but_other_tasks_can_complete(setup):
     next_worker.run_once()
     assert ledger.get_task(old["id"], db_path=path)["status"] == "blocked"
     result = work_queue.result(path, new["id"], "operator")["response"]
-    assert old["id"] in result and "미완료" in result
+    assert old["id"] not in result
+    from nyanya_agent.workflow_notifications import prepare
+    assert old["id"] in prepare(path, "operator").text
     explanation = store.explain(path, old["id"], "operator")
     assert "original request" in explanation and "heartbeat" in explanation
     with pytest.raises(PermissionError):
@@ -101,18 +104,60 @@ def test_recovery_rejects_old_worker_result_and_requires_explicit_resume(setup):
 
 
 @pytest.mark.parametrize(
-    "importance,impact,complexity,profile",
-    [(1, 1, 1, "flash"), (2, 2, 3, "luna"), (4, 1, 2, "astra"), (1, 4, 1, "astra"), (1, 1, 5, "astra")],
+    "importance,impact,complexity",
+    list(product(range(1, 6), repeat=3)),
 )
-def test_routing_axes(importance, impact, complexity, profile):
+def test_routing_axes(importance, impact, complexity):
+    if importance < 4 and impact < 4 and complexity <= 2:
+        profile = "flash"
+    elif importance < 4 and impact < 4 and complexity in {3, 4}:
+        profile = "luna"
+    else:
+        profile = "sol"
     assert (
         model_routing.route(dict(importance=importance, impact=impact, complexity=complexity, reason="evidence"))
         == profile
     )
-    assert model_routing.PROFILES["luna"].effort == "xhigh"
-    assert model_routing.PROFILES["astra"].effort == "low"
+
+
+def test_routing_profiles_and_invalid_task_kind():
+    assert model_routing.PROFILES["flash"] == model_routing.ModelProfile("agy", "gemini-3.8-flash-medium", "medium")
+    assert model_routing.PROFILES["luna"] == model_routing.ModelProfile("codex", "gpt-6-luna", "xhigh")
+    assert model_routing.PROFILES["sol"] == model_routing.ModelProfile("codex", "gpt-6.1-sol", "high")
+    assert model_routing.PROFILES["astra"] is model_routing.PROFILES["sol"]
     with pytest.raises(ValueError, match="task kind"):
         model_routing.route(dict(importance=1, impact=1, complexity=1, reason="invalid path", task_kind="../outside"))
+
+
+@pytest.mark.parametrize("profile", ["auto", "flash", "luna", "sol", "astra"])
+def test_operation_profile_roundtrip_preserves_legacy_alias(setup, profile):
+    _, root, _ = setup
+    spec = OperationSpec(prompt="inspect", workspace=str(root), profile=profile)
+    assert OperationSpec.loads(spec.dumps()) == spec
+
+
+@pytest.mark.parametrize("profile", ["auto", "flash", "luna", "sol", "astra"])
+def test_worker_assesses_with_flash_before_selecting_executor(setup, profile):
+    path, root, worker = setup
+    calls = []
+
+    def model(selected, prompt, *args):
+        calls.append(selected)
+        if prompt.startswith("Return only JSON"):
+            return json.dumps(dict(importance=4, impact=1, complexity=2, reason="high importance"))
+        return json.dumps(dict(summary="complete", changes=[]))
+
+    worker.invoke = model
+    task = store.submit(
+        path, OperationSpec(prompt="inspect", workspace=str(root), profile=profile), "operator", worker.generation
+    )
+    worker.run_once()
+    expected = "sol" if profile == "auto" else profile
+    assert calls == ["flash", expected]
+    assert ledger.get_task(task["id"], db_path=path)["status"] == "completed"
+    selected = [event for event in ledger.list_events(db_path=path) if event["event_type"] == "operation.model_selected"]
+    assert len(selected) == 1
+    assert selected[0]["metadata"]["profile"] == expected
 
 
 def test_bad_model_assessment_fails_without_fallback(setup):
@@ -250,7 +295,7 @@ def test_partial_apply_failure_has_journal_and_no_automatic_replay(setup, monkey
 def test_worker_executes_generated_plan_but_waits_for_modification_approval(setup):
     path, root, worker = setup
     (root / "note.txt").write_text("before")
-    task = add(setup)
+    task = add(setup, prompt="Inspect note.txt")
 
     def model(profile, prompt, *args):
         if prompt.startswith("Return only JSON"):
@@ -603,7 +648,7 @@ def test_schema_three_backup_upgrade_and_restore_preserve_work(tmp_path, monkeyp
     backup = tmp_path / "backup-v3.db"
     backup_database(path, backup)
     monkeypatch.setattr(ledger, "MIGRATIONS", migrations)
-    assert ledger.apply_migrations(path) == 4
+    assert ledger.apply_migrations(path) == ledger.MIGRATIONS[-1][0]
     assert ledger.get_task(task["id"], db_path=path)["current_execution_id"] == execution["id"]
     assert ledger.list_approvals(db_path=path)[0]["id"] == approval["id"]
     restored = tmp_path / "restored.db"
@@ -612,7 +657,7 @@ def test_schema_three_backup_upgrade_and_restore_preserve_work(tmp_path, monkeyp
         assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
-    assert ledger.apply_migrations(restored) == 4
+    assert ledger.apply_migrations(restored) == ledger.MIGRATIONS[-1][0]
     assert ledger.get_task(task["id"], db_path=restored)["prompt"] == "original"
     assert ledger.list_events(db_path=restored)
 

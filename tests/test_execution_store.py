@@ -16,7 +16,7 @@ def test_versioned_migration_is_idempotent_and_events_are_append_only(tmp_path):
     first = store.schema_state(db_path)
     second = store.schema_state(db_path)
 
-    assert first["version"] == first["latest"] == 4
+    assert first["version"] == first["latest"] == store.MIGRATIONS[-1][0]
     assert second["migrations"] == first["migrations"]
 
     task = store.create_task(title="Build ledger", db_path=db_path)
@@ -35,8 +35,8 @@ def test_concurrent_schema_bootstrap_is_serialized(tmp_path):
     with ThreadPoolExecutor(max_workers=6) as executor:
         versions = list(executor.map(lambda _index: store.apply_migrations(db_path), range(12)))
 
-    assert versions == [4] * 12
-    assert store.schema_state(db_path)["version"] == 4
+    assert versions == [store.MIGRATIONS[-1][0]] * 12
+    assert store.schema_state(db_path)["version"] == store.MIGRATIONS[-1][0]
 
 
 def test_task_execution_lifecycle_and_status_projection(tmp_path):

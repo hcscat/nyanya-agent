@@ -252,12 +252,14 @@ Discord bridge 직접 실행:
 
 파일 업로드 처리 순서:
 
-1. 요청된 파일 경로를 사용자 workspace 기준으로 해석한다.
-2. 경로가 허용된 workspace root 내부인지 확인한다.
-3. 대상이 존재하고 파일인지 확인한다.
-4. 설정된 파일공유 채널 안에서 실행한 경우 현재 채널에 Discord attachment로 업로드한다.
-5. 일반 허용 채널에서 실행한 경우 첫 번째 `NYANYA_DISCORD_FILE_SHARE_CHANNEL_IDS` 채널로 업로드하고 요청 채널에는 완료 확인만 반환한다.
-6. dashboard recording이 켜져 있으면 요청 원장에 기록한다.
+1. 명시한 파일을 원 요청자의 등록 workspace 안에서 no-follow로 열고 single-link 일반 파일인지 확인합니다. 인증·세션·키 경로는 차단하며 일반 reports/data/private 폴더 이름만으로는 막지 않습니다.
+2. 설정한 목적지와 SDK의 guild 파일 크기 정보를 확인합니다. 조회 실패 시 다른 채널로 보내지 않으며, 실제 상한은 SDK 한도와 8 MiB 중 작은 값입니다.
+3. 고정한 원본 bytes 전체를 로컬에서 검사합니다. UTF-8·BOM UTF-16·CP949 텍스트와 제한된 text-only DOCX/XLSX/PPTX를 지원합니다. PDF·이미지·암호화·미지원/불완전 추출 문서는 보류합니다. 모델 호출·OCR·파서 다운로드는 하지 않습니다.
+4. 인증정보는 확인으로 우회할 수 없습니다. 개인정보 패턴은 종류·개수만 표시하고 원 요청자가 원 채널에서 upload-approve <id> <sha256>로 확인해야 합니다. upload-reject/upload-cancel로 닫을 수 있습니다. 확인은 300초 동안 한 파일·목적지·한 번의 전송에만 유효합니다.
+5. 전송 직전에 사용자·대화·workspace·상대경로·파일 identity·SHA256·목적지를 재검사합니다. 변경·잘못된 hash·거절·사전 취소·만료·재사용은 전송을 승인하지 않습니다. 검사한 bytes 그대로 전송합니다.
+6. 전송 시작 뒤 취소/오류는 전달 여부가 불확실할 수 있으므로 자동 재전송하지 않습니다. 패턴 무검출은 개인정보가 없다는 보장이 아닙니다.
+
+자세한 검사 범위와 한계는 [업로드 보안 계약](docs/security_and_reliability.md#upload-file-boundary)을 참고하세요. 이 경로는 파일 공유이며 모델의 PDF/이미지 이해 기능을 추가하지 않습니다.
 
 ## Telegram Bridge
 

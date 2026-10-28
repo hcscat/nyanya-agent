@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Coordinate execution adapters with the persistent NyaNya execution ledger."""
+"""Low-level adapter design and recorded-handle reconciliation.
+
+Normal requests use OperationService; command intake is not exposed by connectors.
+"""
 
 from __future__ import annotations
 
@@ -109,6 +112,8 @@ class ExecutionCoordinator:
         write_resource_key: str | None = None,
         approval_id: str | None = None,
     ) -> dict[str, Any]:
+        # Retained design primitive; callers must supply their own authenticated intake.
+        # Generic command approval does not authorize a reviewed file-plan apply.
         adapter = self._adapter(adapter_type)
         if write_resource_key:
             if not approval_id:

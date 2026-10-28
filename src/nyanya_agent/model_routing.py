@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 from nyanya_agent.task_outcomes import OutcomeSignal
 from nyanya_agent.codex_cli import resolve_codex_cli
+from nyanya_agent.context_security import child_environment, validate_provider_prompt
 
 
 @dataclass(frozen=True)
@@ -21,9 +22,11 @@ class ModelProfile:
 
 PROFILES = {
     "flash": ModelProfile("agy", "gemini-3.8-flash-medium", "medium"),
-    "luna": ModelProfile("codex", "gpt-5.6-luna", "xhigh"),
-    "astra": ModelProfile("codex", "gpt-6-astra", "low"),
+    "luna": ModelProfile("codex", "gpt-6-luna", "xhigh"),
+    "sol": ModelProfile("codex", "gpt-6.1-sol", "high"),
 }
+# Legacy serialized profile; explicitly maps to Sol, never an Astra invocation.
+PROFILES["astra"] = PROFILES["sol"]
 
 
 def parse_object(text):
@@ -45,15 +48,16 @@ def route(assessment):
     if not isinstance(assessment.get("reason"), str) or len(assessment["reason"]) > 2000:
         raise SafeOperationError("Invalid routing reason")
     if assessment["impact"] >= 4 or assessment["importance"] >= 4 or assessment["complexity"] >= 5:
-        return "astra"
+        return "sol"
     return "luna" if assessment["complexity"] >= 3 else "flash"
 
 
 def invoke(profile_key, prompt, workspace, timeout, cancel_event):
-    from nyanya_agent.process_runner import run_command
+    from nyanya_agent.process_runner import read_result_file, run_command
 
     if len(prompt.encode("utf-8")) > 100_000:
         raise SafeOperationError("Model input exceeds the bounded CLI payload; narrow the request or file scope")
+    validate_provider_prompt(prompt)
     profile = PROFILES[profile_key]
     if profile.runtime == "agy":
         configured = os.getenv("NYANYA_AGY_CLI", "agy")
@@ -75,7 +79,9 @@ def invoke(profile_key, prompt, workspace, timeout, cancel_event):
             "--print-timeout",
             f"{timeout}s",
         ]
-        rc, stdout, _ = run_command(command, cwd=workspace, timeout=timeout, cancel_event=cancel_event)
+        rc, stdout, _ = run_command(
+            command, cwd=workspace, timeout=timeout, cancel_event=cancel_event, provider=profile.runtime,
+        )
     else:
         binary = resolve_codex_cli()
         if not binary:
@@ -98,8 +104,11 @@ def invoke(profile_key, prompt, workspace, timeout, cancel_event):
                 str(output),
                 prompt,
             ]
-            rc, _, _ = run_command(command, cwd=workspace, timeout=timeout, cancel_event=cancel_event)
-            stdout = output.read_text() if output.is_file() else ""
+            rc, _, _ = run_command(
+                command, cwd=workspace, timeout=timeout, cancel_event=cancel_event,
+                provider=profile.runtime, result_file=output,
+            )
+            stdout = read_result_file(output)
     if rc != 0:
         raise OutcomeSignal("blocked", f"{profile.model} 실행 실패(exit={rc}). 모델 접근·인증·CLI 지원을 확인하세요.")
     if not stdout.strip():
@@ -115,7 +124,9 @@ def preflight():
             result[name] = {"available": False}
             continue
         try:
-            proc = subprocess.run([binary, "--help"], capture_output=True, text=True, timeout=10)
+            proc = subprocess.run(
+                [binary, "--help"], capture_output=True, text=True, timeout=10, env=child_environment(name),
+            )
             result[name] = {"available": proc.returncode == 0}
         except (OSError, subprocess.TimeoutExpired):
             result[name] = {"available": False}

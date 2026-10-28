@@ -94,6 +94,29 @@ def finish(db_path, claim_record: dict[str, Any], outcome: TaskOutcome) -> None:
                 or current["released"] or current["expires_at"] <= timestamp
                 or current["execution_status"] in ledger.EXECUTION_TERMINAL_STATUSES):
             raise ValueError("Stale worker result rejected")
+        spec = claim_record.get("spec")
+        live_plan = None
+        if outcome.status == "awaiting_approval" and spec is not None:
+            live_plan = conn.execute(
+                "SELECT status,decided_by FROM change_plans WHERE task_id=? AND status IN ('pending','approved') "
+                "AND expires_at>? ORDER BY created_at DESC LIMIT 1", (task_id, timestamp),
+            ).fetchone()
+            if not live_plan:
+                outcome = TaskOutcome("cancelled", "변경안이 철회되거나 만료되어 승인 대기를 종료했습니다.")
+        if outcome.status == "cancelled":
+            # A stopped process does not undo journaled effects or resolve older lost attempts.
+            from nyanya_agent.operation_store import _unresolved_effects
+
+            conn.execute("UPDATE executions SET status='cancelled' WHERE id=?", (execution_id,))
+            effect_task = task_id
+            if spec and spec.kind == "apply":
+                parent = conn.execute("SELECT task_id FROM change_plans WHERE id=?", (spec.plan_id,)).fetchone()
+                effect_task = parent["task_id"] if parent else task_id
+            if _unresolved_effects(conn, effect_task):
+                outcome = TaskOutcome("blocked", "실행은 중단했으나 외부 효과 확인이 필요합니다. reconcile로 확인하세요.")
+        task_status = {"succeeded": "completed", "timed_out": "failed"}.get(outcome.status, outcome.status)
+        execution_status = "lost" if outcome.status == "blocked" else outcome.status
+        terminal = task_status in ledger.TASK_TERMINAL_STATUSES
         if current["execution_status"] == "cancelling" and outcome.status != "cancelled":
             # Cancellation acknowledgement is not evidence of process termination.
             task_status, execution_status = "blocked", "lost"
@@ -133,21 +156,38 @@ def finish(db_path, claim_record: dict[str, Any], outcome: TaskOutcome) -> None:
                                          status="completed", message="Approved file apply committed",
                                          metadata={"apply_task_id": task_id, "plan_id": spec.plan_id})
         if outcome.status == "awaiting_approval":
+            approved = live_plan is not None and live_plan['status'] == 'approved'
             conn.execute(
                 "INSERT INTO approvals (id, task_id, execution_id, action, status, requested_by, reason, "
-                "metadata_json, requested_at, expires_at) VALUES (?, ?, ?, 'feedback.review', 'pending', ?, ?, '{}', ?, ?)",
-                (ledger.new_id("approval"), task_id, execution_id, claim_record["worker_id"],
+                "metadata_json, requested_at, expires_at,decided_by,decided_at) "
+                "VALUES (?, ?, ?, 'feedback.review', ?, ?, ?, '{}', ?, ?, ?, ?)",
+                (ledger.new_id("approval"), task_id, execution_id, 'approved' if approved else 'pending', claim_record["worker_id"],
                  "Review the concrete file change plan; this feedback does not grant CLI write access", timestamp,
-                 (datetime.now(UTC) + timedelta(hours=1)).isoformat()),
+                 (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+                 live_plan['decided_by'] if approved else '', timestamp if approved else None),
             )
         ledger.append_event_conn(conn, task_id=task_id, execution_id=execution_id,
                                  event_type="task.result", status=task_status, message="Worker result committed")
 
 
+def claim_delivery(db_path, task_id: str, owner_key: str, execution_id: str) -> bool:
+    """Reserve one saved result before any process-local responder is invoked."""
+    with ledger.legacy.connect(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        return conn.execute(
+            "UPDATE task_results SET delivery_status='sending',updated_at=? "
+            "WHERE execution_id=? AND delivery_status='pending' AND EXISTS ("
+            "SELECT 1 FROM agent_tasks t WHERE t.id=? AND t.current_execution_id=? "
+            "AND COALESCE(json_extract(t.metadata_json,'$.owner_key'),t.requested_by)=?)",
+            (datetime.now(UTC).isoformat(), execution_id, task_id, execution_id, owner_key),
+        ).rowcount == 1
+
+
 def record_delivery(db_path, execution_id: str, *, delivered: bool, error: str = "") -> None:
     with ledger.legacy.connect(db_path) as conn:
         conn.execute(
-            "UPDATE task_results SET delivery_status = ?, delivery_error = ?, updated_at = ? WHERE execution_id = ?",
+            "UPDATE task_results SET delivery_status = ?, delivery_error = ?, updated_at = ? "
+            "WHERE execution_id = ? AND delivery_status='sending'",
             ("delivered" if delivered else "uncertain", error, datetime.now(UTC).isoformat(), execution_id),
         )
 

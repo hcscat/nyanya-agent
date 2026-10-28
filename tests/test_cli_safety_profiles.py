@@ -5,8 +5,11 @@ import urllib.request
 
 import pytest
 
-from nyanya_agent import bridge_runtime
+from nyanya_agent import model_routing, process_runner
 from nyanya_agent import core
+
+
+LOCAL_INVOKE = model_routing.invoke
 
 
 def test_backend_request_rejects_non_http_scheme():
@@ -47,35 +50,24 @@ def test_antigravity_uses_sandbox_by_default(monkeypatch):
     assert "--sandbox" in captured["command"]
 
 
-def test_codex_read_only_invocation_uses_nyanya_profile(monkeypatch):
-    captured: dict[str, object] = {}
-    workdir = Path(__file__).resolve().parents[1]
-
-    monkeypatch.setenv("NYANYA_CODEX_ENABLED", "true")
-    monkeypatch.delenv("NYANYA_CODEX_PROFILE", raising=False)
-    monkeypatch.setattr(bridge_runtime, "resolve_codex_cli", lambda: "/usr/local/bin/codex")
-    monkeypatch.setattr(
-        bridge_runtime,
-        "classify_request_risk",
-        lambda prompt, workdir=None: {
-            "severity": "low",
-            "requires_approval": False,
-            "approval_granted": False,
-            "reasons": [],
-            "stop": False,
-        },
-    )
+@pytest.mark.parametrize("profile,model,effort", [
+    ("luna", "gpt-6-luna", "xhigh"), ("sol", "gpt-6.1-sol", "high"),
+])
+def test_codex_read_only_invocation_uses_isolated_config(tmp_path, monkeypatch, profile, model, effort):
+    captured = {}
+    monkeypatch.setattr(model_routing, "resolve_codex_cli", lambda: "/synthetic/codex")
 
     def fake_run(command, **kwargs):
         captured["command"] = command
-        output_path = Path(command[command.index("-o") + 1])
-        output_path.write_text("ok", encoding="utf-8")
+        captured["kwargs"] = kwargs
+        Path(command[command.index("-o") + 1]).write_text("ok", encoding="utf-8")
         return 0, "", ""
 
-    monkeypatch.setattr(bridge_runtime, "run_subprocess_cancellable", fake_run)
-    result = bridge_runtime.run_codex_task("inspect status", workdir=workdir)
-
-    assert result == "ok"
+    monkeypatch.setattr(process_runner, "run_command", fake_run)
+    assert LOCAL_INVOKE(profile, "Inspect a synthetic example", tmp_path, 30, None) == "ok"
     command = captured["command"]
     assert command[command.index("-s") + 1] == "read-only"
-    assert command[command.index("--profile") + 1] == "nyanya-readonly"
+    assert "--ignore-user-config" in command and "--ephemeral" in command
+    assert command[command.index("-m") + 1] == model
+    assert command[command.index("-c") + 1] == f'model_reasoning_effort="{effort}"'
+    assert captured["kwargs"]["cwd"] == tmp_path and captured["kwargs"]["provider"] == "codex"

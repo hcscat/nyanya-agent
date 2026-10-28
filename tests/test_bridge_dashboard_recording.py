@@ -67,10 +67,8 @@ def test_bridge_submit_records_async_completion(tmp_path, monkeypatch, fixture_w
     )
 
     assert "요청을 접수했습니다" in ack
-    assert "목표:" in ack
-    assert "단계 일정:" in ack
-    assert "목표 변경 규칙:" in ack
-    assert "작업목록" in ack
+    assert len(ack.splitlines()) == 1
+    assert "task_id:" not in ack and "단계 일정:" not in ack
     assert done.wait(2)
     assert responses[-1] == "done"
     deadline = time.monotonic() + 2
@@ -83,6 +81,7 @@ def test_bridge_submit_records_async_completion(tmp_path, monkeypatch, fixture_w
     assert request["result_summary"] == "done"
     task = execution_store.find_task_by_source_request(request_id, db_path=db_path)
     assert task["status"] == "completed"
+    assert task["id"] in ack
     store.close()
 
 
@@ -101,7 +100,7 @@ def test_bridge_task_status_lists_running_and_queued(tmp_path, monkeypatch):
             mode="auto",
             responder=lambda _: None,
         )
-        assert "목표:" in ack
+        assert len(ack.splitlines()) == 1
     assert operation_store.claim(store.operations.path, worker.generation)
     status = store.task_status_text("discord-user:test")
     assert "진행 중: 1개" in status and "대기열: 1개" in status

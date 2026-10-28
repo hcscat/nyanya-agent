@@ -534,6 +534,7 @@ def discord_help_text(*, prefix: str, channel_id: str, user_id: str, is_admin: b
         f"- `{prefix} plan 변경안ID`: 파일별 diff / `{prefix} plan-file 변경안ID 상대경로`: 전체 파일안\n"
         f"- `{prefix} approve 변경안ID hash`: 승인·적용 / `{prefix} revoke 변경안ID`: 거절·철회\n"
         f"- `{prefix} resume 작업ID`: 명시적 재시도 / `{prefix} cancel 작업ID`: 개별 취소\n"
+        f"- `{prefix} ack-delivery 작업ID`: 불확실한 결과 전달 알림만 종료 (전달 확인·재전송·실행 취소 아님)\n"
         f"- `{prefix} reconcile 변경안ID`: 중단된 파일 상태 확인 / `{prefix} resolve 변경안ID 관측hash`: 확인 처리\n"
         f"{admin_note}"
     )
