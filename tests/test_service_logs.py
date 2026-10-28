@@ -63,6 +63,53 @@ def test_run_raw_limit_stops_service_without_deleting_evidence(tmp_path):
     assert json.loads((logs / "dashboard.last-status.json").read_text())["exit_code"] == 75
 
 
+@pytest.mark.parametrize("phase", ["startup", "rescan"])
+def test_concurrent_retirement_does_not_interrupt_service(tmp_path, monkeypatch, phase):
+    logs = tmp_path / "logs"
+    logs.mkdir(mode=0o700)
+    segment = logs / ("discord.stdout.20260101T000000000000Z." + "a" * 32 + ".log")
+    segment.write_bytes(b"x" * 63)
+    segment.chmod(0o600)
+    original = service_logs._safe_file
+    scans = 0
+
+    def retire_before_stat(path, **kwargs):
+        nonlocal scans
+        if path == segment:
+            scans += 1
+            if scans == (1 if phase == "startup" else 2):
+                path.unlink()  # Maintenance retired a closed segment already yielded by iterdir.
+        return original(path, **kwargs)
+
+    monkeypatch.setattr(service_logs, "_safe_file", retire_before_stat)
+    result = service_logs.run_service(
+        logs, "discord", [sys.executable, "-c", "import sys;sys.stdout.write('y');sys.exit(7)"],
+        segment_bytes=16, raw_limit_bytes=64,
+    )
+    assert result == 7 and not segment.exists()
+    assert b"".join(path.read_bytes() for path in logs.glob("discord.stdout.*.log")) == b"y"
+    assert json.loads((logs / "discord.last-status.json").read_text())["error_class"] == ""
+
+
+def test_raw_accounting_does_not_ignore_missing_current_file(tmp_path, monkeypatch):
+    current = tmp_path / "discord.stdout.current"
+    monkeypatch.setattr(Path, "iterdir", lambda _: iter([current]))
+    with pytest.raises(FileNotFoundError):
+        service_logs._raw_bytes(tmp_path, "discord")
+
+
+@pytest.mark.parametrize("unsafe", ["permissions", "symlink"])
+def test_raw_accounting_keeps_unsafe_closed_segments_blocked(tmp_path, unsafe):
+    segment = tmp_path / ("discord.stdout.20260101T000000000000Z." + "b" * 32 + ".log")
+    if unsafe == "symlink":
+        segment.symlink_to(tmp_path / "absent")
+    else:
+        segment.write_bytes(b"x")
+        segment.chmod(0o644)
+    with pytest.raises(ValueError):
+        service_logs._raw_bytes(tmp_path, "discord")
+
+
 def test_wrapper_forwards_signal_and_reaps_child(tmp_path):
     logs = tmp_path / "logs"
     env = os.environ.copy()

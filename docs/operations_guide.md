@@ -108,6 +108,8 @@ Use `/v1/execution-projects`, `/v1/execution-projects/{id}/codex-sessions`, and
 
 ## Local gzip log retention
 
+Service raw-size accounting tolerates closed segments retired concurrently by maintenance, including startup and budget rescans. Missing current streams and unsafe files remain errors; permission/symlink checks and the raw-size limit are not relaxed.
+
 SQLite remains the local task ledger. Do not add a PostgreSQL/Supabase backend, installer or DB selection until the operator explicitly reopens that work. Archive encryption is deferred. Compressed archives are private data, not safe publication material and not replacements for consistent SQLite backups.
 
 ```bash
