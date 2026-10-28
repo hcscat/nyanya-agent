@@ -82,6 +82,8 @@ The optional security tooling requires urllib3 2.8.0 or later within major versi
 
 Migration 5 adds scoped indexes for workflow delivery notices and control selections. The worker uses lightweight state reads, checks for eligible queued work before claiming, and separates recovery/heartbeat intervals from the short work poll. These changes reduce idle writes and history scans. Measure representative workload latency before making broader performance or throughput claims. Migration 6 adds the newest-first audit index. Repeated heartbeat updates no longer generate audit rows, and memory audits omit query text and edited values.
 
+The [local gzip policy](operations_guide.md#local-gzip-log-retention) archives closed months and prunes only verified housekeeping audit preimages older than 90 days. Workflow evidence remains pinned; execution/request events and approval/delivery state are excluded. Archive validation or late-data conflicts preserve originals. Encryption and remote database services remain deferred. This source behavior is not evidence that an existing operating installation has been upgraded.
+
 ## Artifact and publication boundaries
 
 Source installation records `artifact-manifest.json` with package version, source commit/dirty state and hashes/modes of selected public files. Verify the artifact before promotion and retain a compatible code/DB rollback pair. The content digest is an integrity check, not a publisher signature. The verifier allows narrowly recognized generated Python bytecode/build metadata; those generated entries are not a privacy scan or executable provenance proof. Generated build copies must match recorded source bytes and retain safe permissions or setuptools' 0644 normalization; recorded source modes are still verified exactly. A dirty source artifact must be reported as such; a commit ID alone does not identify its extra changes.
@@ -98,13 +100,18 @@ All project `AGENTS.md` and `AGENTS.override.md` files, including root and neste
 - `test_worker_efficiency.py`: old-schema upgrade, indexed lookups and idle polling.
 - `test_artifact_manifest.py`: artifact contents, provenance and tamper detection.
 
+- `test_audit_logging.py`: concurrent registration, heartbeat deduplication, memory metadata minimization and audit-feed index selection.
+- `test_log_archive.py`: monthly boundaries, gzip integrity, pinned evidence, exact-preimage deletion, trigger denial, retention and interrupted publication.
+- `test_service_logs.py`: bounded rotation, process shutdown, writer exclusion, archive corruption/replacement, symlink rejection and conservative retention.
+- `test_log_maintenance.py`: read-only planning, isolated CLI environment, cross-installation DB rejection, bounded summaries and child cancellation.
+
 - `test_apply_admission.py`: thread/process repeat approvals, single child/event and crash rollback.
 
 - `test_conversation_state.py` / `test_conversation_retention.py`: ledger scope/order, reset, late results, older lexical recall and current prompt intake.
 - `test_conversation_worker.py` / `test_conversation_dispatch.py`: natural questions, safe follow-ups, controls and screened private export.
 - `test_wiki_store.py` / `test_dashboard_wiki.py`: provenance, topic conflicts/revisions, recall limits, forgetting and authenticated review.
 - `test_work_memory.py` / `test_memory_store.py`: no-store/forget and legacy successful-source filtering.
-Use the checked-in tests for collected counts. Run the full suite and release/privacy gate for code/release changes as well as focused regressions. Documentation-only changes use structural/link/privacy/package verification; they do not require repeating runtime acceptance. Installed health, live model completion, connector delivery and restart recovery need their own evidence; they are not inferred from unit tests.
+The [historical test table](test_catalog.md#current-complete-test-files) records earlier counts. Use each review branch's test collection for its exact snapshot. Run the full suite and release/privacy gate for code/release changes as well as focused regressions. Documentation-only changes use structural/link/privacy/package verification; they do not require repeating runtime acceptance. Installed health, live model completion, connector delivery and restart recovery need their own evidence; they are not inferred from unit tests.
 
 ## Release-candidate boundary corrections
 

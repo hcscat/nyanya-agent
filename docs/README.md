@@ -1,40 +1,48 @@
 # Documentation
 
-NyaNya Agent keeps only durable Markdown documentation in this directory.
-HTML reports are generated only when explicitly requested and are ignored by Git.
+This directory contains the canonical **English** reusable documentation. In a split workspace, `github_source/docs` is the editing source; reviewed nonprivate English copies under the operating root stay byte-identical. The operating root also carries derived Korean translations named `<document>.ko.md`. Update corresponding translations when the English source changes; Korean editions are local operating documentation and are not part of this public docs directory or its package manifest. Korean requests or interface labels may remain quoted as literal test/UI fixtures.
+
+Actual settings, identifiers, raw logs and deployment evidence stay in operating `OPERATIONS.md` and `docs/private`, outside the repository. Documentation-only updates do not imply runtime upgrades.
+
+Start with [development status](development_status.md), then read the guide needed for the task. Linked files are not automatically loaded by every AI tool. Keep one paragraph/list item per physical line without width-based wrapping; preserve hierarchy, tables, code and intentional hard breaks. Generated HTML requires an explicit request and stays local.
+
+## Filenames and dates
+
+Use stable names for current contracts, such as `development_status.md` and `operations_guide.md`, and update them in place. A date in a retained review filename identifies its original design/verification baseline, not the latest implementation or a release version. Detailed private deployment records may use timestamps to identify their evidence/rollback set. Keep historical links stable rather than creating a full dated copy for every session; tagged release summaries belong to separately prepared Release Notes.
 
 ## Document map
 
 | Area | Document | Purpose |
 |---|---|---|
-| Current development status | [개발 현황과 남은 작업](development_status.md) | Four-batch integration, implemented/partial behavior, current verification and follow-up priorities |
-| Current P0 execution | [P0 implementation (2026-09-12)](p0_execution_20260912.md) | Serializable workers, parallel routing, reviewed file apply, held recovery and ledger migration |
-| Automated test guide | [Python 테스트 안내](test_catalog_ko.md) | File-by-file scenarios, inputs, assertions, execution types and coverage limits |
-| Historical stabilization | [CORE-STAB-01 (2026-09-10)](core_stabilization_20260910.md) | Original source review and verification; use development status for current completion |
-| Idea and architecture | [Architecture and roadmap](architecture_and_roadmap.md) | Product boundary, component ownership, completed capabilities, and deferred work |
-| Architecture review | [Architecture diagnostic (2026-08-26)](architecture_diagnostic_20260826.md) | Evidence-based current-state diagnosis, target boundaries, resizing choices, and phased follow-up |
-| Detailed design | [Execution control plane](execution_control_plane.md) | Task, execution, approval, adapter, event, and recovery contracts |
-| Implementation | [Local Control Plane implementation](local_control_plane_implementation.md) | Accepted product direction, current durable flow, limitations, and next phases |
-| Policy | [`prompts/policy.md`](../prompts/policy.md) | Universal operating, safety, connector, and privacy policy |
-| Policy supplements | [`prompts/policy_technical.md`](../prompts/policy_technical.md), [`prompts/policy_governance.md`](../prompts/policy_governance.md) | Technical enforcement and governance/review rules |
-| Development and deployment | [Installation and distribution](installation_and_distribution.md) | npm/Python installation, private dashboard token provisioning, packaging, update, and release rules |
-| npm release handoff | [npm release resumption guide](npm_release_resumption_guide.md) | Deferred OIDC trusted publishing, staged approval, validation, and rollback procedure |
-| Operations | [Operations guide](operations_guide.md) | Service lifecycle, health checks, backend checks, and recovery commands |
-| Remote access | [External dashboard access](external_dashboard_access.md) | Local, LAN, private-network, and authenticated tunnel options |
-| Security | [Public and private source policy](source_publication_policy.md) | Publication boundaries and secret handling |
-| Runtime safety | [Security and reliability contracts](security_and_reliability.md) | Scoped controls, provider context, execution identity and document-transfer boundaries |
+| Current development status | [Development status and remaining work](development_status.md) | Implemented/verified/deferred behavior and timeline |
+| Topic memory | [LLM Wiki](llm_wiki.md) | Memory screen areas/buttons, cited summaries, scoped recall, conflicts, review and forgetting |
+| P0 execution record | [P0 implementation (2026-09-12)](p0_execution_20260912.md) | Serializable workers, routing, reviewed apply, recovery and migration |
+| Automated tests | [Python test catalog](test_catalog.md) | File-by-file inputs, assertions, execution types and limits |
+| Historical stabilization | [CORE-STAB-01 (2026-09-10)](core_stabilization_20260910.md) | Original source review/verification; current status takes precedence |
+| Architecture | [Architecture and roadmap](architecture_and_roadmap.md) | Product boundary, ownership, completed capabilities and backlog |
+| Historical architecture review | [Architecture diagnostic (2026-08-26)](architecture_diagnostic_20260826.md) | Historical diagnosis/accepted direction |
+| Detailed design | [Execution control plane](execution_control_plane.md) | Tasks, attempts, approval, adapters, events and recovery |
+| Implementation | [Local Control Plane implementation](local_control_plane_implementation.md) | Current flow, constraints and remaining integration |
+| Policy | [`prompts/policy.md`](../prompts/policy.md) | Common operating, safety, connector and privacy policy |
+| Policy supplements | [`prompts/policy_technical.md`](../prompts/policy_technical.md), [`prompts/policy_governance.md`](../prompts/policy_governance.md) | Enforcement and review rules |
+| Development/distribution | [Installation and distribution](installation_and_distribution.md) | npm/Python packaging, private dashboard token provisioning, setup, development and releases |
+| npm release proposal | [npm release resumption guide](npm_release_resumption_guide.md) | Deferred OIDC/staging, verification and rollback |
+| Operations | [Operations guide](operations_guide.md) | Dashboard count popups, request/result previews, natural-height five-item pages, service lifecycle, recovery and gzip retention |
+| Remote access | [External dashboard access](external_dashboard_access.md) | Authentication/unlock, local and private-network access |
+| Security/reliability | [Hardening behavior and limits](security_and_reliability.md) | Context, auth, delivery, resource and integrity boundaries |
 | Security review and reporting | [Security policy](../SECURITY.md) | Threat model, security invariants, finding criteria and responsible reporting; root `AGENTS.md` holds contributor/code-review instructions |
-| Origin review | [Copyright review](copyright_review.md) | Source-origin and project-identity review |
-| Acceptance tests | [User acceptance tests](user_acceptance_tests_ko.md) | Original five scenarios plus reviewed file apply, held recovery and parallel requests |
+| Publication privacy | [Public/private source policy](source_publication_policy.md) | Publication and secret handling |
+| Origin review | [Copyright review](copyright_review.md) | Historical origin/product-identity review |
+| Acceptance | [User acceptance tests](user_acceptance_tests.md) | Service, files, recovery, conversation and memory scenarios |
 
 ## Local-only documents
 
-The following files are operational or machine-specific and must stay untracked:
+Keep these operational or machine-specific materials untracked:
 
 - `private/`
-- `operational_rollout_20260913.md` (instance-specific deployment evidence)
+- `operational_rollout_20260913.md`
 - `nyanya_remote_access_security_build_plan_20260723.md`
-- generated `*.html` reports
+- Operating `*.ko.md` translation copies
+- Generated `*.html` reports
 
-Do not add local paths, account identifiers, IP addresses, credentials, pairing
-URLs, channel IDs, or live runtime records to tracked documentation.
+Do not add personal paths, account identifiers, private IP addresses, credentials, pairing URLs, channel IDs or live runtime records to public documentation.
