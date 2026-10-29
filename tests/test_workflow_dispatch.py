@@ -44,6 +44,11 @@ FILE_SAFETY_REQUEST = (
     "파일 내용은 정확히 첫 줄 SyntheticWikiCheck, 둘째 줄 retry=3으로 하고 마지막에 줄바꿈을 넣어줘. "
     "기존 파일은 수정하거나 삭제하지 마. 실제 파일 생성 결과를 짧게 알려줘."
 )
+READ_FILE_SAFETY_REQUEST = (
+    "현재 요청만 처리해줘. 기존 파일을 읽거나 수정하거나 삭제하지 마. "
+    "새 파일 acceptance-new-20261029.txt를 만들고 SYNTHETIC NEW FILE 한 줄을 넣어줘. "
+    "명령 실행은 하지 마."
+)
 AMBIGUOUS_FILE_SAFETY = (
     "기존 파일은 수정하거나 삭제하지 마.",
     "전체 파일은 수정하지 마.",
@@ -55,6 +60,10 @@ AMBIGUOUS_FILE_SAFETY = (
     "새 파일을 만들어줘. 기존 파일은 수정하거나 삭제하지 마. cancel task_first extra",
     "새 파일을 만들어줘. 기존 파일은 수정하거나 삭제하지 마. cancel all",
     "취소하지 마. 기존 파일은 수정하거나 삭제하지 마. worker.py 코드를 분석해줘.",
+    "새 파일을 만들어줘. 기존 파일을 읽거나 수정하거나 삭제하지 마. task_first는 취소해줘.",
+    "새 파일을 만들어줘. 기존 파일을 읽거나 수정하거나 삭제하지 마. 모두 취소해줘.",
+    '새 파일을 만들어줘. "기존 파일을 읽거나 수정하거나 삭제하지 마."',
+    "새 파일에 기존 파일을 읽거나 수정하거나 삭제하지 마라는 문구를 작성해줘.",
 )
 MIXED_LIST_QUERIES = (
     "미완료 작업 목록만 보여줘. 기존 작업은 다시 실행해줘.",
@@ -95,6 +104,7 @@ MIXED_LIST_QUERIES = (
         ("/cancel task_x", "task_cancel"),
         ("tasks all", "work_request"),
         (FILE_SAFETY_REQUEST, "work_request"),
+        (READ_FILE_SAFETY_REQUEST, "work_request"),
         ("코드를 분석해줘. 전체 파일은 수정하거나 삭제하지 마.", "work_request"),
         ("기존 파일은 삭제하지 마. worker.py 코드를 분석해줘.", "work_request"),
         ("새 파일을 생성해줘. 기존 파일들은 수정/삭제하지 마세요.", "work_request"),
@@ -121,17 +131,18 @@ def test_bounded_intents(text, kind):
     assert classify(text).kind == kind
 
 
-def test_complete_file_safety_enters_normal_intake_with_original_constraints(tmp_path, monkeypatch, fixture_worker):
+@pytest.mark.parametrize("prompt", [FILE_SAFETY_REQUEST, READ_FILE_SAFETY_REQUEST])
+def test_complete_file_safety_enters_normal_intake_with_original_constraints(tmp_path, monkeypatch, fixture_worker, prompt):
     root = tmp_path / "workspace"
     root.mkdir()
     monkeypatch.setenv("NYANYA_WORKSPACE_ROOTS", str(root))
     service = OperationService(tmp_path / "ledger.db")
     _insert_task(service.path, "task_held", "operator")
-    task = service.submit(FILE_SAFETY_REQUEST, root, "operator", conversation_key="fixture-channel")
+    task = service.submit(prompt, root, "operator", conversation_key="fixture-channel")
     assert service.wait(task["id"], "operator", timeout=5).status == "succeeded"
     with db.connect(service.path) as conn:
         row = conn.execute("SELECT prompt FROM agent_tasks WHERE id=?", (task["id"],)).fetchone()
-        assert row["prompt"] == FILE_SAFETY_REQUEST
+        assert row["prompt"] == prompt
         assert conn.execute("SELECT count(*) FROM task_operations").fetchone()[0] == 1
     assert _status(service.path, "task_held") == "failed"
     assert not list(root.iterdir())  # The fixture answer does not claim or apply a filesystem effect.

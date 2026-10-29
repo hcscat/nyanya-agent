@@ -157,6 +157,7 @@ def inline_context_only(request):
         return False
     coordinated = (
         r"파일\s*(?:을|은|에)?\s*(?:읽|열|접근하|탐색하|조회하|열람하)거나\s*"
+        r"(?:(?:수정|변경|편집|삭제|생성)\s*(?:하거나|및|또는|/|,)\s*)*"
         r"(?:수정|변경|편집|삭제|생성)하지\s*(?:말|마|않)"
     )
     for match in re.finditer(coordinated, request):

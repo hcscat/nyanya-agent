@@ -33,6 +33,8 @@ INLINE_ANALYSIS = (
     "파일을 읽거나 수정하지 말고, 방금 요청한 파일 변경은 끝난 거지? 한 문장으로 알려줘.",
     "파일을 읽거나 수정하지 마. 상태만 알려줘.",
     "파일을 읽거나 변경하지 말고 README.md도 열지 마.",
+    "현재 요청만 처리해줘. 기존 파일을 읽거나 수정하거나 삭제하지 마. 새 파일 note.txt를 만들어줘.",
+    "기존 파일을 읽거나 수정하거나 삭제하지 마. README.md 내용은 추측하지 말고 새 파일을 만들어줘.",
     "파일을 열거나 삭제하지 말아줘. 저장된 결과로 답해줘.",
     "파일에 접근하거나 수정하지 말고 진행 상태만 알려줘.",
     "파일을 조회하거나 편집하지 않고 지금 대화로만 답해줘.",
@@ -69,6 +71,7 @@ def test_inline_only_requests_never_traverse_or_read_workspace(tmp_path, monkeyp
     "파일을 읽거나 수정하지 말라는 뜻은 아니고 README.md만 읽어줘.",
     "파일을 읽거나 수정하지 말라고 한 건 아니고 README.md 내용을 확인해줘.",
     "파일을 읽거나 수정하지 않는 게 아니라 README.md를 읽되 수정만 하지 마.",
+    "파일을 읽거나 수정하거나 삭제하지 말라는 뜻은 아니야. README.md만 읽어줘.",
     "Do not modify files. Read README.md and answer only in this message.",
 ])
 def test_output_or_write_restrictions_still_allow_requested_reads(tmp_path, prompt):
