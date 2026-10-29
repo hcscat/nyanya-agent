@@ -223,7 +223,7 @@ def snapshot(root, request=None, diagnostics=None):
     return values
 
 
-def propose(path, task_id, owner, root, changes, baseline, *, task_kind="work", draft_context=None):
+def propose(path, task_id, owner, root, changes, baseline, *, task_kind="work", draft_context=None, record=None):
     root = check_workspace(root, owner)
     if not isinstance(changes, list) or not 1 <= len(changes) <= 40:
         raise SafeOperationError("Invalid change list")
@@ -304,7 +304,7 @@ def propose(path, task_id, owner, root, changes, baseline, *, task_kind="work", 
         if draft_context:
             from nyanya_agent.work_drafts import link_plan_conn
 
-            link_plan_conn(conn, draft_context, task_id, plan_id)
+            link_plan_conn(conn, draft_context, task_id, plan_id, record=record)
         ledger.append_event_conn(
             conn,
             task_id=task_id,
@@ -731,6 +731,12 @@ def resolve(path, plan_id, owner, observed_hash):
                           "resolved_execution_ids": resolved_executions},
             )
             unresolved = _unresolved_effects(conn, plan["task_id"])
+            if not unresolved:
+                conn.execute(
+                    "UPDATE operation_drafts SET status=?,updated_at=?,revision=revision+1 "
+                    "WHERE plan_id=? AND status='ready'",
+                    ("applied" if complete else "closed", now(), plan_id),
+                )
             parent_status = "completed" if complete and not unresolved else "blocked"
             conn.execute(
                 "UPDATE agent_tasks SET status=?,updated_at=?,completed_at=? WHERE id=?",

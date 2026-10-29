@@ -4,10 +4,12 @@ import json
 from pathlib import Path
 import sys
 import threading
+import os
+import stat
 
 import pytest
 
-from nyanya_agent import database as db, execution_store as ledger, work_drafts
+from nyanya_agent import database as db, execution_store as ledger, work_drafts, operation_store as store, work_queue
 from nyanya_agent.operation_service import OperationService
 from nyanya_agent.operation_worker import Worker
 from nyanya_agent.task_outcomes import SafeOperationError, OutcomeSignal
@@ -416,3 +418,115 @@ def test_feedback_can_restore_a_deleted_input_without_another_read_approval(setu
         service.control(f"approve {plan['id']} {plan['plan_hash']}", "operator", wait=False)
         assert worker.run_once()
         assert (root / "note.txt").read_text() == restored
+
+
+@pytest.mark.parametrize("revision", ["replacement\n", "before\n"])
+@pytest.mark.parametrize("fault", ["cancel", "expired", "released", "execution", "worker"])
+def test_feedback_losing_ownership_after_renew_preserves_reviewable_candidate(setup, monkeypatch, revision, fault):
+    root, worker, service, responses, _ = setup
+    request(setup, dict(summary="Read", changes=[], read_files=["note.txt"]))
+    draft = open_scope(setup, dict(summary="First draft", changes=[dict(path="note.txt", action="modify", content="first\n", reason="requested")]))
+    responses.append(dict(summary="Feedback", changes=[dict(path="note.txt", action="modify", content=revision, reason="feedback")]))
+    task = service.submit("Revise this draft", root, "operator", conversation_key="channel:a")
+    record = store.claim(service.path, worker.generation)
+    assert record["task_id"] == task["id"]
+    renew = work_queue.renew
+
+    def invalidate(path, current):
+        assert renew(path, current)
+        if fault == "cancel":
+            store.cancel(path, task["id"], "operator")
+        else:
+            with db.connect(path) as conn:
+                if fault == "expired":
+                    conn.execute("UPDATE task_claims SET expires_at='2000' WHERE task_id=?", (task["id"],))
+                elif fault == "released":
+                    conn.execute("UPDATE task_claims SET released=1 WHERE task_id=?", (task["id"],))
+                elif fault == "execution":
+                    conn.execute("UPDATE agent_tasks SET current_execution_id=NULL WHERE id=?", (task["id"],))
+                else:
+                    conn.execute("UPDATE operation_workers SET closed=1 WHERE id=?", (worker.generation,))
+        return True
+
+    monkeypatch.setattr(work_queue, "renew", invalidate)
+    with pytest.raises(SafeOperationError):
+        worker.perform(record, threading.Event())
+    with db.connect(service.path) as conn:
+        current = conn.execute("SELECT * FROM operation_drafts WHERE id=?", (draft["id"],)).fetchone()
+        assert (current["plan_id"], current["revision"]) == (draft["plan_id"], draft["revision"])
+        plan = conn.execute("SELECT * FROM change_plans WHERE id=?", (draft["plan_id"],)).fetchone()
+        assert plan["status"] == "pending"
+        assert conn.execute("SELECT status FROM agent_tasks WHERE id=?", (plan["task_id"],)).fetchone()[0] == "awaiting_approval"
+        assert conn.execute("SELECT count(*) FROM change_plans").fetchone()[0] == 1
+    assert (root / "note.txt").read_text() == "before\n"
+
+
+@pytest.mark.parametrize("path", ["note.txt", "./note.txt", ".//note.txt"])
+def test_equivalent_safe_change_paths_use_the_approved_whole_file(setup, path):
+    request(setup, dict(summary="Read", changes=[], read_files=["./note.txt"]))
+    draft = open_scope(setup, dict(summary="Modify", changes=[dict(path=path, action="modify", content="after\n", reason="requested")]))
+    assert draft["plan_id"]
+    with db.connect(setup[2].path) as conn:
+        changes = json.loads(conn.execute("SELECT changes_json FROM change_plans WHERE id=?", (draft["plan_id"],)).fetchone()[0])
+        assert changes[0]["path"] == "note.txt"
+    assert (setup[0] / "note.txt").read_text() == "before\n"
+
+
+@pytest.mark.parametrize("path", ["../note.txt", "sub/../note.txt", "/note.txt", "AGENTS.md"])
+def test_change_path_normalization_does_not_relax_private_or_traversal_guards(setup, path):
+    request(setup, dict(summary="Read", changes=[], read_files=["note.txt"]))
+    draft = open_scope(setup, dict(summary="Invalid change", changes=[dict(path=path, action="modify", content="after", reason="invalid")]))
+    assert draft["plan_id"] is None
+    assert (setup[0] / "note.txt").read_text() == "before\n"
+
+
+@pytest.mark.parametrize("complete", [True, False])
+@pytest.mark.parametrize("unrelated_lost", [False, True])
+def test_resolved_interrupted_apply_settles_only_safe_draft_state(setup, monkeypatch, complete, unrelated_lost):
+    from nyanya_agent import reviewed_changes as files
+    from nyanya_agent.operation_spec import OperationSpec
+
+    root, worker, service, _, _ = setup
+    (root / "second.txt").write_text("second before\n")
+    names = ["note.txt"] if complete else ["note.txt", "second.txt"]
+    request(setup, dict(summary="Read", changes=[], read_files=names))
+    draft = open_scope(setup, dict(summary="Modify", changes=[dict(path=name, action="modify", content="after\n", reason="requested") for name in names]))
+    with db.connect(service.path) as conn:
+        plan = conn.execute("SELECT * FROM change_plans WHERE id=?", (draft["plan_id"],)).fetchone()
+    service.control(f"approve {plan['id']} {plan['plan_hash']}", "operator", wait=False)
+    fsync = files.os.fsync
+
+    def fail_directory_sync(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError("synthetic directory sync failure")
+        return fsync(fd)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(files.os, "fsync", fail_directory_sync)
+        assert worker.run_once()
+    assert files.get_plan(service.path, plan["id"], "operator")["status"] == "uncertain"
+    assert (root / "note.txt").read_text() == "after\n"
+    if unrelated_lost:
+        other = ledger.create_task(title="Unrelated uncertain apply", prompt="Separate evidence", requested_by="operator", db_path=service.path)
+        execution = ledger.create_execution(task_id=other["id"], adapter_type="operation", status="lost", db_path=service.path)
+        with db.connect(service.path) as conn:
+            conn.execute("UPDATE agent_tasks SET status='blocked',current_execution_id=? WHERE id=?", (execution["id"], other["id"]))
+            conn.execute("INSERT INTO task_operations(task_id,spec_json,worker_generation,parent_task_id,eligible) VALUES (?,?,?,?,0)",
+                         (other["id"], OperationSpec(kind="apply", workspace=str(root), plan_id="plan_unrelated").dumps(), worker.generation, plan["task_id"]))
+    evidence = files.reconcile(service.path, plan["id"], "operator")
+    files.resolve(service.path, plan["id"], "operator", files.evidence_hash(evidence))
+    current = draft_row(service)
+    if unrelated_lost:
+        assert current["status"] == "ready"
+        with db.connect(service.path) as conn:
+            assert store._unresolved_effects(conn, plan["task_id"])
+        with pytest.raises(SafeOperationError):
+            service.control(f"draft-close {draft['id']}", "operator", conversation_key="channel:a")
+    else:
+        assert current["status"] == ("applied" if complete else "closed")
+        service.control(f"draft-close {draft['id']}", "operator", conversation_key="channel:a")
+        follow_up = request(setup, dict(summary="Normal answer", changes=[]), "Explain a separate topic")
+        assert follow_up["status"] == "completed"
+    assert (root / "note.txt").read_text() == "after\n"
+    if not complete:
+        assert (root / "second.txt").read_text() == "second before\n"

@@ -274,10 +274,10 @@ def hold_legacy_for_quiesced_upgrade(path, *, writers_stopped, reason):
         return len(rows)
 
 
-def require_apply_ownership(conn, record, plan, owner):
+def require_execution_ownership(conn, record, owner):
     """Check a product worker's current operation, execution and unexpired claim."""
     if not record or not all(record.get(key) for key in ("task_id", "execution_id", "worker_id")):
-        raise SafeOperationError("File apply requires the current worker record")
+        raise SafeOperationError("Operation requires the current worker record")
     timestamp = now()
     cutoff = (datetime.now(UTC) - timedelta(seconds=30)).isoformat()
     row = conn.execute(
@@ -293,7 +293,12 @@ def require_apply_ownership(conn, record, plan, owner):
         (record["task_id"], record["execution_id"], record["worker_id"], owner, owner, timestamp, cutoff),
     ).fetchone()
     if not row:
-        raise SafeOperationError("File apply lost current operation execution/claim ownership")
+        raise SafeOperationError("Operation lost current execution/claim ownership")
+    return row
+
+
+def require_apply_ownership(conn, record, plan, owner):
+    row = require_execution_ownership(conn, record, owner)
     spec = OperationSpec.loads(row["spec_json"])
     if spec.workspace != plan["workspace"] or (
         spec.kind == "apply" and (spec.plan_id != plan["id"] or row["parent_task_id"] != plan["task_id"])
@@ -587,8 +592,13 @@ def list_text(path, owner):
 
 def _unresolved_effects(conn, task_id, *, include_lost=True):
     """A dismissal or repeat cancellation cannot erase an uncertain external effect."""
-    operation = conn.execute("SELECT parent_task_id FROM task_operations WHERE task_id=?", (task_id,)).fetchone()
-    resolution_owner = operation["parent_task_id"] if operation and operation["parent_task_id"] else task_id
+    operation = conn.execute(
+        "SELECT parent_task_id,json_extract(spec_json,'$.kind') AS kind FROM task_operations WHERE task_id=?",
+        (task_id,),
+    ).fetchone()
+    resolution_owner = operation["parent_task_id"] if (
+        operation and operation["kind"] == "apply" and operation["parent_task_id"]
+    ) else task_id
     ids = [task_id]
     if resolution_owner == task_id:
         ids.extend(row["task_id"] for row in conn.execute(

@@ -240,8 +240,16 @@ def merge(draft, changes):
     return list(combined.values())
 
 
-def link_plan_conn(conn, draft, task_id, plan_id):
-    from nyanya_agent.operation_store import _unresolved_effects
+def link_plan_conn(conn, draft, task_id, plan_id, *, record=None):
+    from nyanya_agent.operation_spec import OperationSpec
+    from nyanya_agent.operation_store import _unresolved_effects, require_execution_ownership
+
+    operation = require_execution_ownership(conn, record, draft["owner_key"])
+    spec = OperationSpec.loads(operation["spec_json"])
+    if record["task_id"] != task_id or spec.kind != "request" or spec.workspace != draft["workspace"] or (
+        spec.draft_id != draft["id"] and not (not spec.draft_id and draft["source_task_id"] == task_id)
+    ):
+        raise SafeOperationError("Draft feedback does not match the claimed operation")
 
     current = conn.execute("SELECT * FROM operation_drafts WHERE id=?", (draft["id"],)).fetchone()
     if not current or current["status"] != "ready" or current["revision"] != draft["revision"]:

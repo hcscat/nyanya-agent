@@ -8,6 +8,8 @@ The current local candidate adds an approved read scope before original contents
 
 Source-review follow-up retains marked approved undo context for pending deletions, permits safe closure of expired final candidates without changing their expiry evidence, and routes authenticated Telegram file controls through the existing operation service. Synthetic regressions cover restore-to-original/revised content, held-effect closure guards, Telegram approval/read-scope/feedback routing and actor/channel/hash checks. These corrections are source proof; they do not establish another operating rollout or live Telegram acceptance.
 
+Further review corrections recheck feedback execution/claim ownership inside the candidate-replacement transaction, canonicalize safe relative paths before approved-input membership checks, and settle draft state after exact observed-hash recovery only when no uncertain effects remain. Synthetic regressions inject cancellation, expired/released claims, replaced execution and stopped worker immediately after renewal, plus complete/partial recovery with an unrelated lost apply attempt. Operating deployment remains separate.
+
 ## PR 2 review correction
 
 The task-list classifier now accepts complete negative rerun/resume qualifiers while holding mixed-effect requests for clarification. `tests/test_workflow_dispatch.py` covers classification, unchanged tasks/approvals, owner/conversation selection fences and synthetic Discord intake without model submission. This is a source correction; live connector acceptance and operating deployment remain separate. The dated review below is historical evidence, not the current PR validation result.

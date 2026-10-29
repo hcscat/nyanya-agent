@@ -344,13 +344,13 @@ class Worker:
                 scope = work_drafts.create(self.path, record, [])
                 draft = work_drafts.load(self.path, scope["id"], record)
             for item in reply["changes"]:
-                if item.get("action") != "create" and item.get("path") not in baseline:
+                if item.get("action") != "create" and str(reviewed_changes.relative(item["path"])) not in baseline:
                     raise ValueError("Draft changes require a complete current input file")
             changes = work_drafts.merge(draft, reply["changes"])
             if not changes:
                 with db.connect(self.path) as conn:
                     conn.execute("BEGIN IMMEDIATE")
-                    work_drafts.link_plan_conn(conn, draft, record["task_id"], None)
+                    work_drafts.link_plan_conn(conn, draft, record["task_id"], None, record=record)
                 return TaskOutcome("succeeded", summary + "\nNo remaining file changes in this draft.")
             plan = reviewed_changes.propose(
                 self.path,
@@ -361,6 +361,7 @@ class Worker:
                 draft["original"],
                 task_kind=classification.get("task_kind", "work"),
                 draft_context=draft,
+                record=record,
             )
             return TaskOutcome(
                 "awaiting_approval", summary + f"\n초안: {draft['id']} · 원본 변경 없음\n" + reviewed_changes.preview(self.path, plan["id"], record["owner"])
