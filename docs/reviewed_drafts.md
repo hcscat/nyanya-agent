@@ -25,6 +25,8 @@ A single ready draft in the same conversation generation is reused for ordinary 
 
 Adding another input file requires a new approved scope. Close the current settled draft and request the expanded plan. A short assent, a remembered instruction or a model-produced command never substitutes for an authenticated control command. Controls use the connector's existing actor/channel checks and API token protections.
 
+An expired final candidate can be closed to release its draft slot. Its original expiry state and evidence remain preserved. Approved, applying or uncertain plans stay held; expiration is not permission to discard active or unresolved effects.
+
 ## Bounds and retention
 
 The approved input list is limited to 80 files and 50,000 UTF-8 bytes in total. The working copy and final candidate use the existing 2,000,000-byte/40-change bounds, and each owner can have at most 20 pending/ready drafts. Whole files that do not fit the provider input budget are omitted; they cannot be edited by that result. Original files may only be modified/deleted when included completely in the current input.

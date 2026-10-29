@@ -352,3 +352,35 @@ def test_late_feedback_cannot_replace_a_newer_draft(setup):
     with db.connect(service.path) as conn:
         assert conn.execute("SELECT count(*) FROM change_plans").fetchone()[0] == before
         assert conn.execute("SELECT status FROM change_plans WHERE id=?", (draft["plan_id"],)).fetchone()[0] == "pending"
+
+
+def test_expired_final_plan_can_be_closed_without_losing_expiry_evidence(setup, monkeypatch):
+    from nyanya_agent import reviewed_changes
+
+    root, _, service, _, _ = setup
+    monkeypatch.setattr(work_drafts, "MAX_OPEN_DRAFTS", 1)
+    request(setup, dict(summary="Draft output", changes=[dict(path="answer.txt", action="create", content="pending", reason="requested")]))
+    draft = draft_row(service)
+    with db.connect(service.path) as conn:
+        conn.execute("UPDATE change_plans SET expires_at='2000' WHERE id=?", (draft["plan_id"],))
+    reviewed_changes.settle_expired(service.path)
+    service.control(f"draft-close {draft['id']}", "operator", conversation_key="channel:a")
+    assert draft_row(service)["status"] == "closed"
+    with db.connect(service.path) as conn:
+        assert conn.execute("SELECT status FROM change_plans WHERE id=?", (draft["plan_id"],)).fetchone()[0] == "expired"
+        assert conn.execute("SELECT count(*) FROM change_journal").fetchone()[0] == 0
+    assert not list(root.glob("nyanya-tasks/**/*"))
+    task = request(setup, dict(summary="Read scope", changes=[], read_files=["note.txt"]))
+    assert task["status"] == "awaiting_approval" and draft_row(service)["id"] != draft["id"]
+
+
+@pytest.mark.parametrize("status", ["approved", "applying", "uncertain"])
+def test_expiry_closure_does_not_relax_active_or_uncertain_plan_guards(setup, status):
+    request(setup, dict(summary="Draft output", changes=[dict(path="answer.txt", action="create", content="pending", reason="requested")]))
+    service = setup[2]
+    draft = draft_row(service)
+    with db.connect(service.path) as conn:
+        conn.execute("UPDATE change_plans SET status=? WHERE id=?", (status, draft["plan_id"]))
+    with pytest.raises(SafeOperationError):
+        service.control(f"draft-close {draft['id']}", "operator", conversation_key="channel:a")
+    assert draft_row(service)["status"] == "ready"

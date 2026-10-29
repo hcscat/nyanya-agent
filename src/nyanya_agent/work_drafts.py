@@ -299,9 +299,10 @@ def close(path, identifier, owner, *, conversation_key=None):
             return
         if live["plan_id"]:
             plan = conn.execute("SELECT * FROM change_plans WHERE id=?", (live["plan_id"],)).fetchone()
-            if plan["status"] not in {"pending", "revoked"}:
+            if plan["status"] not in {"pending", "revoked", "expired"}:
                 raise SafeOperationError("Draft plan cannot be closed safely")
-            conn.execute("UPDATE change_plans SET status='revoked' WHERE id=?", (plan["id"],))
+            if plan["status"] == "pending":
+                conn.execute("UPDATE change_plans SET status='revoked' WHERE id=?", (plan["id"],))
         for task in tasks:
             if task["status"] == "awaiting_approval":
                 _settle_review(conn, task["id"], "cancelled", "Draft explicitly closed")
