@@ -301,7 +301,7 @@ def test_inline_request_still_requires_registered_workspace(tmp_path, monkeypatc
 
 
 def test_worker_stages_only_selected_sanitized_files(tmp_path, monkeypatch):
-    from nyanya_agent import execution_store as ledger, operation_store as store
+    from nyanya_agent import execution_store as ledger, operation_store as store, work_drafts, database as db
     from nyanya_agent.operation_spec import OperationSpec
     from nyanya_agent.operation_worker import Worker
 
@@ -318,14 +318,15 @@ def test_worker_stages_only_selected_sanitized_files(tmp_path, monkeypatch):
 
     def model(profile, prompt, workspace, timeout, cancel):
         paths = {p.relative_to(workspace).as_posix() for p in workspace.rglob("*") if p.is_file()}
-        assert paths == {"src/worker.py"}
+        assert paths == (set() if len(seen) < 2 else {"src/worker.py"})
         assert "synthetic-config-secret" not in prompt
         assert "private unrelated text" not in prompt
         assert "Local instructions must stay private" not in prompt
         seen.append(profile)
         if prompt.startswith("Return only JSON"):
             return json.dumps({"importance": 1, "impact": 1, "complexity": 1, "reason": "fixture"})
-        return json.dumps({"summary": "safe analysis complete", "changes": []})
+        return json.dumps({"summary": "safe analysis complete", "changes": [],
+                           "read_files": ["src/worker.py"] if len(seen) == 2 else []})
 
     path = tmp_path / "state.db"
     worker = Worker(path, invoke=model)
@@ -333,8 +334,13 @@ def test_worker_stages_only_selected_sanitized_files(tmp_path, monkeypatch):
         prompt="Inspect src/worker.py and settings.json AGENTS.md .env", workspace=str(root),
     ), "operator", worker.generation)
     worker.run_once()
-    assert ledger.get_task(task["id"], db_path=path)["status"] == "completed"
-    assert len(seen) == 2
+    assert ledger.get_task(task["id"], db_path=path)["status"] == "awaiting_approval"
+    with db.connect(path) as conn:
+        scope = conn.execute("SELECT * FROM operation_drafts").fetchone()
+    child, _ = work_drafts.open_and_submit(path, scope["id"], scope["scope_hash"], "operator", worker.generation)
+    worker.run_once()
+    assert ledger.get_task(child["id"], db_path=path)["status"] == "completed"
+    assert len(seen) == 4
 
 
 @pytest.mark.parametrize("crowding", ["directories", "filenames"])

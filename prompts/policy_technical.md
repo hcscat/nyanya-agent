@@ -47,13 +47,7 @@ Flash assesses each request; a recorded Flash/Luna/Astra profile produces bounde
 analysis or a concrete UTF-8 file plan. Model choice never changes permissions.
 Legacy provider checks and adapters are compatibility interfaces, not bypasses.
 
-The model receives a bounded disposable workspace snapshot. It must return
-summary/changes JSON; arbitrary shell execution and browser mutations are outside
-this slice. New files use exclusive creation in unique work/date task folders.
-Existing file modifications and deletions require owner/plan/hash/expiry-bound
-approval. Only reviewed_changes applies files, under a workspace lock with
-preimage validation and an apply journal. Approval words and feedback.review
-records never grant file writes. Re-read workspace registration before execution.
+Normal file work starts without original contents. An authenticated exact read scope permits bounded copies into a draft; model invocations receive temporary copies and return summary/changes JSON. Feedback revises the latest immutable candidate without changing originals. All create/modify/delete effects require owner/plan/hash/expiry-bound final approval. Only reviewed_changes applies files under its existing workspace lock, preimage checks and journal. Native original-workspace denial supplements provider planning/read-only options; unsupported protected execution stays held. This is not complete host or credential isolation. Approval words and remembered feedback never grant writes. Re-read workspace registration before execution. See docs/reviewed_drafts.md.
 
 Interrupted work is held without automatic retry. Reconcile partial file effects
 before any fresh plan; never replay an apply operation. After another task succeeds,

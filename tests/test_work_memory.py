@@ -391,7 +391,7 @@ def test_migration_eight_is_additive_and_previous_code_can_read_old_tables(tmp_p
         tables = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'") if row[0] != 'schema_migrations']
         columns = {name: ','.join(f'"{row[1]}"' for row in conn.execute(f'PRAGMA table_info("{name}")')) for name in tables}
         before = {name: [tuple(row) for row in conn.execute(f'SELECT {columns[name]} FROM "{name}"')] for name in tables}
-    assert ledger.apply_migrations(path) == 9
+    assert ledger.apply_migrations(path) == len(migrations)
     with db.connect(path) as conn:
         after = {name: [tuple(row) for row in conn.execute(f'SELECT {columns[name]} FROM "{name}"')] for name in tables}
         assert conn.execute("SELECT memory_reset_generation FROM conversation_sessions").fetchone()[0] == 0

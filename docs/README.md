@@ -15,6 +15,7 @@ Use stable names for current contracts, such as `development_status.md` and `ope
 | Area | Document | Purpose |
 |---|---|---|
 | Current development status | [Development status and remaining work](development_status.md) | Implemented/verified/deferred behavior, file-safety intent corrections and timeline |
+| Reviewed file drafts | [Plan, copies, feedback and final approval](reviewed_drafts.md) | Exact read scope, original preservation, commands, bounds and native guard limits |
 | Topic memory | [LLM Wiki](llm_wiki.md) | Memory screen areas/buttons, cited summaries, scoped recall, conflicts, review and forgetting |
 | P0 execution record | [P0 implementation (2026-09-12)](p0_execution_20260912.md) | Serializable workers, routing, reviewed apply, recovery and migration |
 | Automated tests | [Python test catalog](test_catalog.md) | File-by-file inputs, assertions, execution types and limits |

@@ -63,6 +63,9 @@ def read_result_file(path):
 
 
 def run_command(command, *, cwd, timeout, cancel_event=None, provider=None, result_file=None):
+    from nyanya_agent.provider_isolation import isolated_command
+
+    command = isolated_command(command, cwd)
     if result_file is not None:
         _require_result_file_support()
     with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:

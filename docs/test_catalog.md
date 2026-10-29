@@ -18,6 +18,10 @@ The document-upload follow-up adds the four test files below. They use synthetic
 
 [test_dashboard_memory_ui.py](../tests/test_dashboard_memory_ui.py) executes the shipped memory render/control functions with Node and a synthetic DOM. It checks empty/populated views, HTML escaping, owner/workspace/project/session payloads, review/forget actions and full-script locked-page bootstrap against the shipped HTML IDs. Its pager stub keeps the memory contract separate from the shared pagination tests. It does not establish real-browser layout, live Discord delivery or operating-service acceptance. Use the exact review branch's collection and execution results for its current count.
 
+## Reviewed-copy workflow regression
+
+[test_draft_workflow.py](../tests/test_draft_workflow.py) uses isolated state and synthetic models/files to check scope approval before copying, unchanged originals, iterative feedback, exact final create/modify/delete approval, wrong/stale hashes, closure/expiry/retention and native direct-access/ancestor-rename denial. Existing conversation/provider and apply tests now follow the two approval boundaries. Real provider startup and operating connector acceptance require separate results.
+
 ## Current complete test files
 
 The table in this section is the historical 2026-10-13 inventory. Its dashboard follow-up recorded **961 passed, one external Starlette/AnyIO warning**. The earlier 948/957-case results describe preceding candidates. These records and the later pre-upload 1089-test result do not validate a separated review branch. Tests used temporary state/env/DB and called neither real models nor operating services.

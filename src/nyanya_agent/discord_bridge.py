@@ -221,6 +221,7 @@ def main() -> int:
             *GET_HOME_COMMANDS,
             "why", "plan", "plan-file", "approve", "revoke", "resume",
             "reconcile", "resolve", "result", "결과", "recovery", "복구",
+            "open-draft", "draft-show", "draft-close", "draft-feedback",
             "reset",
             "/reset",
             "save",
@@ -544,9 +545,9 @@ def main() -> int:
         if command in TASK_STATUS_COMMANDS:
             return finish("작업 목록 범위를 확인하세요. tasks 또는 tasks all을 사용하세요.", mode="control")
 
-        if command in {'why', 'plan', 'approve', 'revoke', 'resume', 'reconcile', 'resolve', 'plan-file'} or (command == 'cancel' and len(text.split()) == 2):
+        if command in {'why', 'plan', 'approve', 'revoke', 'resume', 'reconcile', 'resolve', 'plan-file', 'open-draft', 'draft-show', 'draft-close', 'draft-feedback'} or (command == 'cancel' and len(text.split()) == 2):
             try:
-                response = store.operations.control(text, owner_key, responder=respond_later)
+                response = store.operations.control(text, owner_key, conversation_key=conversation_key, responder=respond_later)
                 return finish(response or '명령 인자를 확인하세요.', mode='control')
             except (ValueError, PermissionError, OSError) as exc:
                 return finish(f'제어 요청을 처리하지 못했습니다: {type(exc).__name__}. 소유자·상태·변경안 hash를 확인하세요.', status='failed', mode='control')

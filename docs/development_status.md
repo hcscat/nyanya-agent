@@ -2,6 +2,10 @@
 
 The source version is `0.3.0`. This document separates implemented contracts, historical validation and deferred work. Git review publication does not deploy an operating instance or publish an npm release.
 
+## Reviewed-copy workflow
+
+The current local candidate adds an approved read scope before original contents are copied, durable bounded copies in the existing SQLite ledger (additive schema v10), temporary per-call materialization, same-conversation draft feedback and exact final approval for new files as well as existing-file edits/deletions. Stale candidates are revoked; original preimages and uncertain-effects guards remain authoritative. Normal model children receive an additional macOS original-workspace denial and fail closed when it is unavailable. This is a local development candidate; source tests, operating installation and real connector acceptance are reported separately. See [reviewed drafts](reviewed_drafts.md) for functions, commands, limits and platform implications.
+
 ## PR 2 review correction
 
 The task-list classifier now accepts complete negative rerun/resume qualifiers while holding mixed-effect requests for clarification. `tests/test_workflow_dispatch.py` covers classification, unchanged tasks/approvals, owner/conversation selection fences and synthetic Discord intake without model submission. This is a source correction; live connector acceptance and operating deployment remain separate. The dated review below is historical evidence, not the current PR validation result.
@@ -37,7 +41,7 @@ Each review branch must report focused/full tests and package/build results for 
 |---|---|---|
 | Request processing | Terminal, Discord and authenticated API → OperationService → data-only OperationSpec → atomic claim by a separate worker | Two independent requests by default, configurable concurrency of 1–4; no decomposition of one request into multiple agents |
 | Model routing | Flash assessment first; importance and impact below 4 with complexity 3–4 select Luna XHigh; importance or impact ≥4, or complexity 5, selects Sol High | Lower complexity uses Flash; `astra` is a compatible Sol alias; no automatic model discovery or switching |
-| File operations | Bounded snapshots of registered workspaces, exclusive new-file creation, immutable existing-file plans with owner/hash/expiry/preimage approval and journals | POSIX UTF-8 regular-file editing; arbitrary shell/test execution, binary editing and directory moves/deletion are not connected to normal intake |
+| File operations | Exact approved input copies, draft feedback, immutable create/modify/delete plans with owner/hash/expiry/preimage approval and journals | POSIX UTF-8 regular-file editing; arbitrary shell/test execution, binary editing and directory moves/deletion are not connected to normal intake |
 | Document upload | Local whole-document extraction within bounds; counts-only personal-information report and original-actor/channel/file/hash/destination-bound confirmation, TTL 300 seconds and one send attempt | Supported text and text-only OOXML only; credentials and uninspectable content held; at most 8 MiB subject to SDK guild metadata; zero patterns is not a safety guarantee and uncertain delivery is never auto-retried |
 | Duplicate approval | Approval and apply admission share one BEGIN IMMEDIATE transaction; reuse the child for the same plan/hash | Conflicting legacy children remain held rather than being deleted or selected automatically |
 | Queries, cancellation and recovery | Owner-scoped tasks/why/cancel/dismiss, conversation selection revisions, interruption holds and explicit resume/reconcile/resolve | Queries and cancellation do not create model tasks; uncertain effects are never replayed automatically |
