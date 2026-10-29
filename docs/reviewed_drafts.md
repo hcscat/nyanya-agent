@@ -23,6 +23,8 @@ A single ready draft in the same conversation generation is reused for ordinary 
 | `draft-close <id>` | Close a settled draft and revoke its pending candidate; originals and evidence remain |
 | `plan`, `plan-file`, `approve`, `revoke` | Existing immutable final-plan review, exact approval and revocation |
 
+Discord and Telegram route these explicit file controls to the same operation authority. Telegram accepts the displayed bare command, `/command` and the normal `/command@bot` form. Its incoming chat/user checks run first; the existing owner, workspace, channel and hash checks remain authoritative. This wires file approvals and draft feedback, not complete Telegram natural-language/control parity or durable delivery.
+
 Adding another input file requires a new approved scope. Close the current settled draft and request the expanded plan. A short assent, a remembered instruction or a model-produced command never substitutes for an authenticated control command. Controls use the connector's existing actor/channel checks and API token protections.
 
 An expired final candidate can be closed to release its draft slot. Its original expiry state and evidence remain preserved. Approved, applying or uncertain plans stay held; expiration is not permission to discard active or unresolved effects.

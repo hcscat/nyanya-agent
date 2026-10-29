@@ -28,6 +28,7 @@ from nyanya_agent.bridge_common import (
     CANCEL_USER_COMMANDS,
     GET_HOME_COMMANDS,
     HELP_COMMANDS,
+    REVIEWED_FILE_COMMANDS,
     NyaNyaConversationStore,
     NyaNyaTask as NyaNyaTask,
     SET_HOME_COMMANDS,
@@ -219,9 +220,8 @@ def main() -> int:
             *SET_HOME_COMMANDS,
             *UNSET_HOME_COMMANDS,
             *GET_HOME_COMMANDS,
-            "why", "plan", "plan-file", "approve", "revoke", "resume",
-            "reconcile", "resolve", "result", "결과", "recovery", "복구",
-            "open-draft", "draft-show", "draft-close", "draft-feedback",
+            *REVIEWED_FILE_COMMANDS, "why", "resume",
+            "result", "결과", "recovery", "복구",
             "reset",
             "/reset",
             "save",
@@ -545,7 +545,7 @@ def main() -> int:
         if command in TASK_STATUS_COMMANDS:
             return finish("작업 목록 범위를 확인하세요. tasks 또는 tasks all을 사용하세요.", mode="control")
 
-        if command in {'why', 'plan', 'approve', 'revoke', 'resume', 'reconcile', 'resolve', 'plan-file', 'open-draft', 'draft-show', 'draft-close', 'draft-feedback'} or (command == 'cancel' and len(text.split()) == 2):
+        if command in REVIEWED_FILE_COMMANDS or command in {'why', 'resume'} or (command == 'cancel' and len(text.split()) == 2):
             try:
                 response = store.operations.control(text, owner_key, conversation_key=conversation_key, responder=respond_later)
                 return finish(response or '명령 인자를 확인하세요.', mode='control')

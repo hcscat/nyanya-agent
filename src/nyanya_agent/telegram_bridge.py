@@ -21,6 +21,7 @@ from nyanya_agent.bridge_common import (
     CANCEL_USER_COMMANDS,
     GET_HOME_COMMANDS,
     HELP_COMMANDS,
+    REVIEWED_FILE_COMMANDS,
     NyaNyaConversationStore,
     SET_HOME_COMMANDS,
     TASK_STATUS_COMMANDS,
@@ -114,6 +115,16 @@ class TelegramBridge:
 
         def responder(response: str) -> None:
             self.send(chat_id, response)
+
+        if command.removeprefix("/") in REVIEWED_FILE_COMMANDS:
+            parts = text.split(maxsplit=1)
+            control = command.removeprefix("/") + (" " + parts[1] if len(parts) == 2 else "")
+            try:
+                return self.store.operations.control(
+                    control, owner_key, conversation_key=conversation_key, responder=responder,
+                ) or "명령 인자를 확인하세요."
+            except (ValueError, PermissionError, OSError, RuntimeError) as exc:
+                return f"제어 요청을 처리하지 못했습니다: {type(exc).__name__}. 소유자·상태·변경안 hash를 확인하세요."
 
         if command in CANCEL_ALL_COMMANDS:
             if not self.store.is_owner(user_id):

@@ -60,7 +60,7 @@ See [security](security_and_reliability.md), [conversation controls](operations_
 
 ## Remaining integration
 
-Durable inbox/outbox/destination/receipt handling is absent. `request_read_model` begins with legacy envelopes, so all-ingress statistics need work. Telegram lacks parity for all owner/conversation/control contracts. Provider-session ownership and safe monthly reuse/deletion need separate verification.
+Durable inbox/outbox/destination/receipt handling is absent. `request_read_model` begins with legacy envelopes, so all-ingress statistics need work. Telegram file-plan and draft controls share the operation authority, while full owner/conversation/natural-language control parity remains incomplete. Provider-session ownership and safe monthly reuse/deletion need separate verification.
 
 Commands and multi-agent DAG decomposition are isolated design primitives or recommendations. Private proxy access does not implement remote workers. Additional hosts, public hosting, resource scheduling and remote DBs remain deferred.
 

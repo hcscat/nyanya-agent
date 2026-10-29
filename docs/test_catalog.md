@@ -22,6 +22,8 @@ The document-upload follow-up adds the four test files below. They use synthetic
 
 [test_draft_workflow.py](../tests/test_draft_workflow.py) uses isolated state and synthetic models/files to check scope approval before copying, unchanged originals, iterative feedback, exact final create/modify/delete approval, wrong/stale hashes, closure/expiry/retention and native direct-access/ancestor-rename denial. Existing conversation/provider and apply tests now follow the two approval boundaries. Real provider startup and operating connector acceptance require separate results.
 
+[test_telegram_drafts.py](../tests/test_telegram_drafts.py) exercises synthetic Telegram update-to-operation routing: bare/slash/bot-suffixed approvals, duplicate admission, read scopes, feedback/show/close, wrong actor/channel/hash, unlisted chats and help rendering. The fake sender and model make no Bot API/provider calls; this is not live Telegram acceptance.
+
 ## Current complete test files
 
 The table in this section is the historical 2026-10-13 inventory. Its dashboard follow-up recorded **961 passed, one external Starlette/AnyIO warning**. The earlier 948/957-case results describe preceding candidates. These records and the later pre-upload 1089-test result do not validate a separated review branch. Tests used temporary state/env/DB and called neither real models nor operating services.
