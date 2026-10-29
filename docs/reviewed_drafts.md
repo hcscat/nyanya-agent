@@ -27,6 +27,8 @@ Adding another input file requires a new approved scope. Close the current settl
 
 An expired final candidate can be closed to release its draft slot. Its original expiry state and evidence remain preserved. Approved, applying or uncertain plans stay held; expiration is not permission to discard active or unresolved effects.
 
+Pending deletions retain their approved original text as explicitly marked undo context, without materializing that file in the temporary draft directory. Feedback can restore or revise that input using `modify`. Restoring the original text removes the proposed deletion; changing it creates a new reviewed candidate. Neither path reads a new original nor bypasses final approval or the whole-file input budget.
+
 ## Bounds and retention
 
 The approved input list is limited to 80 files and 50,000 UTF-8 bytes in total. The working copy and final candidate use the existing 2,000,000-byte/40-change bounds, and each owner can have at most 20 pending/ready drafts. Whole files that do not fit the provider input budget are omitted; they cannot be edited by that result. Original files may only be modified/deleted when included completely in the current input.

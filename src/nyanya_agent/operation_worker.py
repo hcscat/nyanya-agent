@@ -44,6 +44,9 @@ When a CURRENT draft snapshot is supplied, return only the delta from that draft
 Earlier draft changes remain until explicitly revised or removed. A file created in a draft is
 still only a draft; do not claim original files were changed. New and existing files all await
 the exact final file-plan approval. A further input outside the approved scope requires a new scope.
+An input marked pending_deletion retains its approved original text only for feedback/undo;
+it is absent from the working directory. Use modify to restore or revise that original input,
+not create. Its pending deletion is still only a proposal, not an original filesystem effect.
 Use changes=[] for analysis. DO NOT change files or run side-effecting tools. Existing files are only
 editable through the separate reviewed apply engine. New files are placed in a unique task folder.
 Only files in the supplied snapshot may be modified/deleted. No installs, network mutations or
@@ -113,11 +116,18 @@ def _current_prompt(contract, request, snapshot=None, omitted=0, diagnostics=Non
     return value
 
 
+def _snapshot_item(item):
+    value = {"sha256": item["sha256"], "content": item["content"]}
+    if item.get("pending_deletion") is True:
+        value["pending_deletion"] = True
+    return value
+
+
 def _bounded_snapshot(request, baseline, diagnostics=None):
     """Retain full file preimages while preserving the entire current request."""
     selected = {}
     for name, item in baseline.items():
-        candidate = {**selected, name: {"sha256": item["sha256"], "content": item["content"]}}
+        candidate = {**selected, name: _snapshot_item(item)}
         prompt = _current_prompt(RESPONSE, request, candidate, len(baseline), diagnostics)
         reserve = 0 if diagnostics is None else max(0, _diagnostic_budget() - len(_context_diagnostics(diagnostics).encode()))
         if len((prompt + HISTORY_LABEL + "{}").encode("utf-8")) + reserve <= MAX_PROMPT_BYTES:
@@ -263,6 +273,8 @@ class Worker:
         with protect_original(root), tempfile.TemporaryDirectory(prefix="nyanya-input-") as directory:
             staging = Path(directory)
             for name, item in baseline.items():
+                if item.get("pending_deletion") is True:
+                    continue
                 target = staging / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(item["content"])
@@ -284,7 +296,7 @@ class Worker:
                 metadata={"profile": selected},
                 db_path=self.path,
             )
-            context = {name: {"sha256": item["sha256"], "content": item["content"]} for name, item in baseline.items()}
+            context = {name: _snapshot_item(item) for name, item in baseline.items()}
             record["stage"] = "model_result"
             reply = model_routing.parse_object(
                 self.invoke(

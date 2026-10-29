@@ -191,7 +191,7 @@ def current_snapshot(draft):
     values = {name: dict(item) for name, item in draft["original"].items()}
     for change in draft["changes"]:
         if change["action"] == "delete":
-            values.pop(change["path"], None)
+            values[change["path"]]["pending_deletion"] = True
         else:
             values[change["path"]] = {"content": change["content"], "sha256": digest(change["content"].encode())}
     if sum(len(x["content"].encode()) for x in values.values()) > 2_000_000:

@@ -384,3 +384,35 @@ def test_expiry_closure_does_not_relax_active_or_uncertain_plan_guards(setup, st
     with pytest.raises(SafeOperationError):
         service.control(f"draft-close {draft['id']}", "operator", conversation_key="channel:a")
     assert draft_row(service)["status"] == "ready"
+
+
+@pytest.mark.parametrize("restored", ["before\n", "revised restoration\n"])
+def test_feedback_can_restore_a_deleted_input_without_another_read_approval(setup, restored):
+    root, worker, service, _, prompts = setup
+    request(setup, dict(summary="Read", changes=[], read_files=["note.txt"]))
+    draft = open_scope(setup, dict(summary="Propose deletion", changes=[dict(path="note.txt", action="delete", content="", reason="requested")]))
+    model = worker.invoke
+
+    def inspect(profile, prompt, cwd, *args):
+        assert not (Path(cwd) / "note.txt").exists()
+        return model(profile, prompt, cwd, *args)
+
+    worker.invoke = inspect
+    task = request(setup, dict(summary="Restore draft input", changes=[dict(path="note.txt", action="modify", content=restored, reason="undo deletion")]), "Restore the deleted draft input")
+    assert task["status"] in {"completed", "awaiting_approval"}
+    assert (root / "note.txt").read_text() == "before\n"
+    snapshot, _ = json.JSONDecoder().raw_decode(prompts[-1].split("CURRENT request-scoped snapshot (whole files only):\n", 1)[1])
+    assert snapshot["note.txt"]["pending_deletion"] is True
+    assert snapshot["note.txt"]["content"] == "before\n"
+    with db.connect(service.path) as conn:
+        assert conn.execute("SELECT status FROM change_plans WHERE id=?", (draft["plan_id"],)).fetchone()[0] == "revoked"
+        assert conn.execute("SELECT count(*) FROM operation_drafts").fetchone()[0] == 1
+    current = draft_row(service)
+    if restored == "before\n":
+        assert current["plan_id"] is None
+    else:
+        with db.connect(service.path) as conn:
+            plan = conn.execute("SELECT * FROM change_plans WHERE id=?", (current["plan_id"],)).fetchone()
+        service.control(f"approve {plan['id']} {plan['plan_hash']}", "operator", wait=False)
+        assert worker.run_once()
+        assert (root / "note.txt").read_text() == restored
