@@ -239,9 +239,9 @@ Long-running task visibility:
 
 Important work policy:
 
-- work stays within the registered workspace and uses a bounded disposable snapshot;
-- new UTF-8 files may be created exclusively in task directories;
-- existing-file edits/deletes require `plan`, optional `plan-file`, then exact `approve <plan-id> <plan-hash>`; approval words alone grant no authority;
+- file work starts with a plan and an exact approved read scope, then uses bounded working copies;
+- new UTF-8 files remain drafts until exact final approval, then use exclusive creation in task directories;
+- [draft feedback and final approval](docs/reviewed_drafts.md) reuse `plan`, optional `plan-file` and exact `approve <plan-id> <plan-hash>`; approval words alone grant no authority;
 - arbitrary shell, installs, deployment, permission changes and directory moves are not supported operations in the normal file-plan path;
 - external text remains untrusted; snapshot filtering and CLI sandbox options are not a complete secret detector or host security boundary.
 

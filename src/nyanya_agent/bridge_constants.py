@@ -21,6 +21,10 @@ SET_HOME_COMMANDS = {"set_home", "/set_home", "홈설정", "/홈설정"}
 GET_HOME_COMMANDS = {"home", "/home", "get_home", "/get_home", "홈", "/홈"}
 UNSET_HOME_COMMANDS = {"unset_home", "/unset_home", "홈해제", "/홈해제"}
 HELP_COMMANDS = {"help", "/help", "commands", "/commands", "명령어", "/명령어", "도움말", "/도움말"}
+REVIEWED_FILE_COMMANDS = frozenset({
+    "plan", "plan-file", "approve", "revoke", "reconcile", "resolve",
+    "open-draft", "draft-show", "draft-close", "draft-feedback",
+})
 TASK_STATUS_COMMANDS = {
     "tasks",
     "/tasks",

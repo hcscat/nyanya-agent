@@ -223,7 +223,7 @@ def snapshot(root, request=None, diagnostics=None):
     return values
 
 
-def propose(path, task_id, owner, root, changes, baseline, *, task_kind="work"):
+def propose(path, task_id, owner, root, changes, baseline, *, task_kind="work", draft_context=None, record=None):
     root = check_workspace(root, owner)
     if not isinstance(changes, list) or not 1 <= len(changes) <= 40:
         raise SafeOperationError("Invalid change list")
@@ -234,6 +234,10 @@ def propose(path, task_id, owner, root, changes, baseline, *, task_kind="work"):
     seen = set()
     total = 0
     directory = f"nyanya-tasks/{task_kind}/{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}-{plan_id}"
+    if draft_context:
+        from nyanya_agent.work_drafts import directory as draft_directory
+
+        directory = draft_directory(draft_context["id"])
     for item in changes:
         if not isinstance(item, dict) or set(item) - {"path", "action", "content", "reason"}:
             raise SafeOperationError("Unknown file change field")
@@ -243,11 +247,11 @@ def propose(path, task_id, owner, root, changes, baseline, *, task_kind="work"):
         if action not in {"create", "modify", "delete"} or not isinstance(reason, str) or not reason.strip():
             raise SafeOperationError("Action and rationale required")
         if action == "create":
-            name = f"{directory}/{name}"
+            name = name if draft_context and name.startswith(directory + "/") else f"{directory}/{name}"
         if name in seen:
             raise SafeOperationError("Duplicate file operation")
         seen.add(name)
-        before = read_file(root, name)
+        before = (baseline[name]["content"].encode() if name in baseline else None) if draft_context else read_file(root, name)
         if action == "create" and before is not None:
             raise SafeOperationError("Creation would overwrite a file")
         if action != "create" and (
@@ -274,7 +278,7 @@ def propose(path, task_id, owner, root, changes, baseline, *, task_kind="work"):
         )
     encoded = json.dumps(prepared, ensure_ascii=False, sort_keys=True)
     plan_hash = digest(encoded.encode())
-    automatic = all(x["action"] == "create" for x in prepared)
+    automatic = not draft_context and all(x["action"] == "create" for x in prepared)
     with db.connect(path) as conn:
         conn.execute("BEGIN IMMEDIATE")
         task = conn.execute("SELECT requested_by FROM agent_tasks WHERE id=?", (task_id,)).fetchone()
@@ -297,6 +301,10 @@ def propose(path, task_id, owner, root, changes, baseline, *, task_kind="work"):
                 now(),
             ),
         )
+        if draft_context:
+            from nyanya_agent.work_drafts import link_plan_conn
+
+            link_plan_conn(conn, draft_context, task_id, plan_id, record=record)
         ledger.append_event_conn(
             conn,
             task_id=task_id,
@@ -347,6 +355,10 @@ def decide(path, plan_id, owner, plan_hash="", revoke=False):
 
 
 def decide_conn(conn, plan_id, owner, plan_hash="", revoke=False):
+    from nyanya_agent.work_drafts import require_plan_conn
+
+    if not revoke:
+        require_plan_conn(conn, plan_id)
     """Reuse decision checks within the caller's atomic approval/admission transaction."""
     row = conn.execute("SELECT * FROM change_plans WHERE id=? AND owner_key=?", (plan_id, owner)).fetchone()
     if not row or row["status"] not in {"pending", "approved"}:
@@ -510,6 +522,9 @@ def apply(path, plan_id, owner, cancel_event=None, *, record=None):
     root = check_workspace(plan["workspace"], owner)
 
     def require_eligible(conn, expected_status):
+        from nyanya_agent.work_drafts import require_plan_conn
+
+        require_plan_conn(conn, plan_id)
         if cancel_event and cancel_event.is_set():
             raise SafeOperationError("Apply cancelled; reconcile journal before retry")
         parent = conn.execute("SELECT * FROM agent_tasks WHERE id=?", (plan["task_id"],)).fetchone()
@@ -619,6 +634,7 @@ def apply(path, plan_id, owner, cancel_event=None, *, record=None):
                 conn.execute("BEGIN IMMEDIATE")
                 require_eligible(conn, "applying")
                 conn.execute("UPDATE change_plans SET status='applied' WHERE id=?", (plan_id,))
+                conn.execute("UPDATE operation_drafts SET status='applied',updated_at=? WHERE plan_id=? AND status='ready'", (now(), plan_id))
                 ledger.append_event_conn(
                     conn,
                     task_id=plan["task_id"],
@@ -715,6 +731,12 @@ def resolve(path, plan_id, owner, observed_hash):
                           "resolved_execution_ids": resolved_executions},
             )
             unresolved = _unresolved_effects(conn, plan["task_id"])
+            if not unresolved:
+                conn.execute(
+                    "UPDATE operation_drafts SET status=?,updated_at=?,revision=revision+1 "
+                    "WHERE plan_id=? AND status='ready'",
+                    ("applied" if complete else "closed", now(), plan_id),
+                )
             parent_status = "completed" if complete and not unresolved else "blocked"
             conn.execute(
                 "UPDATE agent_tasks SET status=?,updated_at=?,completed_at=? WHERE id=?",

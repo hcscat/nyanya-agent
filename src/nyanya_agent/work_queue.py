@@ -96,11 +96,16 @@ def finish(db_path, claim_record: dict[str, Any], outcome: TaskOutcome) -> None:
             raise ValueError("Stale worker result rejected")
         spec = claim_record.get("spec")
         live_plan = None
+        read_scope = False
         if outcome.status == "awaiting_approval" and spec is not None:
             live_plan = conn.execute(
                 "SELECT status,decided_by FROM change_plans WHERE task_id=? AND status IN ('pending','approved') "
                 "AND expires_at>? ORDER BY created_at DESC LIMIT 1", (task_id, timestamp),
             ).fetchone()
+            if not live_plan:
+                live_plan = conn.execute("SELECT status,'' AS decided_by FROM operation_drafts WHERE source_task_id=? AND status='pending' AND expires_at>?",
+                                         (task_id, timestamp)).fetchone()
+                read_scope = live_plan is not None
             if not live_plan:
                 outcome = TaskOutcome("cancelled", "변경안이 철회되거나 만료되어 승인 대기를 종료했습니다.")
         if outcome.status == "cancelled":
@@ -160,9 +165,10 @@ def finish(db_path, claim_record: dict[str, Any], outcome: TaskOutcome) -> None:
             conn.execute(
                 "INSERT INTO approvals (id, task_id, execution_id, action, status, requested_by, reason, "
                 "metadata_json, requested_at, expires_at,decided_by,decided_at) "
-                "VALUES (?, ?, ?, 'feedback.review', ?, ?, ?, '{}', ?, ?, ?, ?)",
-                (ledger.new_id("approval"), task_id, execution_id, 'approved' if approved else 'pending', claim_record["worker_id"],
-                 "Review the concrete file change plan; this feedback does not grant CLI write access", timestamp,
+                "VALUES (?, ?, ?, ?, ?, ?, ?, '{}', ?, ?, ?, ?)",
+                (ledger.new_id("approval"), task_id, execution_id, 'draft.read_scope' if read_scope else 'feedback.review',
+                 'approved' if approved else 'pending', claim_record["worker_id"],
+                 "Review the exact read scope" if read_scope else "Review the concrete file change plan; this feedback does not grant CLI write access", timestamp,
                  (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
                  live_plan['decided_by'] if approved else '', timestamp if approved else None),
             )

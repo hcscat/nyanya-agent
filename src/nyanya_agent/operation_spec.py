@@ -20,6 +20,7 @@ class OperationSpec:
     profile: OperationProfile = "auto"
     timeout_seconds: int = 600
     plan_id: str = ""
+    draft_id: str = ""
 
     def validate(self):
         if type(self.version) is not int or self.version != 1 or self.kind not in {"request", "apply"}:
@@ -34,6 +35,10 @@ class OperationSpec:
             raise SafeOperationError("An absolute registered workspace is required")
         if self.kind == "apply" and not self.plan_id:
             raise SafeOperationError("Apply requires a persisted plan")
+        if not isinstance(self.draft_id, str) or len(self.draft_id) > 80 or (
+            self.draft_id and (self.kind != "request" or not self.draft_id.startswith("draft_") or not self.draft_id[6:].isalnum())
+        ):
+            raise SafeOperationError("Invalid draft identity")
         return self
 
     def dumps(self):

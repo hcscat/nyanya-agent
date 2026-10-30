@@ -383,6 +383,29 @@ CREATE INDEX idx_wiki_entries_scope
   ON wiki_entries(owner_key, workspace_root, project_id, session_id, topic_key, revision DESC);
 """
 
+MIGRATION_10 = r"""
+CREATE TABLE operation_drafts (
+  id TEXT PRIMARY KEY,
+  owner_key TEXT NOT NULL,
+  workspace TEXT NOT NULL,
+  source_task_id TEXT NOT NULL REFERENCES agent_tasks(id),
+  session_id TEXT REFERENCES conversation_sessions(id),
+  generation INTEGER,
+  paths_json TEXT NOT NULL,
+  scope_hash TEXT NOT NULL,
+  snapshot_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL CHECK(status IN ('pending','ready','closed','applied')),
+  plan_id TEXT REFERENCES change_plans(id),
+  open_task_id TEXT REFERENCES agent_tasks(id),
+  revision INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+CREATE INDEX idx_operation_drafts_scope
+  ON operation_drafts(owner_key,workspace,session_id,generation,status);
+"""
+
 MIGRATIONS = (
     (1, "execution-ledger", MIGRATION_1),
     (2, "projects-and-codex-sessions", MIGRATION_2),
@@ -393,6 +416,7 @@ MIGRATIONS = (
     (7, "durable-conversation-state", MIGRATION_7),
     (8, "bounded-task-work-records", MIGRATION_8),
     (9, "scoped-cited-wiki", MIGRATION_9),
+    (10, "reviewed-draft-workspaces", MIGRATION_10),
 )
 
 _MIGRATION_THREAD_LOCK = threading.RLock()

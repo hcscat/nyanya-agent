@@ -108,10 +108,22 @@ class OperationService:
         responder=None,
         kind="request",
         plan_id="",
+        draft_id="",
     ):
-        if kind == "request" and classify(prompt).kind != "work_request":
+        if kind == "request" and not draft_id and classify(prompt).kind != "work_request":
             raise ValueError("Operation control text cannot be submitted as model work")
         store.check_workspace(workspace, owner)
+        if kind == "request" and not draft_id:
+            from nyanya_agent import work_drafts, work_memory
+
+            if not work_memory.input_disabled(prompt):
+                draft_id = work_drafts.active(self.path, owner, str(Path(workspace).resolve()), conversation_key)
+        if draft_id:
+            from nyanya_agent import work_drafts
+
+            draft = work_drafts.show(self.path, draft_id, owner, conversation_key=conversation_key)
+            if draft["workspace"] != str(Path(workspace).resolve()) or draft["status"] != "ready":
+                raise ValueError("Draft does not match the current operation scope")
         launch_error = None
         try:
             generation = self.ensure_worker()
@@ -122,7 +134,8 @@ class OperationService:
         task = store.submit(
             self.path,
             OperationSpec(
-                kind=kind, prompt=prompt, workspace=str(Path(workspace).resolve()), profile=profile, plan_id=plan_id
+                kind=kind, prompt=prompt, workspace=str(Path(workspace).resolve()), profile=profile, plan_id=plan_id,
+                draft_id=draft_id,
             ),
             owner,
             generation,
@@ -205,10 +218,37 @@ class OperationService:
 
     def control(self, text, owner, *, conversation_key=None, responder=None, wait=True):
         intent = classify(text)
-        if intent.kind != "work_request":
+        draft_command = text.split()[0].lower() if text.split() else ""
+        if intent.kind != "work_request" and draft_command not in {"open-draft", "draft-show", "draft-close", "draft-feedback"}:
             return self.handle_intent(text, owner, conversation_key=conversation_key or owner, responder=responder, wait=wait)
         parts = text.split()
         command = parts[0].lower() if parts else ""
+        if command in {"open-draft", "draft-show", "draft-close", "draft-feedback"}:
+            from nyanya_agent import work_drafts
+
+            if command == "draft-show" and len(parts) == 2:
+                draft = work_drafts.show(self.path, parts[1], owner, conversation_key=conversation_key)
+                return work_drafts.describe(draft) + ("\n" + reviewed_changes.preview(self.path, draft["plan_id"], owner) if draft["plan_id"] else "")
+            if command == "draft-close" and len(parts) == 2:
+                work_drafts.close(self.path, parts[1], owner, conversation_key=conversation_key)
+                return "Draft closed. Original files and execution evidence were preserved."
+            if command == "draft-feedback" and len(parts) >= 3:
+                draft = work_drafts.show(self.path, parts[1], owner, conversation_key=conversation_key)
+                task = self.submit(text.split(None, 2)[2], draft["workspace"], owner, conversation_key=conversation_key,
+                                   responder=responder, draft_id=draft["id"])
+                return self.wait(task["id"], owner).text if responder is None and wait else f"Draft feedback accepted: {task['id']}"
+            if command == "open-draft" and len(parts) == 3:
+                task, created = work_drafts.open_and_submit(self.path, parts[1], parts[2], owner, self.ensure_worker(),
+                                                           conversation_key=conversation_key)
+                if created and responder:
+                    attempt = store.watch_attempt(self.path, task["id"], owner)
+                    thread = threading.Thread(target=self.deliver, args=(task["id"], owner, responder, attempt), daemon=True)
+                    self.watchers.append(thread)
+                    thread.start()
+                if responder is None and wait:
+                    return self.wait(task["id"], owner).text
+                return f"Draft scope {'opened' if created else 'already accepted'}: {task['id']}"
+            return "Use open-draft <id> <hash>, draft-show <id>, draft-close <id> or draft-feedback <id> <request>."
         if command in {"recovery", "복구", "tasks", "작업목록"}:
             return store.reminder(self.path, owner).strip() or "미완료 작업이 없습니다."
         if command == "why" and len(parts) == 2:

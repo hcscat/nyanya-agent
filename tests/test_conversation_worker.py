@@ -6,8 +6,8 @@ import threading
 
 import pytest
 
-from nyanya_agent import conversation_store, database as db, execution_store as ledger
-from nyanya_agent import operation_store as store, reviewed_changes, work_queue
+from nyanya_agent import conversation_store, database as db, execution_store as ledger, work_drafts
+from nyanya_agent import operation_store as store, work_queue
 from nyanya_agent.operation_spec import OperationSpec
 from nyanya_agent.operation_worker import ASSESSMENT, HISTORY_RULES, RESPONSE, Worker
 from nyanya_agent.task_outcomes import OutcomeSignal
@@ -46,6 +46,15 @@ def history(prompt):
 
 def result(setup, task):
     return work_queue.result(setup[0], task["id"], "operator")
+
+
+def open_scope(setup):
+    path, _, worker, _, _ = setup
+    with db.connect(path) as conn:
+        scope = conn.execute("SELECT * FROM operation_drafts ORDER BY created_at DESC LIMIT 1").fetchone()
+    child, _ = work_drafts.open_and_submit(path, scope["id"], scope["scope_hash"], "operator", worker.generation,
+                                           conversation_key="synthetic-conversation")
+    return child
 
 
 def test_two_turn_reference_uses_prior_result_in_both_invocations(setup):
@@ -153,10 +162,14 @@ def test_no_history_instructs_specific_clarification_preserves_code(setup):
 def test_history_screening_and_current_no_read_are_unchanged(setup):
     _, root, worker, calls, replies = setup
     (root / "previous.txt").write_text("DO_NOT_EXPORT_OLD_SNAPSHOT")
-    replies.append(dict(summary="이전 파일 검토를 마쳤습니다.", changes=[]))
-    first = submit(setup, "previous.txt 검토해줘")
+    replies.append(dict(summary="Input needed", changes=[], read_files=["previous.txt"]))
+    submit(setup, "previous.txt 검토해줘")
     worker.run_once()
-    assert "DO_NOT_EXPORT_OLD_SNAPSHOT" in calls[1][1]
+    assert "DO_NOT_EXPORT_OLD_SNAPSHOT" not in calls[1][1]
+    replies.append(dict(summary="이전 파일 검토를 마쳤습니다.", changes=[]))
+    first = open_scope(setup)
+    worker.run_once()
+    assert "DO_NOT_EXPORT_OLD_SNAPSHOT" in calls[3][1]
     replies.append(dict(summary="확인했습니다.", changes=[]))
     secret = "sk-" + "x" * 24
     submit(setup, "이 값을 기억해줘: " + secret)
@@ -166,11 +179,11 @@ def test_history_screening_and_current_no_read_are_unchanged(setup):
                         changes=[], reply_kind="question"))
     submit(setup, "Do not read files. Analyze only the code in this message.")
     worker.run_once()
-    for _, prompt, staged in calls[4:]:
+    for _, prompt, staged in calls[6:]:
         assert secret not in prompt
         assert "DO_NOT_EXPORT" not in prompt
         assert staged == []
-        assert [turn["task_id"] for turn in history(prompt)["turns"]] == [first["id"]]
+        assert first["id"] in [turn["task_id"] for turn in history(prompt)["turns"]]
 
 
 def test_history_is_queried_again_at_executor_time(setup, monkeypatch):
@@ -191,11 +204,17 @@ def test_history_is_queried_again_at_executor_time(setup, monkeypatch):
 
 
 def test_combined_prompt_admits_only_complete_file_preimages(setup, monkeypatch):
-    _, _, worker, calls, replies = setup
+    _, root, worker, calls, replies = setup
     complete = "filetext\\\"" * 1800
     baseline = {name: {"content": complete, "sha256": hashlib.sha256(complete.encode()).hexdigest()}
                 for name in ("one.txt", "two.txt")}
-    monkeypatch.setattr(reviewed_changes, "snapshot", lambda *_: baseline)
+    for name, item in baseline.items():
+        (root / name).write_text(item["content"])
+    replies.append(dict(summary="Read exact inputs", changes=[], read_files=list(baseline)))
+    submit(setup, "Prepare file analysis")
+    worker.run_once()
+    child = open_scope(setup)
+    record = store.claim(setup[0], worker.generation)
     limits = []
     real_context = conversation_store.worker_context
 
@@ -206,8 +225,11 @@ def test_combined_prompt_admits_only_complete_file_preimages(setup, monkeypatch)
     monkeypatch.setattr(conversation_store, "worker_context", context)
     replies.append(dict(summary="범위를 좁혀 주세요.", changes=[], reply_kind="question"))
     current = "가" * 19_000 + " Do not authorize any file writes."
-    submit(setup, current)
-    worker.run_once()
+    from dataclasses import replace
+    record["spec"] = replace(record["spec"], prompt=current)
+    calls.clear()
+    outcome = worker.perform(record, threading.Event())
+    assert child["id"] == record["task_id"] and outcome.status == "succeeded"
     for _, prompt, _ in calls:
         assert len(prompt.encode()) <= 100_000
         assert current in prompt
@@ -276,7 +298,8 @@ def test_short_assent_does_not_approve_existing_file_changes(setup):
     worker.run_once()
     assert (root / "note.txt").read_text() == "original"
     with db.connect(path) as conn:
-        assert conn.execute("SELECT status FROM change_plans WHERE task_id=?", (first["id"],)).fetchone()[0] == "pending"
+        assert conn.execute("SELECT status FROM operation_drafts WHERE source_task_id=?", (first["id"],)).fetchone()[0] == "pending"
+        assert conn.execute("SELECT count(*) FROM change_plans").fetchone()[0] == 0
 
 
 def test_prompt_contract_contains_no_routine_human_receipt_template():

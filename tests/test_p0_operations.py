@@ -316,6 +316,12 @@ def test_worker_executes_generated_plan_but_waits_for_modification_approval(setu
     service = OperationService(path, generation=worker.generation)
     # Explicitly test an existing in-process fixture worker, not the denied production launcher.
     service.ensure_worker = lambda: worker.generation
+    with db.connect(path) as conn:
+        scope = conn.execute("SELECT * FROM operation_drafts").fetchone()
+    service.control(f"open-draft {scope['id']} {scope['scope_hash']}", "operator", wait=False)
+    assert worker.run_once()
+    with db.connect(path) as conn:
+        row = conn.execute("SELECT * FROM change_plans").fetchone()
     service.control(f"approve {row['id']} {row['plan_hash']}", "operator", responder=lambda _: None)
     worker.run_once()
     service.close()

@@ -9,9 +9,10 @@ terminal / Discord / authenticated operations API
   -> OperationService.submit()
   -> SQLite task + OperationSpec + conversation relation
   -> operation_worker + atomic claim + bounded thread pool
-  -> current snapshot -> screened conversation -> Flash assessment
+  -> plan without originals -> exact read-scope approval -> bounded draft copies
+  -> screened conversation -> Flash assessment
   -> selected result model + scoped work/Wiki -> reply / immutable plan
-  -> exclusive creation OR exact approval -> reviewed apply
+  -> feedback -> latest immutable candidate -> exact approval -> reviewed apply
   -> fenced result / task / attempt / event / successful-memory commit
   -> connector watcher (not a durable outbox)
 ```
@@ -27,12 +28,13 @@ terminal / Discord / authenticated operations API
 | File plans / apply journal | Immutable proposal and before/after mutation evidence |
 | `approvals`, `writer_leases` | Decisions and isolated compatibility coordination |
 | `conversation_sessions`, `conversation_turns` | Scope/reset/order relations to existing rows; additive v7 |
+| `operation_drafts` | Approved input paths/copies, conversation generation, current immutable plan and revision; additive v10 |
 | `task_work_records` | Successful screened excerpts/provenance; additive v8 |
 | `wiki_entries` | Topic/source/revision/conflict/review/forget; additive v9 |
 | `execution_projects`, `codex_sessions` | Logical metadata, not CLI session ownership |
 | `agent_requests`, legacy project/memory tables | Envelopes and compatibility readers/candidates |
 
-V4 established operations/plans, v5/v6 added indexes, v7–v9 added memory relations. Original rows remain without copying full transcripts. Normal result/state/events and claim release commit together. Legacy envelope statistics are not complete all-ingress statistics.
+V4 established operations/plans, v5/v6 added indexes, v7–v9 added memory relations; v10 adds bounded draft working copies. Original rows remain without copying full transcripts. Normal result/state/events and claim release commit together. Legacy envelope statistics are not complete all-ingress statistics.
 
 ## Interface responsibilities
 
@@ -58,7 +60,7 @@ See [security](security_and_reliability.md), [conversation controls](operations_
 
 ## Remaining integration
 
-Durable inbox/outbox/destination/receipt handling is absent. `request_read_model` begins with legacy envelopes, so all-ingress statistics need work. Telegram lacks parity for all owner/conversation/control contracts. Provider-session ownership and safe monthly reuse/deletion need separate verification.
+Durable inbox/outbox/destination/receipt handling is absent. `request_read_model` begins with legacy envelopes, so all-ingress statistics need work. Telegram file-plan and draft controls share the operation authority, while full owner/conversation/natural-language control parity remains incomplete. Provider-session ownership and safe monthly reuse/deletion need separate verification.
 
 Commands and multi-agent DAG decomposition are isolated design primitives or recommendations. Private proxy access does not implement remote workers. Additional hosts, public hosting, resource scheduling and remote DBs remain deferred.
 
@@ -75,3 +77,5 @@ node --check src/nyanya_agent/dashboard_static/app.js
 Use the checkout and isolated test state. Before authorized deployment, quiesce writers, take a consistent SQLite backup, verify integrity and compare workflow rows. Preserve newer rows during selected-file rollback. Older code reading v9 is not safe rollback proof: it may regenerate forgotten/opted-out summaries from retained evidence. Keep current provenance/no-store/forget/conversation guards. Never restore an old whole DB over later work.
 
 Common docs are edited in development and mirrored to operations. Their refresh does not imply code deployment/live acceptance.
+
+Current file-work contracts and platform limits are described in [reviewed drafts](reviewed_drafts.md).

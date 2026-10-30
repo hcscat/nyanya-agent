@@ -158,6 +158,6 @@ def test_bridge_answer_returns_plan_for_unapproved_file_mutation(tmp_path, monke
     monkeypatch.setattr(Worker, "__init__", init)
     store = NyaNyaConversationStore({})
     answer = store.answer("discord-user:test", "README.md 파일을 수정해줘")
-    assert "approve plan_" in answer and "검토 hash:" in answer
+    assert "open-draft draft_" in answer and "README.md" in answer
     assert (tmp_path / "README.md").read_text() == "before"
     store.close()

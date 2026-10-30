@@ -4,7 +4,7 @@ These contracts describe the source implementation. Installing a verified artifa
 
 ## Provider context and subprocesses
 
-Normal operations select context using the request's file paths, directory names, filenames or filename topics before reading contents. Name explicit files or a subdirectory when requesting focused work. A broad request without matching files gets overview documentation instead of the entire workspace. The snapshot retains at most 80 files and 50 KB, with bounded metadata traversal.
+Normal operations first plan without original file contents. An authenticated exact read-scope approval copies at most 80 files/50 KB into a bounded SQLite draft; subsequent model invocations materialize disposable copies. All create/modify/delete candidates wait for exact final approval. The standalone scoped snapshot helper remains for isolated compatibility contracts and is not the normal worker intake. See [reviewed drafts](reviewed_drafts.md), including the macOS native original-workspace guard and its explicit platform/host-isolation limits.
 
 Files containing detected credential fields, credential assignments, recognized secret formats or known sensitive environment values are excluded as a whole. Instruction files, runtime state and private paths remain excluded. The original bytes and hashes of accepted files are preserved for subsequent approval checks. Provider prompts receive an additional content check before invocation.
 
